@@ -9,37 +9,41 @@
 // oop/type.h. Included by graphvex sources that stamp headers with
 // graphvex-owned types (font atlases today; texture/vfs classes next).
 //
-// CLASS-SPACE CONTRACT (Rule 17): graphvex classes live in 0x0100-0x01FF.
-// All new graphvex IDs MUST land in that range — the central parent chain
-// and arch switch in vexspoke oop/type.c dispatch on ranges and may not
-// include this file (upstream builds standalone).
+// UNIFORM PER-PROJECT NUMBERING (uniform type rule): each project's
+// registry numbers its own classes starting at 1; the project byte in the
+// 64-bit type id disambiguates every repo's id #1. graphvex id #1
+// (ID_FONT) is distinct from vexspoke id #1 (ID_INT) and darling id #1
+// (ID_PANEL) because the PROJ_* byte differs. Full TYPE_*_SINGLETON ids
+// carry PROJ_GRAPHVEX and must be used at runtime dispatch; bare ID_*
+// constants name vexspoke's own class space only. New graphvex classes
+// take the next free number below — never invent an out-of-registry
+// window (Rule 6: the collision that id space causes is a defect).
 
-// --- GRAPHVEX GPU OBJECTS ---
-#define ID_FONT	0x0100u
-#define ID_IMAGE	0x0101u
-#define ID_SWAPCHAIN	0x0102u
-#define ID_SEMAPHORE	0x0103u
-#define ID_FENCE	0x0104u
-#define ID_COMMAND_BUFFER	0x0105u
-#define ID_COMMAND_QUEUE	0x0106u
-#define ID_GPU_BUFFER	0x0107u
-#define ID_BINDLESS_HEAP	0x0108u
-#define ID_SHAPE	0x0109u
-#define ID_MESH	0x010Au
-#define ID_MESHLET	0x010Bu
-#define ID_SCENE	0x010Cu
-#define ID_STROKE	0x010Du
-#define ID_BRUSH	0x010Eu
-#define ID_VECTOR_BRUSH	0x010Fu
-#define ID_RASTER_BRUSH	0x0110u
-#define ID_DRAWABLE	0x0111u
-#define ID_LAYERED_DRAWABLE	0x0112u
-#define ID_VECTOR_DRAWABLE	0x0113u
-#define ID_LAYERED_VECTOR_DRAWABLE	0x0114u
-#define ID_PIPELINE	0x0115u
-#define ID_PASS	0x0116u
-#define ID_FRAME_IMPORTER	0x0117u
-/* 0x0118 reserved — next free ID is 0x0118u. */
+// --- GRAPHVEX GPU OBJECTS (numbered 1..N, uniform per-project) ---
+#define ID_FONT	1u
+#define ID_IMAGE	2u
+#define ID_SWAPCHAIN	3u
+#define ID_SEMAPHORE	4u
+#define ID_FENCE	5u
+#define ID_COMMAND_BUFFER	6u
+#define ID_COMMAND_QUEUE	7u
+#define ID_GPU_BUFFER	8u
+#define ID_BINDLESS_HEAP	9u
+#define ID_SHAPE	10u
+#define ID_MESH	11u
+#define ID_MESHLET	12u
+#define ID_SCENE	13u
+#define ID_STROKE	14u
+#define ID_BRUSH	15u
+#define ID_VECTOR_BRUSH	16u
+#define ID_RASTER_BRUSH	17u
+#define ID_DRAWABLE	18u
+#define ID_LAYERED_DRAWABLE	19u
+#define ID_VECTOR_DRAWABLE	20u
+#define ID_LAYERED_VECTOR_DRAWABLE	21u
+#define ID_PIPELINE	22u
+#define ID_PASS	23u
+#define ID_FRAME_IMPORTER	24u
 
 #define TYPE_FONT_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_FONT)
 #define TYPE_IMAGE_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_IMAGE)
