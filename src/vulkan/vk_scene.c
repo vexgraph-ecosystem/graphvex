@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "vk_guard.h"
 #include "annotation/overview.h"
 
 ;;OVERVIEW
@@ -49,6 +50,7 @@
  *   - VkSceneCanvas_initModule(instance, gpa, phys, device)
  *   - VkSceneCanvas_acquire(key, width, height)
  *   - VkSceneCanvas_flushRetired(void)
+ *     (Rule 39 net: beginBackPass guards the record seam at entry)
  *   - VkSceneCanvas_width(canvas)
  *   - VkSceneCanvas_height(canvas)
  *   - VkSceneCanvas_frontImage(canvas)
@@ -568,6 +570,8 @@ void VkSceneCanvas_flip(VkSceneCanvas *canvas) {
 
 bool VkSceneCanvas_beginBackPass(VkSceneCanvas *canvas, VkCommandBuffer cb,
                                  float r, float g, float b, float a) {
+    if (!VkGuard_check("VkSceneCanvas_beginBackPass", s_device, nullptr, false))
+        return false;
     if (!canvas || (*canvas).fb[(*canvas).front ^ 1u] == VK_NULL_HANDLE)
         return false;
     VKS_LOAD_DEVICE(CmdBeginRenderPass)

@@ -5,6 +5,7 @@
 
 #include "system/display_info.h"
 #include "system/display_monitor.h"
+#include "vk_guard.h"
 #include "annotation/overview.h"
 
 ;;OVERVIEW
@@ -40,6 +41,7 @@
  *   - VkView_refreshAll(instance, gpa, phys, device)
  *   - VkView_count(void)
  *   - VkView_at(index)
+ *     (Rule 39 net: beginPass guards the record seam at entry)
  *   - VkView_forPoint(x, y)
  *   - VkView_forMonitor(displayId)
  *   - VkView_renderPass(view)
@@ -405,6 +407,8 @@ VkImage VkView_image(const VkView *view) {
 
 bool VkView_beginPass(VkView *view, VkCommandBuffer cb,
                       float r, float g, float b, float a) {
+    if (!VkGuard_check("VkView_beginPass", s_device, nullptr, false))
+        return false;
     if (!view || (*view).fb == VK_NULL_HANDLE)
         return false;
     VKV_LOAD_DEVICE(CmdBeginRenderPass)

@@ -7,6 +7,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOSurface/IOSurface.h>
 #include <vulkan/vulkan_metal.h>
+#include "vk_guard.h"
 #include "annotation/overview.h"
 
 ;;OVERVIEW
@@ -33,6 +34,7 @@
  * ----------------------------------------------------------------------------
  * Constructors:
  *   - VkIOSurface_create(width, height)
+ *     (Rule 39 net: export guards the publish seam at entry)
  *
  * Core Functions:
  *   - VkIOSurface_initModule(instance, gpa, phys, device)
@@ -228,6 +230,8 @@ VkIOSurface *VkIOSurface_wrap(void *ioSurface, uint32_t width, uint32_t height) 
 // After Vulkan renders into the image, export the IOSurface for AppKit
 // compositing. The IOSurface now contains the rendered content.
 bool VkIOSurface_export(VkIOSurface *surf) {
+    if (!VkGuard_check("VkIOSurface_export", s_device, nullptr, false))
+        return false;
     if (!surf || !(*surf).image || !(*surf).surface) return false;
 
     IOS_LOAD_DEVICE(ExportMetalObjectsEXT);

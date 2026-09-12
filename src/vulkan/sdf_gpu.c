@@ -6,6 +6,7 @@
 
 #include <vulkan/vulkan.h>
 #include <mach-o/dyld.h>
+#include "vk_guard.h"
 #include "annotation/overview.h"
 
 ;;OVERVIEW
@@ -25,6 +26,7 @@
  *   - SdfGpu_shutdown(void)
  *   - SdfGpu_available(void)
  *   - SdfGpu_bakePage(coverage, dim, outSdf)
+ *     (Rule 39 net: bakePage guards the compute driver at entry)
  *   - SdfGpu_pageDim(void)
  * ============================================================================
  */
@@ -469,6 +471,8 @@ void SdfGpu_shutdown(void) {
 }
 
 bool SdfGpu_bakePage(const uint8_t *coverage, int dim, uint8_t *outSdf) {
+    if (!VkGuard_check("SdfGpu_bakePage", s_device, s_queue, false))
+        return false;
     if (!s_ready || !coverage || !outSdf || dim != SDF_DIM)
         return false;
     PFN_vkBeginCommandBuffer BeginCmd = (PFN_vkBeginCommandBuffer)D(BeginCommandBuffer);

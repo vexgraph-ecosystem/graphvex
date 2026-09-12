@@ -6,6 +6,7 @@
 #include "system/image_mac.h"
 
 #include <vulkan/vulkan.h>
+#include "vulkan/vk_guard.h"
 #include "annotation/overview.h"
 
 ;;OVERVIEW
@@ -26,6 +27,7 @@
  *   - Texture_load(vfsPath)
  *   - Texture_loadRaw(rgbaData, width, height)
  *   - Texture_updateSubRaw(id, rgbaData, x, y, width, height)
+ *     (Rule 39 net: load/loadRaw/updateSubRaw/replaceRaw guard the driver at entry)
  *
  * Getters:
  *   - Texture_isReady(void)
@@ -224,6 +226,8 @@ void Texture_shutdown(void) {
 }
 
 int32_t Texture_load(const char *vfsPath) {
+    if (!VkGuard_check("Texture_load", s_device, s_queue, false))
+        return -1;
     if (!Texture_isReady() || !s_gpa) {
         fprintf(stderr, "[Texture] Texture module not initialized yet!\n");
         return -1;
@@ -479,6 +483,8 @@ int32_t Texture_load(const char *vfsPath) {
 
 
 int32_t Texture_loadRaw(const void *rgbaData, uint32_t width, uint32_t height) {
+    if (!VkGuard_check("Texture_loadRaw", s_device, s_queue, false))
+        return -1;
     if (!Texture_isReady() || !s_gpa) {
         return -1;
     }
@@ -699,6 +705,8 @@ int32_t Texture_loadRaw(const void *rgbaData, uint32_t width, uint32_t height) {
 }
 
 bool Texture_updateSubRaw(int32_t id, const void *rgbaData, uint32_t x, uint32_t y, uint32_t width, uint32_t height) {
+    if (!VkGuard_check("Texture_updateSubRaw", s_device, s_queue, false))
+        return false;
     if (!Texture_isReady() || !s_gpa || id < 0 || id >= s_textureCount) return false;
 
     size_t imageSize = width * height * 4;
@@ -829,6 +837,8 @@ bool Texture_getSize(int32_t id, uint32_t *outW, uint32_t *outH) {
 }
 
 int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uint32_t height) {
+    if (!VkGuard_check("Texture_replaceRaw", s_device, s_queue, false))
+        return -1;
     if (!Texture_isReady() || !s_gpa) return -1;
     if (id < 0 || id >= s_textureCount) {
         return Texture_loadRaw(rgbaData, width, height);
