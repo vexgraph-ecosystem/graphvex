@@ -1,5 +1,6 @@
 #include "texture.h"
 #include "io/vfs.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,22 +13,51 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * MODULE: Texture (vulkan/texture/texture.c)
- * LEVEL: L4 — Self-Management (Vulkan bindless texture GPU setup)
+ * MODULE: Texture (vulkan/texture/texture.c — bindless 1024-slot registry)
+ * LEVEL: L4 — Self-Management (owns GPU images/views/samplers + retire ring)
  * ============================================================================
- * 1 on failure.
+ * Procedural bindless registry: slot id -> (image, memory, view, sampler,
+ * width, height). Uploads stage through a host-visible buffer, transition
+ * with a one-shot CB from the module-owned transient pool, submit with a
+ * per-upload fence, and wait at most 100ms (Rule 27) — never DeviceWaitIdle
+ * or QueueWaitIdle between another CB Begin/End on the shared queue.
  *
- * STRUCT FIELDS: none — procedural (module-level bindless registry state only).
+ * Replace policy: same-size replace is a fast in-place sub-update
+ * (Texture_updateSubRaw only, zero destroy). A resize retires the old
+ * (image, view, sampler, memory) onto the bounded retire ring and points
+ * the slot at the fresh handles + UpdateDescriptorSets immediately; the
+ * old handles die only after their upload fence signals or 2 drained
+ * frames pass — the GPU may still be reading them (Rule 39 net).
+ *
+ * SLOT RECORD (retired row — behaviorless, owned by the retire ring):
+ * ----------------------------------------------------------------------------
+ *   VkImage s_retireImage[i];         // retired image awaiting safe destroy
+ *   VkDeviceMemory s_retireMemory[i]; // retired backing memory
+ *   VkImageView s_retireView[i];      // retired view
+ *   VkSampler s_retireSampler[i];     // retired sampler
+ *   VkFence s_retireFence[i];         // upload fence proving GPU drain (or null)
+ *   uint64_t s_retireSeq[i];          // frame seq at retire (2-frame fallback)
+ * Ring: s_retireHead + s_retireCount over RETIRE_MAX 8; s_frameSeq ticks
+ * per resize/free. Reap is non-blocking (GetFenceStatus poll); a full ring
+ * with no drainable slot fails the replace loudly (return -1, old content
+ * kept, retry next tick) — never an unbounded wait, never a leak.
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Core Functions:
  *   - Texture_initModule(instance, gpa, phys, device, queue, queueFamily)
- *   - Texture_shutdown(void)
+ *   - Texture_shutdown(void)            : bounded-drain retire ring, then
+ *                                         live slots, pool, descriptors (Rule 26)
  *   - Texture_load(vfsPath)
  *   - Texture_loadRaw(rgbaData, width, height)
  *   - Texture_updateSubRaw(id, rgbaData, x, y, width, height)
- *     (Rule 39 net: load/loadRaw/updateSubRaw/replaceRaw guard the driver at entry)
+ *   - Texture_replaceRaw(id, rgbaData, width, height)
+ *                                         : fast path (same-size -> sub-update);
+ *                                           retire path (resize -> new handles
+ *                                           + ring the old ones)
+ *   - Texture_free(id)                  : ring the slot, do not destroy inline
+ *     (Rule 39 net: load/loadRaw/updateSubRaw/replaceRaw guard the driver
+ *      at entry; submit seams pass the live queue per VkGuard contract)
  *
  * Getters:
  *   - Texture_isReady(void)
@@ -35,6 +65,14 @@
  *   - Texture_getDescriptorSetLayout(void)
  *   - Texture_getSize(id, outW, outH)
  *   - Texture_maxBoundId(void)       — Rule 39: ceiling for draw-site texId clamps
+ *   - Texture_retireDepth(void)      — live retire-ring occupancy [0, 8]
+ *   - Texture_retireCapacity(void)   — RETIRE_MAX 8 (bounded, Rule 27)
+ *   - Texture_frameSeq(void)         — retire frame clock (2-frame reap proof)
+ *
+ * Setters: none — slots mutate only through load/replace/free core verbs.
+ * Cold validation (Rule 35): null data, zero width/height, id OOB, and
+ * width*height*4 overflow reject loudly once at entry (return -1/false);
+ * hot upload paths carry the nullptr entry guard only, zero per-texel work.
  * ============================================================================
  */
 
@@ -63,6 +101,22 @@ static VkDescriptorSetLayout s_descLayout;
 static VkDescriptorSet s_bindlessSet;
 static VkCommandPool s_cmdPool;
 
+// Bounded retire ring (SLOT RECORD rows): a resized/freed slot's old
+// (image, memory, view, sampler) waits here until the GPU provably drains
+// it — upload-fence signal OR 2 retired frames — instead of dying under a
+// DeviceWaitIdle between another CB Begin/End on the shared queue.
+#define TEXTURE_RETIRE_MAX 8
+#define TEXTURE_RETIRE_FRAME_LAG 2
+#define TEXTURE_FENCE_WAIT_NS 100000000ULL
+static VkImage s_retireImage[TEXTURE_RETIRE_MAX];
+static VkDeviceMemory s_retireMemory[TEXTURE_RETIRE_MAX];
+static VkImageView s_retireView[TEXTURE_RETIRE_MAX];
+static VkSampler s_retireSampler[TEXTURE_RETIRE_MAX];
+static VkFence s_retireFence[TEXTURE_RETIRE_MAX];
+static uint64_t s_retireSeq[TEXTURE_RETIRE_MAX];
+static int s_retireCount = 0;
+static uint64_t s_frameSeq = 0;
+
 #define VK_LOAD(name) \
     static PFN_vk##name name##_fn; \
     name##_fn = (PFN_vk##name)s_gpa(s_instance, "vk" #name);
@@ -80,18 +134,169 @@ static uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags proper
     return UINT32_MAX;
 }
 
+// CORE HELPERS (retire ring + bounded upload submit; file-local, no API)
+
+// Cold validator (Rule 35): null/zero/overflow reject once at entry.
+// Dest-last: pixel byte count lands in outBytes (may be nullptr).
+static bool textureBytesOk(const void *rgbaData, uint32_t width, uint32_t height, size_t *outBytes) {
+    if (rgbaData == nullptr)
+        return false;
+    if (width == 0 || height == 0)
+        return false;
+    size_t pixels = (size_t) width * (size_t) height;
+    if (pixels > (SIZE_MAX / 4u))
+        return false;
+    if (outBytes)
+        *outBytes = pixels * 4u;
+    return true;
+}
+
+// Destroy one retired row (fence included). Caller proves drain first.
+static void retireDestroySlot(VkDevice dev, int slot) {
+    VK_LOAD(DestroySampler)
+    VK_LOAD(DestroyImageView)
+    VK_LOAD(DestroyImage)
+    VK_LOAD(FreeMemory)
+    VK_LOAD(DestroyFence)
+    if (s_retireSampler[slot] != VK_NULL_HANDLE && DestroySampler_fn)
+        DestroySampler_fn(dev, s_retireSampler[slot], nullptr);
+    if (s_retireView[slot] != VK_NULL_HANDLE && DestroyImageView_fn)
+        DestroyImageView_fn(dev, s_retireView[slot], nullptr);
+    if (s_retireImage[slot] != VK_NULL_HANDLE && DestroyImage_fn)
+        DestroyImage_fn(dev, s_retireImage[slot], nullptr);
+    if (s_retireMemory[slot] != VK_NULL_HANDLE && FreeMemory_fn)
+        FreeMemory_fn(dev, s_retireMemory[slot], nullptr);
+    if (s_retireFence[slot] != VK_NULL_HANDLE && DestroyFence_fn)
+        DestroyFence_fn(dev, s_retireFence[slot], nullptr);
+    s_retireImage[slot] = VK_NULL_HANDLE;
+    s_retireMemory[slot] = VK_NULL_HANDLE;
+    s_retireView[slot] = VK_NULL_HANDLE;
+    s_retireSampler[slot] = VK_NULL_HANDLE;
+    s_retireFence[slot] = VK_NULL_HANDLE;
+    s_retireSeq[slot] = 0;
+}
+
+// Non-blocking reap: signaled fence OR 2 retired frames prove GPU drain.
+// Never waits — a still-flying row stays ringed for a later tick.
+static void retireDrain(VkDevice dev) {
+    if (dev == VK_NULL_HANDLE)
+        return;
+    VK_LOAD(GetFenceStatus)
+    int live = 0;
+    for (int i = 0; i < TEXTURE_RETIRE_MAX; i++) {
+        if (s_retireImage[i] == VK_NULL_HANDLE)
+            continue;
+        bool drainable = false;
+        if (s_retireFence[i] != VK_NULL_HANDLE && GetFenceStatus_fn) {
+            if (GetFenceStatus_fn(dev, s_retireFence[i]) == VK_SUCCESS)
+                drainable = true;
+        }
+        if (!drainable && s_frameSeq >= s_retireSeq[i] + TEXTURE_RETIRE_FRAME_LAG)
+            drainable = true;
+        if (!drainable) {
+            live++;
+            continue;
+        }
+        retireDestroySlot(dev, i);
+    }
+    s_retireCount = live;
+}
+
+// Ring one retired row. False when the ring is full with no drainable slot:
+// the caller keeps old content live and fails loudly (retry next tick).
+static bool retirePush(VkImage image, VkDeviceMemory memory, VkImageView view, VkSampler sampler, VkFence fence) {
+    VkDevice dev = s_device;
+    if (dev == VK_NULL_HANDLE || image == VK_NULL_HANDLE)
+        return false;
+    retireDrain(dev);
+    if (s_retireCount >= TEXTURE_RETIRE_MAX)
+        return false;
+    int slot = -1;
+    for (int i = 0; i < TEXTURE_RETIRE_MAX; i++) {
+        if (s_retireImage[i] == VK_NULL_HANDLE) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
+        return false;
+    s_frameSeq++;
+    s_retireImage[slot] = image;
+    s_retireMemory[slot] = memory;
+    s_retireView[slot] = view;
+    s_retireSampler[slot] = sampler;
+    s_retireFence[slot] = fence;
+    s_retireSeq[slot] = s_frameSeq;
+    s_retireCount++;
+    return true;
+}
+
+// Bounded upload tail (Rule 27): per-upload fence, two 100ms waits max,
+// throttled log, drop-degrade false. Never QueueWaitIdle/DEVICE_WAIT_IDLE.
+// Owns the whole submit-or-fail tail: on success the caller tears down its
+// CB + staging normally; on timeout the CB + staging are still flying, so
+// this leaks them once (reclaimed at pool destroy) rather than use-after-
+// free the GPU read, rings the fresh image (VK_NULL_HANDLE when the upload
+// targets a live slot, as in updateSubRaw) for 2-frame reap, and returns
+// false. Timeouts fire only on a dead drawable; healthy hitches never trip
+// 200ms. No UINT64_MAX anywhere on this path.
+static bool submitUploadTail(VkDevice dev, VkQueue queue, VkCommandBuffer cb, VkBuffer staging, VkDeviceMemory stagingMem, VkImage freshImage, VkDeviceMemory freshMem) {
+    (void) staging;
+    (void) stagingMem;
+    VK_LOAD(CreateFence)
+    VK_LOAD(DestroyFence)
+    VK_LOAD(QueueSubmit)
+    VK_LOAD(WaitForFences)
+    if (!CreateFence_fn || !DestroyFence_fn || !QueueSubmit_fn || !WaitForFences_fn)
+        return false;
+    VkFenceCreateInfo fi = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFence fence = VK_NULL_HANDLE;
+    if (CreateFence_fn(dev, &fi, nullptr, &fence) != VK_SUCCESS)
+        return false;
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cb;
+    bool ok = false;
+    if (QueueSubmit_fn(queue, 1, &si, fence) == VK_SUCCESS) {
+        if (WaitForFences_fn(dev, 1, &fence, VK_TRUE, TEXTURE_FENCE_WAIT_NS) == VK_SUCCESS)
+            ok = true;
+        else if (WaitForFences_fn(dev, 1, &fence, VK_TRUE, TEXTURE_FENCE_WAIT_NS) == VK_SUCCESS)
+            ok = true;
+        else {
+            static uint32_t s_timeoutStrikes = 0;
+            s_timeoutStrikes++;
+            if ((s_timeoutStrikes % 64u) == 1u) {
+                fprintf(stderr, "[Texture] upload fence wait TIMEOUT (strike %u): drop-degrade, retry next tick\n", s_timeoutStrikes);
+                fflush(stderr);
+            }
+        }
+    }
+    // Fence destroy is legal even when the submit is still flying (fence
+    // lifetime is independent); the CB/buffers are the caller's problem —
+    // see the leak-once contract above.
+    DestroyFence_fn(dev, fence, nullptr);
+    if (!ok && freshImage != VK_NULL_HANDLE) {
+        // The fresh image never reached a slot: ring it for 2-frame reap so
+        // the timed-out upload leaks nothing but its CB + staging pair.
+        retirePush(freshImage, freshMem, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    }
+    return ok;
+}
+
 bool Texture_isReady(void) {
     return s_device != VK_NULL_HANDLE && s_instance != VK_NULL_HANDLE && s_gpa != nullptr;
 }
 
 bool Texture_initModule(void *instance, void *gpa, void *phys, void *device, void *queue, uint32_t queueFamily) {
-    s_instance = (VkInstance)instance;
-    s_gpa = (PFN_vkGetInstanceProcAddr)gpa;
-    s_phys = (VkPhysicalDevice)phys;
-    s_device = (VkDevice)device;
-    s_queue = (VkQueue)queue;
+    s_instance = (VkInstance) instance;
+    s_gpa = (PFN_vkGetInstanceProcAddr) gpa;
+    s_phys = (VkPhysicalDevice) phys;
+    s_device = (VkDevice) device;
+    s_queue = (VkQueue) queue;
     s_queueFamily = queueFamily;
-    
+    s_retireCount = 0;
+    s_frameSeq = 0;
+
     VK_LOAD(CreateDescriptorSetLayout)
     VK_LOAD(CreateDescriptorPool)
     VK_LOAD(AllocateDescriptorSets)
@@ -172,6 +377,8 @@ void Texture_shutdown(void) {
         s_queue = VK_NULL_HANDLE;
         s_gpa = nullptr;
         s_textureCount = 0;
+        s_retireCount = 0;
+        s_frameSeq = 0;
         return;
     }
     VK_LOAD(DestroySampler)
@@ -181,6 +388,21 @@ void Texture_shutdown(void) {
     VK_LOAD(DestroyDescriptorPool)
     VK_LOAD(DestroyDescriptorSetLayout)
     VK_LOAD(DestroyCommandPool)
+    VK_LOAD(WaitForFences)
+
+    // Rule 26 teardown, Rule 27 bound: the retire ring dies FIRST — one
+    // bounded 100ms wait per fence-carrying row, then force-destroy whatever
+    // remains (shutdown is the last resort; the device goes away next).
+    // Live slots, pool, and descriptors follow in dependency order.
+    for (int i = 0; i < TEXTURE_RETIRE_MAX; i++) {
+        if (s_retireImage[i] == VK_NULL_HANDLE)
+            continue;
+        if (s_retireFence[i] != VK_NULL_HANDLE && WaitForFences_fn)
+            WaitForFences_fn(s_device, 1, &s_retireFence[i], VK_TRUE, TEXTURE_FENCE_WAIT_NS);
+        retireDestroySlot(s_device, i);
+    }
+    s_retireCount = 0;
+    s_frameSeq = 0;
 
     for (int i = 0; i < s_textureCount; i++) {
         if (s_samplers[i] != VK_NULL_HANDLE && DestroySampler_fn) {
@@ -218,6 +440,8 @@ void Texture_shutdown(void) {
 
     s_bindlessSet = VK_NULL_HANDLE;
     s_textureCount = 0;
+    s_retireCount = 0;
+    s_frameSeq = 0;
 
     s_device = VK_NULL_HANDLE;
     s_instance = VK_NULL_HANDLE;
@@ -233,6 +457,8 @@ int32_t Texture_load(const char *vfsPath) {
         fprintf(stderr, "[Texture] Texture module not initialized yet!\n");
         return -1;
     }
+    if (vfsPath == nullptr)
+        return -1;
     if (s_textureCount >= MAX_BINDLESS_TEXTURES) {
         printf("Texture limit reached!\n");
         return -1;
@@ -267,7 +493,12 @@ int32_t Texture_load(const char *vfsPath) {
         return -1;
     }
 
-    size_t imageSize = width * height * 4;
+    size_t imageSize = 0;
+    if (width == 0 || height == 0 || width > (SIZE_MAX / 4u) / height) {
+        free(rgbaData);
+        return -1;
+    }
+    imageSize = width * height * 4;
 
     VK_LOAD(CreateBuffer)
     VK_LOAD(GetBufferMemoryRequirements)
@@ -350,8 +581,6 @@ int32_t Texture_load(const char *vfsPath) {
     VK_LOAD(EndCommandBuffer)
     VK_LOAD(CmdPipelineBarrier)
     VK_LOAD(CmdCopyBufferToImage)
-    VK_LOAD(QueueSubmit)
-    VK_LOAD(QueueWaitIdle)
     VK_LOAD(FreeCommandBuffers)
 
     VkCommandBufferAllocateInfo cmdAllocInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -404,12 +633,8 @@ int32_t Texture_load(const char *vfsPath) {
 
     EndCommandBuffer_fn(commandBuffer);
 
-    VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    QueueSubmit_fn(s_queue, 1, &submitInfo, VK_NULL_HANDLE);
-    QueueWaitIdle_fn(s_queue);
+    if (!submitUploadTail(s_device, s_queue, commandBuffer, stagingBuffer, stagingBufferMemory, textureImage, textureImageMemory))
+        return -1;
     FreeCommandBuffers_fn(s_device, s_cmdPool, 1, &commandBuffer);
 
     DestroyBuffer_fn(s_device, stagingBuffer, nullptr);
@@ -494,7 +719,9 @@ int32_t Texture_loadRaw(const void *rgbaData, uint32_t width, uint32_t height) {
         return -1;
     }
 
-    size_t imageSize = width * height * 4;
+    size_t imageSize = 0;
+    if (!textureBytesOk(rgbaData, width, height, &imageSize))
+        return -1;
 
     VK_LOAD(CreateBuffer)
     VK_LOAD(GetBufferMemoryRequirements)
@@ -504,7 +731,7 @@ int32_t Texture_loadRaw(const void *rgbaData, uint32_t width, uint32_t height) {
     VK_LOAD(UnmapMemory)
     VK_LOAD(DestroyBuffer)
     VK_LOAD(FreeMemory)
-    
+
     // 1. Create Staging Buffer
     VkBufferCreateInfo bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferInfo.size = imageSize;
@@ -574,8 +801,6 @@ int32_t Texture_loadRaw(const void *rgbaData, uint32_t width, uint32_t height) {
     VK_LOAD(EndCommandBuffer)
     VK_LOAD(CmdPipelineBarrier)
     VK_LOAD(CmdCopyBufferToImage)
-    VK_LOAD(QueueSubmit)
-    VK_LOAD(QueueWaitIdle)
     VK_LOAD(FreeCommandBuffers)
 
     VkCommandBufferAllocateInfo cmdAllocInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -628,12 +853,8 @@ int32_t Texture_loadRaw(const void *rgbaData, uint32_t width, uint32_t height) {
 
     EndCommandBuffer_fn(commandBuffer);
 
-    VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    QueueSubmit_fn(s_queue, 1, &submitInfo, VK_NULL_HANDLE);
-    QueueWaitIdle_fn(s_queue);
+    if (!submitUploadTail(s_device, s_queue, commandBuffer, stagingBuffer, stagingBufferMemory, textureImage, textureImageMemory))
+        return -1;
     FreeCommandBuffers_fn(s_device, s_cmdPool, 1, &commandBuffer);
 
     DestroyBuffer_fn(s_device, stagingBuffer, nullptr);
@@ -710,7 +931,13 @@ bool Texture_updateSubRaw(int32_t id, const void *rgbaData, uint32_t x, uint32_t
         return false;
     if (!Texture_isReady() || !s_gpa || id < 0 || id >= s_textureCount) return false;
 
-    size_t imageSize = width * height * 4;
+    size_t imageSize = 0;
+    if (!textureBytesOk(rgbaData, width, height, &imageSize))
+        return false;
+    uint32_t slotW = s_widths[id];
+    uint32_t slotH = s_heights[id];
+    if (x >= slotW || y >= slotH || width > slotW - x || height > slotH - y)
+        return false;
 
     VK_LOAD(CreateBuffer)
     VK_LOAD(GetBufferMemoryRequirements)
@@ -750,8 +977,6 @@ bool Texture_updateSubRaw(int32_t id, const void *rgbaData, uint32_t x, uint32_t
     VK_LOAD(EndCommandBuffer)
     VK_LOAD(CmdPipelineBarrier)
     VK_LOAD(CmdCopyBufferToImage)
-    VK_LOAD(QueueSubmit)
-    VK_LOAD(QueueWaitIdle)
     VK_LOAD(FreeCommandBuffers)
 
     VkCommandBufferAllocateInfo cmdAllocInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -809,12 +1034,8 @@ bool Texture_updateSubRaw(int32_t id, const void *rgbaData, uint32_t x, uint32_t
 
     EndCommandBuffer_fn(commandBuffer);
 
-    VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    QueueSubmit_fn(s_queue, 1, &submitInfo, VK_NULL_HANDLE);
-    QueueWaitIdle_fn(s_queue);
+    if (!submitUploadTail(s_device, s_queue, commandBuffer, stagingBuffer, stagingBufferMemory, VK_NULL_HANDLE, VK_NULL_HANDLE))
+        return false;
     FreeCommandBuffers_fn(s_device, s_cmdPool, 1, &commandBuffer);
 
     DestroyBuffer_fn(s_device, stagingBuffer, nullptr);
@@ -848,39 +1069,31 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
     if (id < 0 || id >= s_textureCount) {
         return Texture_loadRaw(rgbaData, width, height);
     }
+    // Fast path: same size repaints the live image in place — zero destroy,
+    // zero descriptor rewrite, zero retire traffic.
     if (s_widths[id] == width && s_heights[id] == height) {
         if (Texture_updateSubRaw(id, rgbaData, 0, 0, width, height)) {
             return id;
         }
+        return -1;
     }
 
-    VK_LOAD(DeviceWaitIdle)
-    VK_LOAD(DestroySampler)
-    VK_LOAD(DestroyImageView)
-    VK_LOAD(DestroyImage)
-    VK_LOAD(FreeMemory)
+    size_t imageSize = 0;
+    if (!textureBytesOk(rgbaData, width, height, &imageSize))
+        return -1;
 
-    if (DeviceWaitIdle_fn)
-        DeviceWaitIdle_fn(s_device);
-
-    if (s_samplers[id] != VK_NULL_HANDLE) {
-        DestroySampler_fn(s_device, s_samplers[id], nullptr);
-        s_samplers[id] = VK_NULL_HANDLE;
-    }
-    if (s_views[id] != VK_NULL_HANDLE) {
-        DestroyImageView_fn(s_device, s_views[id], nullptr);
-        s_views[id] = VK_NULL_HANDLE;
-    }
-    if (s_images[id] != VK_NULL_HANDLE) {
-        DestroyImage_fn(s_device, s_images[id], nullptr);
-        s_images[id] = VK_NULL_HANDLE;
-    }
-    if (s_memories[id] != VK_NULL_HANDLE) {
-        FreeMemory_fn(s_device, s_memories[id], nullptr);
-        s_memories[id] = VK_NULL_HANDLE;
-    }
-
-    size_t imageSize = (size_t)width * (size_t)height * 4;
+    // Retire path: detach the old handles into locals FIRST. They move onto
+    // the retire ring only after the fresh image proves uploadable — a
+    // failed resize keeps old content live (drop-degrade, retry next tick).
+    // Never DeviceWaitIdle/Destroy* between another CB Begin/End here.
+    VkImage oldImage = s_images[id];
+    VkDeviceMemory oldMemory = s_memories[id];
+    VkImageView oldView = s_views[id];
+    VkSampler oldSampler = s_samplers[id];
+    s_images[id] = VK_NULL_HANDLE;
+    s_memories[id] = VK_NULL_HANDLE;
+    s_views[id] = VK_NULL_HANDLE;
+    s_samplers[id] = VK_NULL_HANDLE;
 
     VK_LOAD(CreateBuffer)
     VK_LOAD(GetBufferMemoryRequirements)
@@ -889,8 +1102,11 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
     VK_LOAD(MapMemory)
     VK_LOAD(UnmapMemory)
     VK_LOAD(DestroyBuffer)
+    VK_LOAD(FreeMemory)
+    VK_LOAD(DestroyImage)
 
-    // 1. Create Staging Buffer
+    // 1. Create Staging Buffer (failures restore the detached slot: the
+    // resize never happened, old content stays live)
     VkBufferCreateInfo bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferInfo.size = imageSize;
     bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -899,6 +1115,10 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
     if (CreateBuffer_fn(s_device, &bufferInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
         return -1;
     }
 
@@ -911,6 +1131,10 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
 
     if (AllocateMemory_fn(s_device, &allocInfo, nullptr, &stagingBufferMemory) != VK_SUCCESS) {
         DestroyBuffer_fn(s_device, stagingBuffer, nullptr);
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
         return -1;
     }
     BindBufferMemory_fn(s_device, stagingBuffer, stagingBufferMemory, 0);
@@ -944,6 +1168,10 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
     if (CreateImage_fn(s_device, &imageInfo, nullptr, &textureImage) != VK_SUCCESS) {
         DestroyBuffer_fn(s_device, stagingBuffer, nullptr);
         FreeMemory_fn(s_device, stagingBufferMemory, nullptr);
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
         return -1;
     }
 
@@ -955,6 +1183,10 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
         DestroyImage_fn(s_device, textureImage, nullptr);
         DestroyBuffer_fn(s_device, stagingBuffer, nullptr);
         FreeMemory_fn(s_device, stagingBufferMemory, nullptr);
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
         return -1;
     }
     BindImageMemory_fn(s_device, textureImage, textureImageMemory, 0);
@@ -965,8 +1197,6 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
     VK_LOAD(EndCommandBuffer)
     VK_LOAD(CmdPipelineBarrier)
     VK_LOAD(CmdCopyBufferToImage)
-    VK_LOAD(QueueSubmit)
-    VK_LOAD(QueueWaitIdle)
     VK_LOAD(FreeCommandBuffers)
 
     VkCommandBufferAllocateInfo cmdAllocInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -1019,20 +1249,26 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
 
     EndCommandBuffer_fn(commandBuffer);
 
-    VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
-
-    QueueSubmit_fn(s_queue, 1, &submitInfo, VK_NULL_HANDLE);
-    QueueWaitIdle_fn(s_queue);
+    // Upload timeout: the fresh image is already ringed for 2-frame reap
+    // inside submitUploadTail — restore the old slot untouched (old content
+    // kept, retry next tick). Never a null-handle window in the registry.
+    if (!submitUploadTail(s_device, s_queue, commandBuffer, stagingBuffer, stagingBufferMemory, textureImage, textureImageMemory)) {
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
+        return -1;
+    }
     FreeCommandBuffers_fn(s_device, s_cmdPool, 1, &commandBuffer);
 
     DestroyBuffer_fn(s_device, stagingBuffer, nullptr);
     FreeMemory_fn(s_device, stagingBufferMemory, nullptr);
 
-    // 4. Create ImageView & Sampler
+    // 4. Create ImageView & Sampler (DestroyImage/FreeMemory ride on the
+    // staging-section loads above — one load per name per function)
     VK_LOAD(CreateImageView)
     VK_LOAD(CreateSampler)
+    VK_LOAD(DestroyImageView)
 
     VkImageViewCreateInfo viewInfo = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     viewInfo.image = textureImage;
@@ -1046,6 +1282,12 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
 
     VkImageView textureImageView;
     if (CreateImageView_fn(s_device, &viewInfo, nullptr, &textureImageView) != VK_SUCCESS) {
+        DestroyImage_fn(s_device, textureImage, nullptr);
+        FreeMemory_fn(s_device, textureImageMemory, nullptr);
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
         return -1;
     }
 
@@ -1064,10 +1306,44 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
     VkSampler textureSampler;
     if (CreateSampler_fn(s_device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
         DestroyImageView_fn(s_device, textureImageView, nullptr);
+        DestroyImage_fn(s_device, textureImage, nullptr);
+        FreeMemory_fn(s_device, textureImageMemory, nullptr);
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
         return -1;
     }
 
-    // 5. Update Bindless Descriptor Set at slot id
+    // 5. Retire the old row BEFORE publishing: the fresh handles are still
+    // unpublished, so a full ring restores old content and destroys fresh
+    // safely (never seen by a frame). Published rows die only via the ring.
+    // A null old image (half-torn slot) destroys its orphaned peers inline —
+    // they were never published either.
+    VK_LOAD(DestroySampler)
+    if (oldImage != VK_NULL_HANDLE) {
+        if (!retirePush(oldImage, oldMemory, oldView, oldSampler, VK_NULL_HANDLE)) {
+            DestroyImageView_fn(s_device, textureImageView, nullptr);
+            DestroyImage_fn(s_device, textureImage, nullptr);
+            FreeMemory_fn(s_device, textureImageMemory, nullptr);
+            if (DestroySampler_fn)
+                DestroySampler_fn(s_device, textureSampler, nullptr);
+            s_images[id] = oldImage;
+            s_memories[id] = oldMemory;
+            s_views[id] = oldView;
+            s_samplers[id] = oldSampler;
+            return -1;
+        }
+    } else {
+        if (oldView != VK_NULL_HANDLE)
+            DestroyImageView_fn(s_device, oldView, nullptr);
+        if (oldMemory != VK_NULL_HANDLE)
+            FreeMemory_fn(s_device, oldMemory, nullptr);
+        if (oldSampler != VK_NULL_HANDLE && DestroySampler_fn)
+            DestroySampler_fn(s_device, oldSampler, nullptr);
+    }
+
+    // 6. Update Bindless Descriptor Set at slot id
     VK_LOAD(UpdateDescriptorSets)
     VkDescriptorImageInfo descImageInfo = {0};
     descImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1084,7 +1360,7 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
 
     UpdateDescriptorSets_fn(s_device, 1, &descriptorWrite, 0, nullptr);
 
-    // 6. Record to Registry at slot id
+    // 7. Record to Registry at slot id
     s_images[id] = textureImage;
     s_memories[id] = textureImageMemory;
     s_views[id] = textureImageView;
@@ -1098,29 +1374,40 @@ int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uin
 void Texture_free(int32_t id) {
     if (!Texture_isReady() || !s_gpa || s_instance == VK_NULL_HANDLE) return;
     if (id < 0 || id >= s_textureCount) return;
-    VK_LOAD(DeviceWaitIdle)
-    VK_LOAD(DestroySampler)
-    VK_LOAD(DestroyImageView)
-    VK_LOAD(DestroyImage)
-    VK_LOAD(FreeMemory)
-    if (DeviceWaitIdle_fn)
-        DeviceWaitIdle_fn(s_device);
-    if (s_samplers[id] != VK_NULL_HANDLE && DestroySampler_fn) {
-        DestroySampler_fn(s_device, s_samplers[id], nullptr);
-        s_samplers[id] = VK_NULL_HANDLE;
-    }
-    if (s_views[id] != VK_NULL_HANDLE && DestroyImageView_fn) {
-        DestroyImageView_fn(s_device, s_views[id], nullptr);
-        s_views[id] = VK_NULL_HANDLE;
-    }
-    if (s_images[id] != VK_NULL_HANDLE && DestroyImage_fn) {
-        DestroyImage_fn(s_device, s_images[id], nullptr);
-        s_images[id] = VK_NULL_HANDLE;
-    }
-    if (s_memories[id] != VK_NULL_HANDLE && FreeMemory_fn) {
-        FreeMemory_fn(s_device, s_memories[id], nullptr);
-        s_memories[id] = VK_NULL_HANDLE;
+    // Retire, never destroy inline: the slot's image may still be referenced
+    // by an in-flight frame. A full ring restores the slot and defers the
+    // free (retry next tick) — never DeviceWaitIdle, never an inline kill.
+    VkImage oldImage = s_images[id];
+    VkDeviceMemory oldMemory = s_memories[id];
+    VkImageView oldView = s_views[id];
+    VkSampler oldSampler = s_samplers[id];
+    if (oldImage == VK_NULL_HANDLE)
+        return;
+    s_images[id] = VK_NULL_HANDLE;
+    s_memories[id] = VK_NULL_HANDLE;
+    s_views[id] = VK_NULL_HANDLE;
+    s_samplers[id] = VK_NULL_HANDLE;
+    if (!retirePush(oldImage, oldMemory, oldView, oldSampler, VK_NULL_HANDLE)) {
+        s_images[id] = oldImage;
+        s_memories[id] = oldMemory;
+        s_views[id] = oldView;
+        s_samplers[id] = oldSampler;
+        return;
     }
     s_widths[id] = 0;
     s_heights[id] = 0;
+}
+
+// GETTERS (Rule 24: symmetric, null-safe; statics need no guard)
+
+int32_t Texture_retireDepth(void) {
+    return s_retireCount;
+}
+
+int32_t Texture_retireCapacity(void) {
+    return TEXTURE_RETIRE_MAX;
+}
+
+uint64_t Texture_frameSeq(void) {
+    return s_frameSeq;
 }

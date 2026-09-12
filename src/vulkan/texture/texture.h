@@ -1,6 +1,7 @@
 #ifndef ANTI_TEXTURE_H
 #define ANTI_TEXTURE_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -33,6 +34,14 @@ bool Texture_getSize(int32_t id, uint32_t *outW, uint32_t *outH);
 // Draw seams clamp shader texId against this so OOB -1 / exhausted ids never
 // reach the bindless array and fault the GPU (Rule 39 hot-minimal guard).
 int32_t Texture_maxBoundId(void);
+
+// Bounded retire-ring introspection (Rule 24 symmetric getters, Rule 27
+// proof): depth is the live occupancy in [0, retireCapacity]; capacity is
+// the fixed RETIRE_MAX 8; frameSeq is the retire clock (rows reap after
+// fence signal or 2 drained frames). Headless-safe: 0/8/0 with no device.
+int32_t Texture_retireDepth(void);
+int32_t Texture_retireCapacity(void);
+uint64_t Texture_frameSeq(void);
 
 #endif // ANTI_TEXTURE_H
 

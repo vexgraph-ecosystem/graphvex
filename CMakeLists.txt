@@ -111,8 +111,25 @@ if(APPLE)
 endif()
 endif() # NOT TARGET graphvex
 
+set(GRAPHVEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../_tests/graphvex")
+if(NOT EXISTS "${GRAPHVEX_TEST_DIR}")
+    set(GRAPHVEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+endif()
+
 # Buffer smoke test (relocated from the vexspoke `vexspoke_demo` harness with the move).
-add_executable(buffer_test
-    tests/buffer_test.c
-)
-target_link_libraries(buffer_test PRIVATE graphvex)
+if(EXISTS "${GRAPHVEX_TEST_DIR}/buffer_test.c" AND NOT TARGET buffer_test)
+    add_executable(buffer_test
+        ${GRAPHVEX_TEST_DIR}/buffer_test.c
+    )
+    target_link_libraries(buffer_test PRIVATE graphvex)
+endif()
+
+# Texture retire-ring contract test: headless cold-validation matrix
+# (nullptr/wrong-id/zero-size/overflow) + retire depth/capacity/seq defaults
+# + shutdown-with-no-flight. Links graphvex; needs no GPU.
+if(EXISTS "${GRAPHVEX_TEST_DIR}/texture_retire_test.c" AND NOT TARGET texture_retire_test)
+    add_executable(texture_retire_test
+        ${GRAPHVEX_TEST_DIR}/texture_retire_test.c
+    )
+    target_link_libraries(texture_retire_test PRIVATE graphvex)
+endif()
