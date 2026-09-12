@@ -29,6 +29,11 @@ void *Texture_getDescriptorSetLayout(void);
 // Returns the pixel dimensions of a loaded texture by ID. Returns false if ID is invalid.
 bool Texture_getSize(int32_t id, uint32_t *outW, uint32_t *outH);
 
+// Returns the number of bound bindless textures: valid IDs are [0, maxBoundId).
+// Draw seams clamp shader texId against this so OOB -1 / exhausted ids never
+// reach the bindless array and fault the GPU (Rule 39 hot-minimal guard).
+int32_t Texture_maxBoundId(void);
+
 #endif // ANTI_TEXTURE_H
 
 // Loads a texture directly from raw RGBA8 data in memory.

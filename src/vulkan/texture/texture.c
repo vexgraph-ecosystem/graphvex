@@ -34,6 +34,7 @@
  *   - Texture_getDescriptorSet(void)
  *   - Texture_getDescriptorSetLayout(void)
  *   - Texture_getSize(id, outW, outH)
+ *   - Texture_maxBoundId(void)       — Rule 39: ceiling for draw-site texId clamps
  * ============================================================================
  */
 
@@ -834,6 +835,10 @@ bool Texture_getSize(int32_t id, uint32_t *outW, uint32_t *outH) {
     if (outW) *outW = s_widths[id];
     if (outH) *outH = s_heights[id];
     return true;
+}
+
+int32_t Texture_maxBoundId(void) {
+    return s_textureCount;
 }
 
 int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uint32_t height) {
