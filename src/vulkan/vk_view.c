@@ -407,7 +407,7 @@ VkImage VkView_image(const VkView *view) {
 
 bool VkView_beginPass(VkView *view, VkCommandBuffer cb,
                       float r, float g, float b, float a) {
-    if (!VkGuard_check("VkView_beginPass", s_device, nullptr, false))
+    if (!VkGuard_checkResource("VkView_beginPass", s_device, false))
         return false;
     if (!view || (*view).fb == VK_NULL_HANDLE)
         return false;

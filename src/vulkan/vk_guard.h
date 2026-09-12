@@ -21,9 +21,13 @@
 //                    MoltenVK/Metal line names the cause, not this seam)
 //   * device null -> returns false + log-once per file (lifecycle bug: a
 //                    driver call must never run on a zombie/unrung handle)
-//   * queue null  -> permitted ONLY on device-resource seams (create/destroy/
-//                    record); any seam that submits/fences/presents must pass
-//                    its queue so the whole queue health chain is covered
+//   * queue null  -> returns false + log-once per file (submit/fence/present
+//                    seams MUST pass their queue so the whole queue health
+//                    chain is covered — Rule 27/39: an unwaitable submit
+//                    wedges teardown). Device-resource seams (create/destroy/
+//                    record/export with no queue touch) are the explicit
+//                    opt-out: they call VkGuard_checkResource instead, never
+//                    VkGuard_check with a null queue.
 //
 // Callers degrade exactly like any transient failure: return false, keep
 // dirty state, retry next tick (Rules 27 + 35). Never crash, never UB,
@@ -32,7 +36,6 @@
 #ifndef NDEBUG
 
 static inline bool VkGuard_check(const char *seam, void *device, void *queue, bool deviceLost) {
-    (void) queue;
     if (deviceLost)
         return false;
     if (device == nullptr) {
@@ -44,12 +47,40 @@ static inline bool VkGuard_check(const char *seam, void *device, void *queue, bo
         }
         return false;
     }
+    if (queue == nullptr) {
+        static bool s_queueLogged;
+        if (!s_queueLogged) {
+            s_queueLogged = true;
+            fprintf(stderr, "vk: seam \"%s\" blocked — queue is null (submit/fence/present seam without a queue wedges teardown; resource seams use VkGuard_checkResource; Rule 39)\n", seam);
+            fflush(stderr);
+        }
+        return false;
+    }
+    return true;
+}
+
+// Explicit opt-out for device-resource seams (create/destroy/record/export):
+// no queue is touched, so none is required. Submit/fence/present seams must
+// never call this — they use VkGuard_check with their live queue.
+static inline bool VkGuard_checkResource(const char *seam, void *device, bool deviceLost) {
+    if (deviceLost)
+        return false;
+    if (device == nullptr) {
+        static bool s_resLogged;
+        if (!s_resLogged) {
+            s_resLogged = true;
+            fprintf(stderr, "vk: seam \"%s\" blocked — device is null (lifecycle bug, not device loss; Rule 39)\n", seam);
+            fflush(stderr);
+        }
+        return false;
+    }
     return true;
 }
 
 #else
 
 #define VkGuard_check(seam, device, queue, deviceLost) ((void) 0, true)
+#define VkGuard_checkResource(seam, device, deviceLost) ((void) 0, true)
 
 #endif // NDEBUG
 

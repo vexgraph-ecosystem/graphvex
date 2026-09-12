@@ -230,7 +230,7 @@ VkIOSurface *VkIOSurface_wrap(void *ioSurface, uint32_t width, uint32_t height) 
 // After Vulkan renders into the image, export the IOSurface for AppKit
 // compositing. The IOSurface now contains the rendered content.
 bool VkIOSurface_export(VkIOSurface *surf) {
-    if (!VkGuard_check("VkIOSurface_export", s_device, nullptr, false))
+    if (!VkGuard_checkResource("VkIOSurface_export", s_device, false))
         return false;
     if (!surf || !(*surf).image || !(*surf).surface) return false;
 

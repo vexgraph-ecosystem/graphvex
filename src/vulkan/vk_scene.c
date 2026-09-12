@@ -570,7 +570,7 @@ void VkSceneCanvas_flip(VkSceneCanvas *canvas) {
 
 bool VkSceneCanvas_beginBackPass(VkSceneCanvas *canvas, VkCommandBuffer cb,
                                  float r, float g, float b, float a) {
-    if (!VkGuard_check("VkSceneCanvas_beginBackPass", s_device, nullptr, false))
+    if (!VkGuard_checkResource("VkSceneCanvas_beginBackPass", s_device, false))
         return false;
     if (!canvas || (*canvas).fb[(*canvas).front ^ 1u] == VK_NULL_HANDLE)
         return false;
