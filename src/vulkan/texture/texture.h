@@ -38,10 +38,30 @@ int32_t Texture_maxBoundId(void);
 // Bounded retire-ring introspection (Rule 24 symmetric getters, Rule 27
 // proof): depth is the live occupancy in [0, retireCapacity]; capacity is
 // the fixed RETIRE_MAX 8; frameSeq is the retire clock (rows reap after
-// fence signal or 2 drained frames). Headless-safe: 0/8/0 with no device.
+// fence signal or the retire guard, else the 2-frame CPU-lag fallback).
+// Headless-safe: 0/8/0 with no device.
 int32_t Texture_retireDepth(void);
 int32_t Texture_retireCapacity(void);
 uint64_t Texture_frameSeq(void);
+
+// Retire-guard seam (Rule 33 canonical downward callback — the leaf never
+// reaches up for sampler-flight state): the sampler-flight owner (the
+// darling compositor) registers a non-blocking "safe to destroy retired
+// images" probe. retireDrain destroys fence-less rows (free/resize rollovers
+// that a submitted batch/pane CB may still sample) ONLY while the guard
+// returns true — the 2-frame CPU lag is a fallback for standalone builds
+// with no guard registered. Never blocks, never allocates, headless-safe.
+void Texture_setRetireGuard(bool (*guard)(void));
+
+// Rule 24 symmetric introspection — the currently-registered retire guard,
+// or NULL when none (standalone/texture_retire_test falls back to Rule 32
+// 2-frame CPU lag). Never blocks, Rule 35-cold.
+bool (*Texture_getRetireGuard(void))(void);
+
+// Rule 24 symmetric introspection: the currently-registered retire guard,
+// or NULL when none (callers then rely on the 2-frame CPU lag fallback).
+// Never blocks. Texture_getRetireGuard() is null-safe (Rule 24).
+bool (*Texture_getRetireGuard(void))(void);
 
 #endif // ANTI_TEXTURE_H
 

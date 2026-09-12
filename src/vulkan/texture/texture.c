@@ -26,8 +26,11 @@
  * (Texture_updateSubRaw only, zero destroy). A resize retires the old
  * (image, view, sampler, memory) onto the bounded retire ring and points
  * the slot at the fresh handles + UpdateDescriptorSets immediately; the
- * old handles die only after their upload fence signals or 2 drained
- * frames pass — the GPU may still be reading them (Rule 39 net).
+ * old handles die only after their upload fence signals, or the retire
+ * guard certifies no bindless-sampling Submit is in flight, or — for
+ * standalone builds with no guard — 2 drained frames pass. A submitted
+ * batch/pane CB that still samples the old slot must never meet a
+ * FreeMemory under it (Rule 39 net: GPU page-fault on freed memory).
  *
  * SLOT RECORD (retired row — behaviorless, owned by the retire ring):
  * ----------------------------------------------------------------------------
@@ -38,9 +41,10 @@
  *   VkFence s_retireFence[i];         // upload fence proving GPU drain (or null)
  *   uint64_t s_retireSeq[i];          // frame seq at retire (2-frame fallback)
  * Ring: s_retireHead + s_retireCount over RETIRE_MAX 8; s_frameSeq ticks
- * per resize/free. Reap is non-blocking (GetFenceStatus poll); a full ring
- * with no drainable slot fails the replace loudly (return -1, old content
- * kept, retry next tick) — never an unbounded wait, never a leak.
+ * per resize/free. Reap is non-blocking (GetFenceStatus poll + the retire
+ * guard callback); a full ring with no drainable slot fails the replace
+ * loudly (return -1, old content kept, retry next tick) — never an
+ * unbounded wait, never a leak.
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -69,7 +73,11 @@
  *   - Texture_retireCapacity(void)   — RETIRE_MAX 8 (bounded, Rule 27)
  *   - Texture_frameSeq(void)         — retire frame clock (2-frame reap proof)
  *
- * Setters: none — slots mutate only through load/replace/free core verbs.
+ * Setters:
+ *   - Texture_setRetireGuard(guard)  — bind the sampler-flight destroy probe
+ *     (Rule 33 downward callback; registered by the compositor, null in
+ *     standalone/headless builds -> CPU-lag fallback)
+ * Slot mutation still flows only through load/replace/free core verbs.
  * Cold validation (Rule 35): null data, zero width/height, id OOB, and
  * width*height*4 overflow reject loudly once at entry (return -1/false);
  * hot upload paths carry the nullptr entry guard only, zero per-texel work.
@@ -116,6 +124,9 @@ static VkFence s_retireFence[TEXTURE_RETIRE_MAX];
 static uint64_t s_retireSeq[TEXTURE_RETIRE_MAX];
 static int s_retireCount = 0;
 static uint64_t s_frameSeq = 0;
+// Sampler-flight destroy probe (Rule 33 callback seam, registered by the
+// darling compositor): null = legacy standalone mode (CPU-lag fallback).
+static bool (*s_retireGuard)(void) = nullptr;
 
 #define VK_LOAD(name) \
     static PFN_vk##name name##_fn; \
@@ -176,8 +187,10 @@ static void retireDestroySlot(VkDevice dev, int slot) {
     s_retireSeq[slot] = 0;
 }
 
-// Non-blocking reap: signaled fence OR 2 retired frames prove GPU drain.
-// Never waits — a still-flying row stays ringed for a later tick.
+// Non-blocking reap: signaled upload fence, OR the registered retire guard
+// certifying no bindless-sampling Submit is in flight, OR (standalone builds
+// without a guard) 2 retired frames. Never waits — a still-flying row stays
+// ringed for a later tick.
 static void retireDrain(VkDevice dev) {
     if (dev == VK_NULL_HANDLE)
         return;
@@ -191,7 +204,18 @@ static void retireDrain(VkDevice dev) {
             if (GetFenceStatus_fn(dev, s_retireFence[i]) == VK_SUCCESS)
                 drainable = true;
         }
-        if (!drainable && s_frameSeq >= s_retireSeq[i] + TEXTURE_RETIRE_FRAME_LAG)
+        // Fence-less rows (free / resize rollovers) are sampled by submitted
+        // batch + pane CBs, NOT proven by the upload fence. When a retire
+        // guard is registered it is the ONLY destroy proof for them: it tells
+        // us no bindless-sampling Submit is in flight, so FreeMemory under a
+        // flying CB (the kIOGPUCommandBufferCallbackErrorPageFault defect) can
+        // never happen. The 2-frame CPU lag survives solely as the standalone
+        // / headless fallback — a registered guard is authoritative.
+        if (!drainable && s_retireGuard) {
+            if (s_retireGuard())
+                drainable = true;
+        }
+        if (!drainable && s_retireGuard == nullptr && s_frameSeq >= s_retireSeq[i] + TEXTURE_RETIRE_FRAME_LAG)
             drainable = true;
         if (!drainable) {
             live++;
@@ -1410,4 +1434,14 @@ int32_t Texture_retireCapacity(void) {
 
 uint64_t Texture_frameSeq(void) {
     return s_frameSeq;
+}
+
+void Texture_setRetireGuard(bool (*guard)(void)) {
+    s_retireGuard = guard;
+}
+
+// Rule 24 — symmetric introspection for the registered retire guard. Returns
+// NULL when none is bound (standalone fallback path), never blocks.
+bool (*Texture_getRetireGuard(void))(void) {
+    return s_retireGuard;
 }
