@@ -61,14 +61,14 @@ static void bindlessHeapFreeStorage(BindlessHeap *heap) {
 }
 
 // CONSTRUCTORS
-BindlessHeap *BindlessHeap_0(void) {
-    BindlessHeap *heap = (BindlessHeap*) Memory_alloc(TYPE_BINDLESS_HEAP_SINGLETON, sizeof(BindlessHeap));
+BindlessHeap *BindlessHeap_0() {
+    BindlessHeap *heap = Memory_alloc(TYPE_BINDLESS_HEAP_SINGLETON, sizeof(BindlessHeap));
     if (!heap)
         heap = (BindlessHeap*) calloc(1, sizeof(BindlessHeap));
     if (!heap)
         return nullptr;
     uint32_t cap = 8;
-    Image **slots = (Image**) calloc(cap, sizeof(Image *));
+    Image **slots = calloc(cap, sizeof(Image*));
     if (!slots) {
         bindlessHeapFreeStorage(heap);
         return nullptr;
