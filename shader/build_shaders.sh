@@ -14,6 +14,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 
 glslangValidator -V "$DIR/vert/texture_quad.vert" -o "$DIR/spv/texture_quad_vert.spv"
 glslangValidator -V "$DIR/frag/texture_quad.frag" -o "$DIR/spv/texture_quad_frag.spv"
+glslangValidator -V "$DIR/frag/layer_quad.frag" -o "$DIR/spv/layer_quad_frag.spv"
 glslangValidator -V "$DIR/vert/text_sdf.vert" -o "$DIR/spv/text_sdf_vert.spv"
 glslangValidator -V "$DIR/frag/text_sdf.frag" -o "$DIR/spv/text_sdf_frag.spv"
 glslangValidator -V "$DIR/comp/sdf_jfa.comp" -o "$DIR/spv/sdf_jfa.spv"

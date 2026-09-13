@@ -50,6 +50,11 @@ add_library(graphvex STATIC
     src/font/font_bake.c
     src/io/vfs.c
     src/vulkan/sdf_gpu.c
+    src/vulkan/vk_instance.c
+    src/vulkan/vk_mac.c
+    src/vulkan/vk_layer.c
+    src/vulkan/vk_pane.c
+    src/vulkan/vk_window_seam.c
     src/vulkan/vk_scene.c
     src/vulkan/vk_view.c
     src/vulkan/vk_iosurface.c
@@ -82,6 +87,13 @@ add_library(graphvex STATIC
 target_include_directories(graphvex PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_options(graphvex PRIVATE -Wall -Wextra -Werror -mcpu=native)
 
+# Rule 39/40: DEBUG macro gates Vulkan validation layers + debug messenger.
+# In Debug builds, enable exhaustive validation; in Release, everything is
+# compiled out and stripped via -ffunction-sections/-fdata-sections + -dead_strip.
+target_compile_definitions(graphvex PRIVATE
+    $<$<CONFIG:Debug>:DEBUG=1>
+)
+
 find_package(Vulkan QUIET)
 if(Vulkan_FOUND)
     target_include_directories(graphvex PUBLIC ${Vulkan_INCLUDE_DIRS})
@@ -107,6 +119,8 @@ if(APPLE)
         "-framework Foundation"
         "-framework AppKit"
         "-framework CoreText"
+        "-framework Metal"
+        "-framework QuartzCore"
     )
 endif()
 endif() # NOT TARGET graphvex
