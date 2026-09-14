@@ -26,7 +26,7 @@
  *   - SdfGpu_shutdown(void)
  *   - SdfGpu_available(void)
  *   - SdfGpu_bakePage(coverage, dim, outSdf)
- *     (Rule 39 net: bakePage guards the compute driver at entry)
+ *     (the Ecosystem Vulkan Safety Nets Law net: bakePage guards the compute driver at entry)
  *   - SdfGpu_pageDim(void)
  * ============================================================================
  */

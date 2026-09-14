@@ -14,7 +14,7 @@
  * ============================================================================
  * Multi-layer vector board: N VectorDrawable layers + active index + opacity
  * + blend + visibleMask. Max 32 layers bitmask. Exposes layers exclusively
- * via Rule 29 LayeredVectorDrawable_layer* verbs. Renders visible layers to
+ * via the Sub-Part Field Segregation Law LayeredVectorDrawable_layer* verbs. Renders visible layers to
  * destination raster Drawable board.
  *
  * STRUCT FIELDS (Mirroring draw/layered_vector_drawable.h):

@@ -49,16 +49,16 @@ int VkPane_count(void);
 uint64_t VkPane_presentCount(int index);
 uint64_t VkPane_skipCount(int index);
 
-// Per-chain repaint demand (slot-record bit, Rule 3 — no new class).
-// Setter takes (index, dirty): selector first, value last (Rule 9 dest-last
+// Per-chain repaint demand (slot-record bit, the Single Class Per File Law — no new class).
+// Setter takes (index, dirty): selector first, value last (the Dest-Last Law dest-last
 // idiom, cf. Panel_setSize). Boolean getter answers the symmetric probe
-// (Rule 24). Register/resize set demand; the present walk clears it after a
+// (the Symmetric Getter/Setter Completeness Law). Register/resize set demand; the present walk clears it after a
 // successful present; thread 0 (or the preFrame bridge) sets it when the
 // panel tree dirties. A clean chain is skipped after its fence poll.
 void VkPane_markDirty(int index, bool dirty);
 bool VkPane_isDirty(int index);
 
-// Flight probe for texture-retire safety (Rule 39 net): true only when no
+// Flight probe for texture-retire safety (the Ecosystem Vulkan Safety Nets Law net): true only when no
 // pane submit is pending anywhere in the registry — i.e. no pane CB that
 // sampled bindless descriptors is still executing (FreeMemory under a flying
 // pane Submit is the GPU-page-fault defect). Non-blocking GetFenceStatus
@@ -66,7 +66,7 @@ bool VkPane_isDirty(int index);
 bool VkPane_flightIdle(void);
 
 // Teardown: destroy all pane surfaces/swapchains. MUST run before the
-// instance dies (Rule 26: destroy top-down, free last).
+// instance dies (the Teardown Order Law: destroy top-down, free last).
 void VkPane_shutdown(void);
 
 // Global renderer hook set by the UI compositor (darling). Invoked per pane

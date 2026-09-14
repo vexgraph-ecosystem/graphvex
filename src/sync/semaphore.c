@@ -12,7 +12,7 @@
  * ============================================================================
  * GPU-GPU ordering handle. One submission signals a timeline value and a
  * later submission waits for it; the CPU never blocks here — wait only
- * probes the counter (Rule 27: no unbounded waits). CPU-side stubs only:
+ * probes the counter (the Bounded Wait Law: no unbounded waits). CPU-side stubs only:
  * signal/wait track the value flag and touch no Vulkan/Metal/Direct
  * backend.
  *

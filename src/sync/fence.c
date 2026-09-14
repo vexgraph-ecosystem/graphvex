@@ -11,7 +11,7 @@
  * LEVEL: L2 — Behavior (CPU-GPU join lifecycle stubs)
  * ============================================================================
  * CPU-GPU join handle. The CPU waits (bounded to FENCE_WAIT_TIMEOUT_NS per
- * Rule 27 — never an unbounded block on a joined path) until GPU work
+ * the Bounded Wait Law — never an unbounded block on a joined path) until GPU work
  * signals completion. CPU-side stubs only: wait probes the signaled flag
  * and touches no Vulkan/Metal/Direct backend.
  *

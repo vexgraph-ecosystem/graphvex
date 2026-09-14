@@ -14,7 +14,7 @@
 // A LayeredDrawable is the multi-layer raster board: an array of owned
 // Drawable layers with per-layer opacity, blend mode, and a 32-bit visibility
 // bitmask. Layers are exposed exclusively through LayeredDrawable_layer* verbs
-// per Rule 29. CPU stub: records layer mutations and dirty flag without GPU rasterization.
+// per the Sub-Part Field Segregation Law. CPU stub: records layer mutations and dirty flag without GPU rasterization.
 
 #define LAYER_BLEND_NORMAL   0u
 #define LAYER_BLEND_MULTIPLY 1u
@@ -50,7 +50,7 @@ bool LayeredDrawable_removeLayer(LayeredDrawable *self, uint32_t index);
 void LayeredDrawable_composite(LayeredDrawable *self, Drawable *dest);
 Drawable *LayeredDrawable_activeLayer(LayeredDrawable *self);
 
-// Layer Part Verbs (Rule 29)
+// Layer Part Verbs (the Sub-Part Field Segregation Law)
 Drawable *LayeredDrawable_layerGet(const LayeredDrawable *self, uint32_t index);
 void LayeredDrawable_layerSetOpacity(LayeredDrawable *self, uint32_t index, float opacity);
 float LayeredDrawable_layerGetOpacity(const LayeredDrawable *self, uint32_t index);

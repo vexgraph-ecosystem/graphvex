@@ -18,14 +18,14 @@
  * LEVEL: L4 — Self-Management (retained offscreen GPU target lifecycle)
  * ============================================================================
  * Registry of retained offscreen render targets — the COMPOSITED scene model
- * of the Present-On-Demand law (Rule 14). A scene owns a fixed pixel-size
+ * of the Present-On-Demand Law. A scene owns a fixed pixel-size
  * flight target (two record/submit slots, flip/flop) rendered into on the
  * present worker by VkLayer_visit; the canvas painter samples the
  * last-published flight image as a textured quad via VkLayer_composite,
  * collaged into the board pass at the scene's anchor rect. One canvas total
  * — no per-scene CAMetalLayer surfaces. DIRECT scenes use VkPane instead.
  *
- * structural invariant (Rule 14): composite != render. visit() invokes the
+ * structural invariant (the Present-On-Demand Law): composite != render. visit() invokes the
  * scene's render handler into its retained target; composite() only copies
  * published pixels. The canvas can never re-invoke a scene render.
  *
@@ -59,7 +59,7 @@
  *
  * Core Functions:
  *   - VkLayer_visit()               : render dirty layers into flight targets
- *                                    (Rule 39 seam guard at entry; skips clean
+ *                                    (the Ecosystem Vulkan Safety Nets Law seam guard at entry; skips clean
  *                                    layers after fence poll; clears demand on
  *                                    render; publishes the flipped slot)
  *   - VkLayer_composite(cb, ...)    : sample a published layer as a quad into
@@ -70,7 +70,7 @@
  *
  * Setters:
  *   - VkLayer_setRenderer(fn)
- *   - VkLayer_markDirty(index, dirty) : per-layer repaint demand (Rule 24
+ *   - VkLayer_markDirty(index, dirty) : per-layer repaint demand (the Symmetric Getter/Setter Completeness Law
  *                                       symmetric pair with isDirty)
  *
  * Getters:
@@ -121,14 +121,14 @@ typedef struct VkLayerChain {
                              // cleared after a successful render
     uint64_t presentCount;   // lifetime successful renders (diagnostic)
     uint64_t skipCount;      // lifetime fence-poll + clean skips (diagnostic)
-    uint64_t fenceTimeoutNs; // 100ms bounded (Rule 27)
+    uint64_t fenceTimeoutNs; // 100ms bounded (the Bounded Wait Law)
 } VkLayerChain;
 
 static VkLayerChain s_chains[VK_LAYER_CHAIN_MAX] = {0};
 // Registry lock (two-thread live-resize contract): the present worker runs
 // VkLayer_visit every frame while thread 0 may VkLayer_resize (settle) or
 // VkLayer_unregister (teardown). All structural mutation and the visit
-// iteration serialize here; the waits inside remain bounded (Rule 27).
+// iteration serialize here; the waits inside remain bounded (the Bounded Wait Law).
 static SpinLock s_layerLock = SPIN_LOCK_INIT;
 static int s_count = 0;
 static VkRenderPass s_layerPass = VK_NULL_HANDLE;
@@ -185,7 +185,7 @@ bool VkLayer_isDirty(int index) {
     return (*chain).dirty;
 }
 
-// Rule 39 flight probe: true only when every layer's last submit fence is
+// the Ecosystem Vulkan Safety Nets Law flight probe: true only when every layer's last submit fence is
 // signaled — no offscreen CB that sampled bindless descriptors is still
 // executing. Non-blocking: GetFenceStatus poll only, under a try of the
 // registry lock. Fences start SIGNALED, so a never-submitted layer is idle.
@@ -217,8 +217,8 @@ void VkLayer_setRenderer(VkLayerRenderFn fn) {
     s_renderer = fn;
 }
 
-// Setters/getters for the per-layer repaint-demand bit (Rule 24 symmetric
-// pair; selector first, value last per Rule 9). Lock-free single-byte stores
+// Setters/getters for the per-layer repaint-demand bit (the Symmetric Getter/Setter Completeness Law symmetric
+// pair; selector first, value last per the Dest-Last Law). Lock-free single-byte stores
 // matching the presentCount/skipCount diagnostic pattern: the worker reads
 // and clears under the registry lock while the bridge sets from outside —
 // a missed mark only delays one render to the next tick (drop-degrade).
@@ -235,7 +235,7 @@ void VkLayer_markDirty(int index, bool dirty) {
 
 // Bundle-aware spv lookup shared by the composite pipeline build: the CMake
 // staging dir, adjacent spv, then cwd relative — the same resolution the
-// other graphvex shader loaders honor (Rule 21).
+// other graphvex shader loaders honor (the SPIR-V Shader Deployment Law).
 static unsigned char *layerLoadSpv(const char *path, size_t *outSize) {
     FILE *f = fopen(path, "rb");
     if (!f)
@@ -710,7 +710,7 @@ int VkLayer_register(int width, int height, void *owner) {
     (*chain).active = true;
     (*chain).owner = owner;
     // Layer pixel size is fixed NOW (register args) — the registered ground
-    // truth the offscreen targets are built at (Rule 11.5).
+    // truth the offscreen targets are built at (the Pane-of-Glass Law).
     (*chain).extent = (VkExtent2D){ .width = (uint32_t) width, .height = (uint32_t) height };
     (*chain).fenceTimeoutNs = 100000000ULL;
     (*chain).dirty = true;      // registration demands the first render
@@ -764,7 +764,7 @@ bool VkLayer_unregister(int index) {
         return false;
     }
 
-    // Bounded wait for in-flight renders before teardown (Rule 27): both
+    // Bounded wait for in-flight renders before teardown (the Bounded Wait Law): both
     // flight slots drain, so neither flight image can be retired under.
     VK_LAYER_LOAD_DEVICE(WaitForFences)
     for (uint32_t s = 0; s < VK_LAYER_FLIGHT; s++) {
@@ -804,7 +804,7 @@ bool VkLayer_resize(int index, int width, int height) {
     }
     if ((*chain).extent.width == (uint32_t) width && (*chain).extent.height == (uint32_t) height) {
         SpinLock_unlock(&s_layerLock);
-        return true; // fixed layer: no rebuild on window resize (Rule 11.5)
+        return true; // fixed layer: no rebuild on window resize (the Pane-of-Glass Law)
     }
 
     // Bound the wait on in-flight renders (both flight slots) before
@@ -826,7 +826,7 @@ bool VkLayer_resize(int index, int width, int height) {
 }
 
 bool VkLayer_visit(void) {
-    // Rule 39 seam guard: layers submit to the shared queue every frame; a
+    // the Ecosystem Vulkan Safety Nets Law seam guard: layers submit to the shared queue every frame; a
     // dead/nulled device must never be handed layer work. Debug net only.
     if (!VkGuard_check("VkLayer_visit", Vk_getDevice(), Vk_getQueue(), Vk_isDeviceLost()))
         return false;
@@ -866,8 +866,8 @@ bool VkLayer_visit(void) {
 
         // Stale-frame reuse: when this slot's last submit still flies, skip
         // the layer and keep its last published image on the canvas — never
-        // block the walk. Non-blocking poll only: drop-degrade per Rule 27,
-        // zero logging per Rule 35 hot-minimal.
+        // block the walk. Non-blocking poll only: drop-degrade per the Bounded Wait Law,
+        // zero logging per the Cold-Strict, Hot-Minimal Validation Law hot-minimal.
         if (GetFenceStatus_fn(s_instanceDevice, fence) != VK_SUCCESS) {
             (*chain).skipCount++;
             continue;

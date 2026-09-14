@@ -15,7 +15,7 @@
 // presents. THREAD CONTRACT: init and clearPresent run on thread 0 (the
 // surface wraps the window's AppKit view).
 //
-// Window-system seam (Rule 17): graphvex must NEVER include hotcwap/window.h.
+// Window-system seam (the Vertical Integration Law): graphvex must NEVER include hotcwap/window.h.
 // Instead, the host calls Vk_setWindowSeam() before Vk_init(), registering
 // opaque callbacks. All Window_* queries in the Vulkan layer go through these.
 
@@ -54,7 +54,7 @@ bool Vk_ready(void);
 // "device lost" instead of a lying "idle".
 bool Vk_isDeviceLost(void);
 
-// Rule 39 flight probe: true only when the present submit fence is signaled —
+// the Ecosystem Vulkan Safety Nets Law flight probe: true only when the present submit fence is signaled —
 // the board present CB, which may have sampled bindless textures via the frame
 // renderer, is no longer executing. Non-blocking GetFenceStatus poll; the fence
 // starts SIGNALED so a never-presented device reads idle. Consumed by the
@@ -65,7 +65,7 @@ bool Vk_presentFlightIdle(void);
 // True only when VK_EXT_debug_utils is actually enabled on the live device.
 // Callers use this to gate vkSetDebugUtilsObjectNameEXT — the loader resolves
 // the symbol even on unsupported builds, but calling it on a non-debug device
-// segfaults (Rule 39 seam naming).
+// segfaults (the Ecosystem Vulkan Safety Nets Law seam naming).
 bool Vk_isDebugUtilsEnabled(void);
 
 // Acquire, clear the monitor cache to the window's background color (or the

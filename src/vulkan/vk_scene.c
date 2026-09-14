@@ -50,7 +50,7 @@
  *   - VkSceneCanvas_initModule(instance, gpa, phys, device)
  *   - VkSceneCanvas_acquire(key, width, height)
  *   - VkSceneCanvas_flushRetired(void)
- *     (Rule 39 net: beginBackPass guards the record seam at entry)
+ *     (the Ecosystem Vulkan Safety Nets Law net: beginBackPass guards the record seam at entry)
  *   - VkSceneCanvas_width(canvas)
  *   - VkSceneCanvas_height(canvas)
  *   - VkSceneCanvas_frontImage(canvas)

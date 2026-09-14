@@ -41,7 +41,7 @@
  *   - VkView_refreshAll(instance, gpa, phys, device)
  *   - VkView_count(void)
  *   - VkView_at(index)
- *     (Rule 39 net: beginPass guards the record seam at entry)
+ *     (the Ecosystem Vulkan Safety Nets Law net: beginPass guards the record seam at entry)
  *   - VkView_forPoint(x, y)
  *   - VkView_forMonitor(displayId)
  *   - VkView_renderPass(view)

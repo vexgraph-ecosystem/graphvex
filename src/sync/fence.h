@@ -9,7 +9,7 @@
 // sync/fence.h — CPU-GPU join handle (stub).
 //
 // A Fence joins CPU execution with GPU completion: the CPU waits (bounded,
-// 100ms per Rule 27) until the GPU signals. All lifecycle functions are
+// 100ms per the Bounded Wait Law) until the GPU signals. All lifecycle functions are
 // CPU-side stubs: no Vulkan/Metal/Direct backend is touched here.
 
 #ifndef FENCE_WAIT_TIMEOUT_NS

@@ -30,13 +30,13 @@ FrameImporter *FrameImporter_0(void);
 void FrameImporter_free(FrameImporter *self);
 
 // Copy w*h*4 RGBA8 bytes into dest via Image_upload (dest-last per
-// Rule 9). Records lastWidth/lastHeight on success. False on NULL
+// the Dest-Last Law). Records lastWidth/lastHeight on success. False on NULL
 // self/bytes/dest or zero dims. Pure upload — decode happened before,
 // in the caller's ProcessSpawn-driven binary.
 bool FrameImporter_rgbaToTexture(FrameImporter *self, uint32_t w, uint32_t h,
                                  const uint8_t *bytes, Image *dest);
 
-// Symmetric accessors (Rule 24; null-safe).
+// Symmetric accessors (the Symmetric Getter/Setter Completeness Law; null-safe).
 void FrameImporter_setLastWidth(FrameImporter *self, uint32_t w);
 uint32_t FrameImporter_getLastWidth(const FrameImporter *self);
 void FrameImporter_setLastHeight(FrameImporter *self, uint32_t h);

@@ -11,11 +11,11 @@
 // Metal/Direct later) is one driver row behind GraphicsBackend. Ditching MoltenVK
 // then means adding metal.m — never touching darling.
 //
-// Split note (Rule 3): this sketch holds 4 types in one header to keep the
+// Split note (the Single Class Per File Law): this sketch holds 4 types in one header to keep the
 // seam reviewable. On implementation each becomes its own pair:
 // device.h, frame.h, drawable.h, backend.h.
 //
-// LAYER LAW: graphvex is vexspoke-only (Rule 17). The drawable handle flows
+// LAYER LAW: graphvex is vexspoke-only (the Vertical Integration Law). The drawable handle flows
 // DOWN from hotcwap (it owns the NSWindow/CAMetalLayer/HWND); graphvex
 // never includes window.h and never inspects the handle — drivers cast it.
 

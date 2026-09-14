@@ -8,7 +8,7 @@
 // vulkan/vk_window_seam.h — the Window-system seam for Vulkan init/present.
 //
 // graphvex (the graphics foundation layer) must NEVER include headers from
-// hotcwap, darling, or api-haven (Rule 17). But the Vulkan instance/device
+// hotcwap, darling, or api-haven (the Vertical Integration Law). But the Vulkan instance/device
 // needs to interact with the OS window for:
 //   - CAMetalLayer extraction (surface creation)
 //   - Present mode queries (FIFO vs IMMEDIATE pacing)

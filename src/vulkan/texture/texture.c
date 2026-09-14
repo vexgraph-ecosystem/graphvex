@@ -19,7 +19,7 @@
  * Procedural bindless registry: slot id -> (image, memory, view, sampler,
  * width, height). Uploads stage through a host-visible buffer, transition
  * with a one-shot CB from the module-owned transient pool, submit with a
- * per-upload fence, and wait at most 100ms (Rule 27) — never DeviceWaitIdle
+ * per-upload fence, and wait at most 100ms (the Bounded Wait Law) — never DeviceWaitIdle
  * or QueueWaitIdle between another CB Begin/End on the shared queue.
  *
  * Replace policy: same-size replace is a fast in-place sub-update
@@ -30,7 +30,7 @@
  * guard certifies no bindless-sampling Submit is in flight, or — for
  * standalone builds with no guard — 2 drained frames pass. A submitted
  * batch/pane CB that still samples the old slot must never meet a
- * FreeMemory under it (Rule 39 net: GPU page-fault on freed memory).
+ * FreeMemory under it (the Ecosystem Vulkan Safety Nets Law net: GPU page-fault on freed memory).
  *
  * SLOT RECORD (retired row — behaviorless, owned by the retire ring):
  * ----------------------------------------------------------------------------
@@ -51,7 +51,7 @@
  * Core Functions:
  *   - Texture_initModule(instance, gpa, phys, device, queue, queueFamily)
  *   - Texture_shutdown(void)            : bounded-drain retire ring, then
- *                                         live slots, pool, descriptors (Rule 26)
+ *                                         live slots, pool, descriptors (the Teardown Order Law)
  *   - Texture_load(vfsPath)
  *   - Texture_loadRaw(rgbaData, width, height)
  *   - Texture_updateSubRaw(id, rgbaData, x, y, width, height)
@@ -60,7 +60,7 @@
  *                                           retire path (resize -> new handles
  *                                           + ring the old ones)
  *   - Texture_free(id)                  : ring the slot, do not destroy inline
- *     (Rule 39 net: load/loadRaw/updateSubRaw/replaceRaw guard the driver
+ *     (the Ecosystem Vulkan Safety Nets Law net: load/loadRaw/updateSubRaw/replaceRaw guard the driver
  *      at entry; submit seams pass the live queue per VkGuard contract)
  *
  * Getters:
@@ -68,17 +68,17 @@
  *   - Texture_getDescriptorSet(void)
  *   - Texture_getDescriptorSetLayout(void)
  *   - Texture_getSize(id, outW, outH)
- *   - Texture_maxBoundId(void)       — Rule 39: ceiling for draw-site texId clamps
+ *   - Texture_maxBoundId(void)       — the Ecosystem Vulkan Safety Nets Law: ceiling for draw-site texId clamps
  *   - Texture_retireDepth(void)      — live retire-ring occupancy [0, 8]
- *   - Texture_retireCapacity(void)   — RETIRE_MAX 8 (bounded, Rule 27)
+ *   - Texture_retireCapacity(void)   — RETIRE_MAX 8 (bounded, the Bounded Wait Law)
  *   - Texture_frameSeq(void)         — retire frame clock (2-frame reap proof)
  *
  * Setters:
  *   - Texture_setRetireGuard(guard)  — bind the sampler-flight destroy probe
- *     (Rule 33 downward callback; registered by the compositor, null in
+ *     (the Conflict Triage Law downward callback; registered by the compositor, null in
  *     standalone/headless builds -> CPU-lag fallback)
  * Slot mutation still flows only through load/replace/free core verbs.
- * Cold validation (Rule 35): null data, zero width/height, id OOB, and
+ * Cold validation (the Cold-Strict, Hot-Minimal Validation Law): null data, zero width/height, id OOB, and
  * width*height*4 overflow reject loudly once at entry (return -1/false);
  * hot upload paths carry the nullptr entry guard only, zero per-texel work.
  * ============================================================================
@@ -124,7 +124,7 @@ static VkFence s_retireFence[TEXTURE_RETIRE_MAX];
 static uint64_t s_retireSeq[TEXTURE_RETIRE_MAX];
 static int s_retireCount = 0;
 static uint64_t s_frameSeq = 0;
-// Sampler-flight destroy probe (Rule 33 callback seam, registered by the
+// Sampler-flight destroy probe (the Conflict Triage Law callback seam, registered by the
 // darling compositor): null = legacy standalone mode (CPU-lag fallback).
 static bool (*s_retireGuard)(void) = nullptr;
 
@@ -147,7 +147,7 @@ static uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags proper
 
 // CORE HELPERS (retire ring + bounded upload submit; file-local, no API)
 
-// Cold validator (Rule 35): null/zero/overflow reject once at entry.
+// Cold validator (the Cold-Strict, Hot-Minimal Validation Law): null/zero/overflow reject once at entry.
 // Dest-last: pixel byte count lands in outBytes (may be nullptr).
 static bool textureBytesOk(const void *rgbaData, uint32_t width, uint32_t height, size_t *outBytes) {
     if (rgbaData == nullptr)
@@ -255,7 +255,7 @@ static bool retirePush(VkImage image, VkDeviceMemory memory, VkImageView view, V
     return true;
 }
 
-// Bounded upload tail (Rule 27): per-upload fence, two 100ms waits max,
+// Bounded upload tail (the Bounded Wait Law): per-upload fence, two 100ms waits max,
 // throttled log, drop-degrade false. Never QueueWaitIdle/DEVICE_WAIT_IDLE.
 // Owns the whole submit-or-fail tail: on success the caller tears down its
 // CB + staging normally; on timeout the CB + staging are still flying, so
@@ -414,7 +414,7 @@ void Texture_shutdown(void) {
     VK_LOAD(DestroyCommandPool)
     VK_LOAD(WaitForFences)
 
-    // Rule 26 teardown, Rule 27 bound: the retire ring dies FIRST — one
+    // the Teardown Order Law teardown, the Bounded Wait Law bound: the retire ring dies FIRST — one
     // bounded 100ms wait per fence-carrying row, then force-destroy whatever
     // remains (shutdown is the last resort; the device goes away next).
     // Live slots, pool, and descriptors follow in dependency order.
@@ -1422,7 +1422,7 @@ void Texture_free(int32_t id) {
     s_heights[id] = 0;
 }
 
-// GETTERS (Rule 24: symmetric, null-safe; statics need no guard)
+// GETTERS (the Symmetric Getter/Setter Completeness Law: symmetric, null-safe; statics need no guard)
 
 int32_t Texture_retireDepth(void) {
     return s_retireCount;
@@ -1440,7 +1440,7 @@ void Texture_setRetireGuard(bool (*guard)(void)) {
     s_retireGuard = guard;
 }
 
-// Rule 24 — symmetric introspection for the registered retire guard. Returns
+// the Symmetric Getter/Setter Completeness Law — symmetric introspection for the registered retire guard. Returns
 // NULL when none is bound (standalone fallback path), never blocks.
 bool (*Texture_getRetireGuard(void))(void) {
     return s_retireGuard;

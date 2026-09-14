@@ -14,7 +14,7 @@
  * ============================================================================
  * N Drawable layers + active index + opacity + blend + visibleMask.
  * Max 32 layers bitmask. CPU stub: records layer mutations and marks dirty
- * without rasterizing on GPU. Exposes layers exclusively via Rule 29
+ * without rasterizing on GPU. Exposes layers exclusively via the Sub-Part Field Segregation Law
  * LayeredDrawable_layer* verbs.
  *
  * STRUCT FIELDS (Mirroring draw/layered_drawable.h):

@@ -32,10 +32,10 @@ bool Texture_getSize(int32_t id, uint32_t *outW, uint32_t *outH);
 
 // Returns the number of bound bindless textures: valid IDs are [0, maxBoundId).
 // Draw seams clamp shader texId against this so OOB -1 / exhausted ids never
-// reach the bindless array and fault the GPU (Rule 39 hot-minimal guard).
+// reach the bindless array and fault the GPU (the Ecosystem Vulkan Safety Nets Law hot-minimal guard).
 int32_t Texture_maxBoundId(void);
 
-// Bounded retire-ring introspection (Rule 24 symmetric getters, Rule 27
+// Bounded retire-ring introspection (the Symmetric Getter/Setter Completeness Law symmetric getters, the Bounded Wait Law
 // proof): depth is the live occupancy in [0, retireCapacity]; capacity is
 // the fixed RETIRE_MAX 8; frameSeq is the retire clock (rows reap after
 // fence signal or the retire guard, else the 2-frame CPU-lag fallback).
@@ -44,7 +44,7 @@ int32_t Texture_retireDepth(void);
 int32_t Texture_retireCapacity(void);
 uint64_t Texture_frameSeq(void);
 
-// Retire-guard seam (Rule 33 canonical downward callback — the leaf never
+// Retire-guard seam (the Conflict Triage Law canonical downward callback — the leaf never
 // reaches up for sampler-flight state): the sampler-flight owner (the
 // darling compositor) registers a non-blocking "safe to destroy retired
 // images" probe. retireDrain destroys fence-less rows (free/resize rollovers
@@ -53,14 +53,14 @@ uint64_t Texture_frameSeq(void);
 // with no guard registered. Never blocks, never allocates, headless-safe.
 void Texture_setRetireGuard(bool (*guard)(void));
 
-// Rule 24 symmetric introspection — the currently-registered retire guard,
-// or NULL when none (standalone/texture_retire_test falls back to Rule 32
-// 2-frame CPU lag). Never blocks, Rule 35-cold.
+// the Symmetric Getter/Setter Completeness Law symmetric introspection — the currently-registered retire guard,
+// or NULL when none (standalone/texture_retire_test falls back to the Bounded Wait Law
+// 2-frame CPU lag). Never blocks, the Cold-Strict, Hot-Minimal Validation Law-cold.
 bool (*Texture_getRetireGuard(void))(void);
 
-// Rule 24 symmetric introspection: the currently-registered retire guard,
+// the Symmetric Getter/Setter Completeness Law symmetric introspection: the currently-registered retire guard,
 // or NULL when none (callers then rely on the 2-frame CPU lag fallback).
-// Never blocks. Texture_getRetireGuard() is null-safe (Rule 24).
+// Never blocks. Texture_getRetireGuard() is null-safe (the Symmetric Getter/Setter Completeness Law).
 bool (*Texture_getRetireGuard(void))(void);
 
 #endif // ANTI_TEXTURE_H

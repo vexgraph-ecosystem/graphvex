@@ -6,14 +6,14 @@
 
 // vulkan/vk_layer.h — retained offscreen render-target registry ("layers").
 //
-// COMPOSITED scenes (Present-On-Demand law, Rule 14): a scene renders into a
+// COMPOSITED scenes (the Present-On-Demand Law): a scene renders into a
 // fixed pixel-size offscreen flight target on the present worker
 // (VkLayer_visit), then the canvas painter samples its last-published image
 // as a textured quad (VkLayer_composite) into the board pass at the scene's
 // anchor rect. One canvas total — no per-scene CAMetalLayer surfaces. DIRECT
 // scenes keep their own CAMetalLayer + VkPane swapchain instead.
 //
-// structural invariant (Rule 14): composite != render — visit() invokes the
+// structural invariant (the Present-On-Demand Law): composite != render — visit() invokes the
 // scene's render handler into its retained target; composite() only copies
 // published pixels. The canvas can never re-invoke a scene render.
 //
@@ -37,14 +37,14 @@ bool VkLayer_unregister(int index);
 
 // Resize a layer flight target. No-op (returns true) when the size is
 // unchanged — the whole point: a fixed-size layer NEVER rebuilds on window
-// resize (Rule 11.5). Rebuilds the offscreen targets only on true drift.
+// resize (the Pane-of-Glass Law). Rebuilds the offscreen targets only on true drift.
 // Thread 0 only.
 bool VkLayer_resize(int index, int width, int height);
 
 // Render every registered dirty layer into its offscreen flight target on
 // the present worker's queue — the same queue whose board pass composites
-// them. Non-blocking fence polls (Rule 27; drop-degrade keeps the last
-// published image); clean layers rest on their last render (Rule 14).
+// them. Non-blocking fence polls (the Bounded Wait Law; drop-degrade keeps the last
+// published image); clean layers rest on their last render (the Present-On-Demand Law).
 // Returns true if at least one layer was (re)rendered.
 bool VkLayer_visit(void);
 
@@ -69,16 +69,16 @@ int VkLayer_count(void);
 uint64_t VkLayer_presentCount(int index);
 uint64_t VkLayer_skipCount(int index);
 
-// Per-layer repaint demand (slot-record bit, Rule 3 — no new class).
-// Setter takes (index, dirty): selector first, value last (Rule 9 dest-last
+// Per-layer repaint demand (slot-record bit, the Single Class Per File Law — no new class).
+// Setter takes (index, dirty): selector first, value last (the Dest-Last Law dest-last
 // idiom, cf. Panel_setSize). Boolean getter answers the symmetric probe
-// (Rule 24). Register/resize set demand; the visit walk clears it after a
+// (the Symmetric Getter/Setter Completeness Law). Register/resize set demand; the visit walk clears it after a
 // successful render; thread 0 (or the preFrame bridge) sets it when the
 // scene tree dirties. A clean layer is skipped after its fence poll.
 void VkLayer_markDirty(int index, bool dirty);
 bool VkLayer_isDirty(int index);
 
-// Flight probe for texture-retire safety (Rule 39 net): true only when no
+// Flight probe for texture-retire safety (the Ecosystem Vulkan Safety Nets Law net): true only when no
 // layer submit is pending anywhere in the registry — no offscreen CB that
 // sampled bindless descriptors is still executing. Non-blocking
 // GetFenceStatus poll, never waits/allocs; a busy answer safely defers
@@ -86,7 +86,7 @@ bool VkLayer_isDirty(int index);
 bool VkLayer_flightIdle(void);
 
 // Teardown: destroy all layer targets + composite pipeline + sampler.
-// MUST run before the instance dies (Rule 26), called by Vk_shutdown.
+// MUST run before the instance dies (the Teardown Order Law), called by Vk_shutdown.
 void VkLayer_shutdown(void);
 
 // Global renderer hook set by the UI compositor (darling). Invoked per layer

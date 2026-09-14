@@ -15,7 +15,7 @@
 // A LayeredVectorDrawable is the multi-layer vector board: an array of owned
 // VectorDrawable layers with per-layer opacity, blend mode, and a 32-bit visibility
 // bitmask. Layers are exposed exclusively through LayeredVectorDrawable_layer* verbs
-// per Rule 29. Renders visible vector layers onto a destination raster Drawable.
+// per the Sub-Part Field Segregation Law. Renders visible vector layers onto a destination raster Drawable.
 
 #ifndef LAYER_BLEND_NORMAL
 #define LAYER_BLEND_NORMAL   0u
@@ -55,7 +55,7 @@ bool LayeredVectorDrawable_removeLayer(LayeredVectorDrawable *self, uint32_t ind
 void LayeredVectorDrawable_render(LayeredVectorDrawable *self, Drawable *dest);
 VectorDrawable *LayeredVectorDrawable_activeLayer(LayeredVectorDrawable *self);
 
-// Layer Part Verbs (Rule 29)
+// Layer Part Verbs (the Sub-Part Field Segregation Law)
 VectorDrawable *LayeredVectorDrawable_layerGet(const LayeredVectorDrawable *self, uint32_t index);
 void LayeredVectorDrawable_layerSetOpacity(LayeredVectorDrawable *self, uint32_t index, float opacity);
 float LayeredVectorDrawable_layerGetOpacity(const LayeredVectorDrawable *self, uint32_t index);

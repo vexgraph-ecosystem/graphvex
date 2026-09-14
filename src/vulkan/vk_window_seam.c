@@ -5,7 +5,7 @@
 // vulkan/vk_window_seam.c — the Window-system seam glue.
 //
 // graphvex (the graphics foundation layer) must NEVER include headers from
-// hotcwap, darling, or api-haven (Rule 17). But Vk_init / presentFrameLocked
+// hotcwap, darling, or api-haven (the Vertical Integration Law). But Vk_init / presentFrameLocked
 // need to interact with the OS window — for surface creation, pacing, resize
 // detection, etc. So the host (hotcwap) registers opaque callbacks here
 // before calling Vk_init, and graphvex calls through them via the Vk_seam*
