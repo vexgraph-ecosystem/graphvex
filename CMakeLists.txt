@@ -52,6 +52,7 @@ add_library(graphvex STATIC
     src/io/vfs.c
     src/vulkan/sdf_gpu.c
     src/vulkan/graphics_layer.c
+    src/vulkan/spv_watch.c
     src/vulkan/vk_instance.c
     src/vulkan/vk_mac.c
     src/vulkan/vk_layer.c
