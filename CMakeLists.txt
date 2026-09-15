@@ -38,6 +38,7 @@ endif()
 if(NOT TARGET graphvex)
 add_library(graphvex STATIC
     src/graphvex/version.c
+    src/graphvex/gfx_loop.c
     src/buffer/buffer.c
     src/buffer/color_buffer.c
     src/buffer/depth_buffer.c
@@ -50,6 +51,7 @@ add_library(graphvex STATIC
     src/font/font_bake.c
     src/io/vfs.c
     src/vulkan/sdf_gpu.c
+    src/vulkan/graphics_layer.c
     src/vulkan/vk_instance.c
     src/vulkan/vk_mac.c
     src/vulkan/vk_layer.c
@@ -109,8 +111,9 @@ endif()
 if(APPLE)
     target_sources(graphvex PRIVATE
         src/objc/font_cocoa.m
+        src/objc/graphics_layer_cocoa.m
     )
-    set_source_files_properties(src/objc/font_cocoa.m PROPERTIES
+    set_source_files_properties(src/objc/font_cocoa.m src/objc/graphics_layer_cocoa.m PROPERTIES
         COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(graphvex PUBLIC
         "-framework CoreFoundation"
@@ -138,6 +141,15 @@ if(EXISTS "${GRAPHVEX_TEST_DIR}/buffer_test.c" AND NOT TARGET buffer_test)
     target_link_libraries(buffer_test PRIVATE graphvex)
 endif()
 
+# GraphicsLayer board-shim seam test: headless cold-boundary matrix
+# (nullptr/hostile-size/role/pulse). Pure-C side only, no GPU, no AppKit.
+if(EXISTS "${GRAPHVEX_TEST_DIR}/graphics_layer_test.c" AND NOT TARGET graphics_layer_test)
+    add_executable(graphics_layer_test
+        ${GRAPHVEX_TEST_DIR}/graphics_layer_test.c
+    )
+    target_link_libraries(graphics_layer_test PRIVATE graphvex)
+    target_compile_options(graphics_layer_test PRIVATE -Wall -Wextra -Werror)
+endif()
 # Texture retire-ring contract test: headless cold-validation matrix
 # (nullptr/wrong-id/zero-size/overflow) + retire depth/capacity/seq defaults
 # + shutdown-with-no-flight. Links graphvex; needs no GPU.
