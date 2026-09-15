@@ -17,7 +17,7 @@
 // carry PROJ_GRAPHVEX and must be used at runtime dispatch; bare ID_*
 // constants name vexspoke's own class space only. New graphvex classes
 // take the next free number below — never invent an out-of-registry
-// window (Rule 6: the collision that id space causes is a defect).
+// window (the One Type Registry Law: the collision that id space causes is a defect).
 
 // --- GRAPHVEX GPU OBJECTS (numbered 1..N, uniform per-project) ---
 #define ID_FONT	1u
@@ -44,6 +44,7 @@
 #define ID_PIPELINE	22u
 #define ID_PASS	23u
 #define ID_FRAME_IMPORTER	24u
+#define ID_GRAPHICS_LAYER	25u
 
 #define TYPE_FONT_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_FONT)
 #define TYPE_IMAGE_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_IMAGE)
@@ -69,5 +70,6 @@
 #define TYPE_PIPELINE_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_PIPELINE)
 #define TYPE_PASS_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_PASS)
 #define TYPE_FRAME_IMPORTER_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_FRAME_IMPORTER)
+#define TYPE_GRAPHICS_LAYER_SINGLETON	(PROJ_GRAPHVEX | FORM_SINGLETON | ID_GRAPHICS_LAYER)
 
 #endif
