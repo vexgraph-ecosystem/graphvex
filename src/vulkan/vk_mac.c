@@ -86,7 +86,7 @@ static VkRenderPass s_iosurfacePass = VK_NULL_HANDLE;
 
 // Load the Vulkan loader library (MoltenVK on macOS, Khronos loader fallback).
 void *VkMac_loadLib(void) {
-    // === Rule 39: MoltenVK debug config in Debug builds ===
+    // === the Ecosystem Vulkan Safety Nets Law: MoltenVK debug config in Debug builds ===
 #if defined(DEBUG) || defined(_DEBUG)
     // MVK_CONFIG_API_DEBUG: MoltenVK emits debug callbacks (vkDebugUtilsMessenger)
     // MVK_CONFIG_LOG_LEVEL: 3 = verbose (trace every Vulkan -> Metal translation)
@@ -194,5 +194,8 @@ VkRenderPass VkMac_getIOSurfacePass(void) {
 // Resize render trampoline: attempts a synchronized present on thread 0 during OS resize.
 void VkMac_resizeRenderTrampoline(void *userdata) {
     (void) userdata;
-    Vk_clearPresent();
+    extern int VkPane_count(void);
+    if (VkPane_count() == 0) {
+        Vk_clearPresent();
+    }
 }

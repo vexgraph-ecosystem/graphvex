@@ -1,6 +1,7 @@
 #include <vulkan/vulkan_core.h>
 #include "vulkan/vk_pane.h"
 #include "vulkan/vk.h"
+#include "vulkan/vk_window_seam.h"
 #include "vulkan/vk_mac.h"
 #include "vulkan/vk_guard.h"
 #include "annotation/overview.h"
@@ -42,7 +43,7 @@
  *   - VkPane_resize(index, w, h)            : swapchain rebuild (pane size)
  *                                            (marks chain dirty on rebuild)
  *   - VkPane_presentAll()                   : acquire+render+present per pane
- *                                            (Rule 39 seam guard at entry;
+ *                                            (the Ecosystem Vulkan Safety Nets Law seam guard at entry;
  *                                            skips clean chains after fence
  *                                            poll, clears demand on present)
  *   - VkPane_shutdown()                     : destroy all chains + pool
@@ -51,11 +52,11 @@
  *   - VkPane_ready() / VkPane_count()
  *   - VkPane_isDirty(index)           : per-chain repaint demand probe
  *   - VkPane_flightIdle()             : true when no pane submit is pending
- *                                       (Rule 39 texture-retire drain probe)
+ *                                       (the Ecosystem Vulkan Safety Nets Law texture-retire drain probe)
  *
  * Setters:
  *   - VkPane_setRenderer(fn)
- *   - VkPane_markDirty(index, dirty)  : per-chain repaint demand (Rule 24
+ *   - VkPane_markDirty(index, dirty)  : per-chain repaint demand (the Symmetric Getter/Setter Completeness Law
  *                                       symmetric pair with isDirty)
  * ============================================================================
  */
@@ -76,7 +77,7 @@ extern bool s_instanceDebugUtils;   // set when VK_EXT_debug_utils is live on th
         name##_fn = (PFN_vk##name)s_instanceGdpa(s_instanceDevice, "vk" #name); \
     }
 
-// Rule 39 seam naming: label each pane submit's MTLCommandBuffer so a device-lost
+// the Ecosystem Vulkan Safety Nets Law seam naming: label each pane submit's MTLCommandBuffer so a device-lost
 // log names the pane chain instead of the generic "vkQueueSubmit" string.
 static void VkPane_nameObject(VkObjectType type, uint64_t handle, const char *name) {
     if (!s_instanceDevice || handle == 0 || !s_instanceDebugUtils)
@@ -124,14 +125,14 @@ typedef struct VkPaneChain {
                              // cleared after a successful present (slot record)
     uint64_t presentCount;   // lifetime successful presents (diagnostic)
     uint64_t skipCount;      // lifetime fence-poll + clean skips, stale kept (diagnostic)
-    uint64_t fenceTimeoutNs; // 100ms bounded (Rule 27)
+    uint64_t fenceTimeoutNs; // 100ms bounded (the Bounded Wait Law)
 } VkPaneChain;
 
 static VkPaneChain s_chains[VK_PANE_CHAIN_MAX] = {0};
 // Registry lock (two-thread live-resize contract): the present worker runs
 // VkPane_presentAll every frame while thread 0 may VkPane_resize (settle) or
 // VkPane_unregister (teardown). All structural mutation and the present
-// iteration serialize here; the waits inside remain bounded (Rule 27).
+// iteration serialize here; the waits inside remain bounded (the Bounded Wait Law).
 static SpinLock s_paneLock = SPIN_LOCK_INIT;
 static int s_count = 0;
 static VkRenderPass s_panePass = VK_NULL_HANDLE;
@@ -159,8 +160,8 @@ uint64_t VkPane_skipCount(int index) {
     return s_chains[index].skipCount;
 }
 
-// Setters / getters for the per-chain repaint-demand bit (Rule 24 symmetric
-// pair; selector first, value last per Rule 9). Lock-free single-byte stores
+// Setters / getters for the per-chain repaint-demand bit (the Symmetric Getter/Setter Completeness Law symmetric
+// pair; selector first, value last per the Dest-Last Law). Lock-free single-byte stores
 // matching the presentCount/skipCount diagnostic pattern: the worker reads
 // and clears under the registry lock while the bridge sets from outside —
 // a missed mark only delays one repaint to the next tick (drop-degrade).
@@ -182,7 +183,7 @@ bool VkPane_isDirty(int index) {
     return (*chain).dirty;
 }
 
-// Rule 39 flight probe: true only when every pane's last submit fence is
+// the Ecosystem Vulkan Safety Nets Law flight probe: true only when every pane's last submit fence is
 // signaled — no pane CB that sampled bindless descriptors is still executing.
 // Non-blocking: GetFenceStatus poll only, under a try of the registry lock
 // (a worker mid-present answers busy, safely deferring destroys rather than
@@ -314,12 +315,11 @@ static bool buildPaneSwapchain(VkPaneChain *chain, bool transparent) {
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount)
         imageCount = caps.maxImageCount;
 
-    uint32_t w = caps.currentExtent.width;
-    uint32_t h = caps.currentExtent.height;
-    if (chain->extent.width > 0 && chain->extent.height > 0
-        && (w == 0 || h == 0)) {
-        w = chain->extent.width;
-        h = chain->extent.height;
+    uint32_t w = chain->extent.width;
+    uint32_t h = chain->extent.height;
+    if (w == 0 || h == 0 || w == UINT32_MAX || h == UINT32_MAX) {
+        w = caps.currentExtent.width;
+        h = caps.currentExtent.height;
     }
 
     // The pane pass must be rebuilt when the negotiated format differs.
@@ -565,7 +565,7 @@ bool VkPane_unregister(int index) {
 
     VkPaneChain *chain = &s_chains[index];
 
-    // Bounded wait for in-flight present before teardown (Rule 27): both
+    // Bounded wait for in-flight present before teardown (the Bounded Wait Law): both
     // flight slots drain, so neither record buffer can be RETIRED under.
     VK_LAYER_LOAD_DEVICE(WaitForFences)
     if ((*chain).chain != VK_NULL_HANDLE) {
@@ -617,7 +617,7 @@ bool VkPane_resize(int index, int width, int height) {
     }
     if (chain->extent.width == (uint32_t)width && chain->extent.height == (uint32_t)height) {
         SpinLock_unlock(&s_paneLock);
-        return true; // fixed pane: no rebuild on window resize (Rule 11)
+        return true; // fixed pane: no rebuild on window resize (the Pane-of-Glass Law)
     }
 
     // Bound the wait on in-flight presents (both flight slots) before
@@ -628,6 +628,7 @@ bool VkPane_resize(int index, int width, int height) {
             WaitForFences_fn(s_instanceDevice, 1, &(*chain).fence[s], VK_TRUE, (*chain).fenceTimeoutNs);
     }
     destroyPaneSwapchain(chain);
+    chain->extent = (VkExtent2D){ .width = (uint32_t)width, .height = (uint32_t)height };
     bool ok = buildPaneSwapchain(chain, true);
     if (ok)
         (*chain).dirty = true; // rebuilt chain demands a repaint
@@ -636,11 +637,17 @@ bool VkPane_resize(int index, int width, int height) {
 }
 
 bool VkPane_presentAll(void) {
-    // Rule 39 seam guard: panes submit to the shared queue every frame; a
+    // the Ecosystem Vulkan Safety Nets Law seam guard: panes submit to the shared queue every frame; a
     // dead/nulled device must never be handed pane work. Debug net only.
     if (!VkGuard_check("VkPane_presentAll", Vk_getDevice(), Vk_getQueue(), Vk_isDeviceLost()))
         return false;
     if (!s_renderer || s_count == 0 || !s_instanceDevice)
+        return false;
+    // Minimize gate: the genie miniaturize/restore animation re-snapshots the
+    // layer; presenting pane children through it paints the "trail of
+    // windows" ghosting. Drop the frame, keep dirty — present returns on
+    // restore.
+    if (Vk_seamIsMinimized())
         return false;
 
     SpinLock_lock(&s_paneLock);
@@ -681,8 +688,8 @@ bool VkPane_presentAll(void) {
         // the chain and keep its last drawable on screen — never block the
         // walk (a sequential bounded wait here parks every later chain, and
         // during live resize the layers must keep moving while scenes catch
-        // up next tick). Non-blocking poll only: drop-degrade per Rule 27,
-        // zero logging per Rule 35 hot-minimal.
+        // up next tick). Non-blocking poll only: drop-degrade per the Bounded Wait Law,
+        // zero logging per the Cold-Strict, Hot-Minimal Validation Law hot-minimal.
         if (GetFenceStatus_fn(s_instanceDevice, fence) != VK_SUCCESS) {
             (*chain).skipCount++;
             continue;
@@ -702,7 +709,7 @@ bool VkPane_presentAll(void) {
                                              (*chain).semAcquire, VK_NULL_HANDLE, &imageIndex);
         if (ar == VK_ERROR_OUT_OF_DATE_KHR) {
             // LIVE RESIZE NOTE: this path is UNREACHABLE during live resize.
-            // Pane pixel extent is FIXED at register/resize time (Rule 11):
+            // Pane pixel extent is FIXED at register/resize time (the Pane-of-Glass Law):
             // VkPane_resize is a no-op when the requested size is unchanged,
             // so the swapchain never reports OUT_OF_DATE mid-drag. The board
             // swapchain handles live resize; panes present at 60fps into their

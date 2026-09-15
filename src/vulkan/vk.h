@@ -39,7 +39,8 @@ void Vk_setWindowSeam(
     uint64_t (*renderGenerationFn)(void *w),
     bool (*isLiveResizingFn)(void *w),
     void (*setResizeRenderHookFn)(void *w, void *fn, void *userdata),
-    void (*setGravityTopLeftFn)(void *w)
+    void (*setGravityTopLeftFn)(void *w),
+    bool (*isMinimizedFn)(void *w)
 );
 
 // Init: Vk_setWindowSeam must be called first. Returns false if the

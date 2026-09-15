@@ -61,18 +61,19 @@
   *   - Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, x, y, w, h, r, g, b, a, textureId, mode, imgW, imgH)
   *   - Vk_drawSDFText(cmdBuffer, surfaceW, surfaceH, x, y, w, h, r, g, b, a, textureId, bold, smoothness, u0, v0, u1, v1)
   *   - Vk_drawColorGlyph(cmdBuffer, surfaceW, surfaceH, x, y, w, h, alpha, textureId, u0, v0, u1, v1)
-  *   - (Rule 39 net: drawTexture / drawSDFText / drawColorGlyph clamp textureId
+  *   - (the Ecosystem Vulkan Safety Nets Law net: drawTexture / drawSDFText / drawColorGlyph clamp textureId
   *     against Texture_maxBoundId() so OOB ids never reach the bindless sampler)
   *   - rebuildTargets(void)
   *   - destroyTargets(void)
   *   - buildPipelines(void)
- *   - presentFrameLocked(void)     : board present chain (Rule 39 seam guard;
- *                                    present-frozen-chain mid-drag: no rebuild,
- *                                    OUT_OF_DATE drops one board frame)
+ *   - presentFrameLocked(void)     : board present chain (the Ecosystem Vulkan Safety Nets Law seam guard;
+ *                                    continuous-chase mid-drag: caps-drift
+ *                                    rebuilds at throttle rate, OUT_OF_DATE
+ *                                    rebuilds + retries inline)
  *   - presentNote(reason)
  *   - presentNoteCode(what, code)
  *   - presentRefenceSignaled(void)
- *   - Vk_presentFlightIdle(void)     : Rule 39 flight probe — true when the
+ *   - Vk_presentFlightIdle(void)     : the Ecosystem Vulkan Safety Nets Law flight probe — true when the
  *                                      present submit fence is signaled (the
  *                                      board present CB that may sample
  *                                      bindless via the frame renderer has
@@ -297,7 +298,7 @@ static void *s_libLoad(void) {
     static PFN_vk##name name##_fn; \
     name##_fn = s_gdpa ? (PFN_vk##name)s_gdpa(s_device, "vk" #name) : (PFN_vk##name)s_gpa(s_instance, "vk" #name);
 
-// Rule 39 seam naming: vkSetDebugUtilsObjectNameEXT (VK_EXT_debug_utils) gives
+// the Ecosystem Vulkan Safety Nets Law seam naming: vkSetDebugUtilsObjectNameEXT (VK_EXT_debug_utils) gives
 // every submit's MTLCommandBuffer a human name, so MoltenVK's device-lost log
 // identifies the faulting seam instead of the generic "vkQueueSubmit" label.
 // Gated on s_instanceDebugUtils — some MoltenVK builds are unsupported for the
@@ -318,14 +319,14 @@ static void Vk_nameObject(VkObjectType type, uint64_t handle, const char *name) 
     nameFn(s_device, &info);
 }
 
-// === Rule 39: Exhaustive Vulkan debug/validation in Debug builds ===
+// === the Ecosystem Vulkan Safety Nets Law: Exhaustive Vulkan debug/validation in Debug builds ===
 //  - VK_LAYER_KHRONOS_validation (core validation)
 //  - GPU-assisted (device-side instrumentation, shader instrumentation)
 //  - Best practices (MVK performance warnings, layout feedback)
 //  - Debug utils object naming (seam labels)
 //  - MoltenVK marker extension (MVK_CONFIG_API_DEBUG, trace logging)
 //  - Strict stdbool logging of every VkResult in debug builds
-// In Release these are all compiled out via the safety ribbon (Rule 40).
+// In Release these are all compiled out via the safety ribbon (the Dynamic Scalability & Anti-Hardcoding Law).
 // ------------------------------------------------------------------
 
 #if defined(DEBUG) || defined(_DEBUG)
@@ -447,9 +448,9 @@ bool Vk_init(void) {
     app.pApplicationName = "vex";
     app.apiVersion = VK_API_VERSION_1_2;
 
-    // === Rule 39: Validation layers in Debug builds ===
+    // === the Ecosystem Vulkan Safety Nets Law: Validation layers in Debug builds ===
     // VK_LAYER_KHRONOS_validation + GPU-assisted + best-practices.
-    // Tree-shaken by the release safety ribbon (Rule 40) via #if guard.
+    // Tree-shaken by the release safety ribbon (the Dynamic Scalability & Anti-Hardcoding Law) via #if guard.
 #if defined(DEBUG) || defined(_DEBUG)
     static const char *validationLayers[] = {
         "VK_LAYER_KHRONOS_validation"
@@ -541,7 +542,7 @@ bool Vk_init(void) {
     }
 
     // 5. logical device — request VK_EXT_debug_utils ONLY when this driver
-    // exposes it (Rule 39 seam naming). An unsupported request is dropped by
+    // exposes it (the Ecosystem Vulkan Safety Nets Law seam naming). An unsupported request is dropped by
     // MoltenVK yet leaves vkSetDebugUtilsObjectNameEXT on a non-debug device,
     // which segfaults on call. nDev drives enabledExtensionCount accordingly.
     VK_LOAD_INSTANCE(EnumerateDeviceExtensionProperties)
@@ -949,7 +950,7 @@ void Vk_shutdown(void) {
         return;
     if (s_device != VK_NULL_HANDLE) {
         // Retained offscreen layer targets + per-pane CAMetalLayer chains
-        // first; board targets last (Rule 26: destroy top-down, free last).
+        // first; board targets last (the Teardown Order Law: destroy top-down, free last).
         VkLayer_shutdown();
         VkPane_shutdown();
         destroyTargets();
@@ -1577,7 +1578,7 @@ bool Vk_isDeviceLost(void) {
     return s_deviceLost;
 }
 
-// Rule 39 flight probe: the present fence s_fence starts SIGNALED and is
+// the Ecosystem Vulkan Safety Nets Law flight probe: the present fence s_fence starts SIGNALED and is
 // pending only between a successful submit and that frame's drain, so this
 // non-blocking poll reports "no present CB executing" truthfully — never
 // presented => idle, submit in flight/device lost => busy (defers destroys),
@@ -1617,8 +1618,8 @@ bool Vk_clearPresent(void) {
 static bool presentFrameTail(uint32_t imageIndex);
 
 static bool presentFrameLocked(void) {
-    // Rule 39 seam guard: never touch the driver on a broken health chain.
-    // Debug net (NDEBUG-stripped); release ships Rule 35 hot-minimal only.
+    // the Ecosystem Vulkan Safety Nets Law seam guard: never touch the driver on a broken health chain.
+    // Debug net (NDEBUG-stripped); release ships the Cold-Strict, Hot-Minimal Validation Law hot-minimal only.
     if (!VkGuard_check("presentFrameLocked", s_device, s_queue, s_deviceLost))
         return false;
     if (!Vk_ready() || !s_pipelinesBuilt) {
@@ -1626,15 +1627,22 @@ static bool presentFrameLocked(void) {
         return false;
     }
 
-    // PRESENT-FROZEN-CHAIN (Rule 11.6): mid-drag the board swapchain stays at
-    // its frozen extent — no rebuild per drag frame (the size-proportional
-    // lag defect). The pass below keeps presenting the current chain: the
-    // CAMetalLayer stretches it to the live bounds (Resize gravity, applied
-    // CA-side with zero worker work) while panes keep rendering into their
-    // fixed chains. Caps drift and render-gen drift both defer to settle;
-    // an OUT_OF_DATE acquire mid-drag drops exactly one board frame and the
-    // settle pass rebuilds once at the true final size. Fence (100ms) and
-    // acquire (25ms) bounds stay (Rules 27/39).
+    // Minimize gate: the genie miniaturize/restore animation re-snapshots the
+    // layer; presenting through it paints a "trail of windows" ghost trail.
+    // Drop the frame (keep dirty state — the caller retries after restore),
+    // never rebuild, never touch the driver while off-screen.
+    if (Vk_seamIsMinimized()) {
+        presentNote("minimized (present suppressed)");
+        return false;
+    }
+
+    // the Continuous Real-Time Live Resize Law CONTINUOUS-CHASE (live resize): every applied drag step
+    // already chased drawableSize on thread 0 (setFrameSize /
+    // windowDidResize), so surface caps drift off the chain here and the
+    // extent block below rebuilds at the throttle rate — the pass keeps
+    // presenting the freshest chain at worker cadence, TopLeft-pinned, no
+    // stretch, no settle-only jump. Fence (100ms) and acquire (25ms)
+    // bounds stay (the Bounded Wait Law / the Ecosystem Vulkan Safety Nets Law).
 
     // Retire the PREVIOUS frame through its fence BEFORE touching the chain.
     // Bounded wait: if the surface died (e.g. fullscreen close yanked the
@@ -1674,9 +1682,8 @@ static bool presentFrameLocked(void) {
     }
 
     // Policy drift (presentMode / transparent changed) wants a fresh chain.
-    // During live resize the render-gen drift is expected; rebuild defers to
-    // settle (defense-in-depth with Window_setGravityTopLeft's live-resize
-    // guard: prevents rebuildTargets -> Window_setGravityTopLeft mid-drag).
+    // Policy is not size: it applies off-drag. (Extent drift — the actual
+    // resize signal — rebuilds in the caps block below regardless of drag.)
     if (s_window) {
         uint64_t renderGen = Vk_seamRenderGeneration();
         if (renderGen != s_appliedRenderGen && !Vk_seamIsLiveResizing() && !rebuildTargets()) {
@@ -1693,11 +1700,11 @@ static bool presentFrameLocked(void) {
     if (!s_hzInit) {
         s_hzInit = 1;
         const char *hzEnv = getenv("ANTI_RESIZE_HZ");
-        // Default 30Hz: bounds swapchain rebuilds across rapid NON-live
-        // resizes (programmatic resize floods). Mid-drag the live gate below
-        // skips the rebuild and keeps presenting the frozen chain, so a drag
-        // costs zero rebuilds and settles exactly once. The CAMetalLayer
-        // panes never rebuild anyway (Rule 11).
+        // Default 30Hz: bounds swapchain rebuilds across rapid extents
+        // (programmatic resize floods, drag steps). Between rebuilds the
+        // worker keeps presenting the freshest chain, so a drag costs
+        // throttled rebuilds and tracks live. The CAMetalLayer
+        // panes never rebuild anyway (the Pane-of-Glass Law).
         int hz = hzEnv ? atoi(hzEnv) : 30;
         s_minRebuildGapNs = hz > 0 ? (int64_t)(1000000000LL / hz) : 0;
     }
@@ -1705,31 +1712,17 @@ static bool presentFrameLocked(void) {
     memset(&live, 0, sizeof(live));
     if (GetPhysicalDeviceSurfaceCapabilitiesKHR_fn(s_phys, s_surface, &live) == VK_SUCCESS
         && (live.currentExtent.width != s_extent.width || live.currentExtent.height != s_extent.height)) {
-        // LIVE RESIZE GATE (present-frozen-chain): during an active drag the
-        // renderer keeps PRESENTING the current chain — the CAMetalLayer
-        // scales it to the live window frame while thread 0 moves pane
-        // layers, and no rebuild happens (a rebuild per drag frame is the
-        // size-proportional lag). On settle (viewDidEndLiveResize) the flag
-        // clears, the drawable lands at the final size, and the next pass
-        // rebuilds exactly once.
-        if (Vk_seamIsLiveResizing()) {
-            s_lastRebuildNs = 0;
-        } else {
-            uint64_t nowNs = NanoTime_now();
-            if (s_lastRebuildNs != 0 && s_minRebuildGapNs > 0
-                && nowNs - s_lastRebuildNs < (uint64_t)s_minRebuildGapNs) {
-                presentNote("rebuild throttled on extent drift");
-                return false;
-            }
-            fprintf(stderr, "vk: extent moved %ux%u -> %ux%u; rebuilding\n",
-                    s_extent.width, s_extent.height,
-                    live.currentExtent.width, live.currentExtent.height);
-            if (!rebuildTargets()) {
-                presentNote("extent rebuild failed");
-                return false;
-            }
-            s_lastRebuildNs = NanoTime_now();
+        uint64_t nowNs = NanoTime_now();
+        if (s_lastRebuildNs != 0 && s_minRebuildGapNs > 0
+            && nowNs - s_lastRebuildNs < (uint64_t)s_minRebuildGapNs) {
+            presentNote("rebuild throttled on extent drift");
+            return false;
         }
+        if (!rebuildTargets()) {
+            presentNote("extent rebuild failed");
+            return false;
+        }
+        s_lastRebuildNs = NanoTime_now();
     } else {
         s_lastRebuildNs = 0;
     }
@@ -1742,16 +1735,6 @@ static bool presentFrameLocked(void) {
     VkResult ar = AcquireNextImageKHR_fn(s_device, s_swapchain, 25000000ULL /* ~1 frame */,
                                          s_semAcquire, VK_NULL_HANDLE, &imageIndex);
     if (ar == VK_ERROR_OUT_OF_DATE_KHR) {
-        // LIVE RESIZE DEFERRAL: during an active AppKit drag the surface
-        // reports OUT_OF_DATE on every acquire. Rebuilding per drag frame is
-        // the size-proportional lag defect — the CAMetalLayer scales the
-        // current chain to the live frame while thread 0 moves pane layers.
-        // Drop this frame; the settle pass (viewDidEndLiveResize) will rebuild
-        // exactly once at the true final size.
-        if (s_window && Vk_seamIsLiveResizing()) {
-            presentNote("out-of-date deferred during live resize");
-            return false;
-        }
         if (!rebuildTargets()) {
             presentNote("out-of-date rebuild failed");
             return false;
@@ -1800,7 +1783,7 @@ static bool presentFrameLocked(void) {
 }
 
 static bool presentFrameTail(uint32_t imageIndex) {
-    // Rule 39 seam guard at the board submit/present boundary (device + queue).
+    // the Ecosystem Vulkan Safety Nets Law seam guard at the board submit/present boundary (device + queue).
     if (!VkGuard_check("presentFrameTail", s_device, s_queue, s_deviceLost))
         return false;
     VK_LOAD_DEVICE(BeginCommandBuffer)
@@ -1820,8 +1803,6 @@ static bool presentFrameTail(uint32_t imageIndex) {
 
     VkCommandBufferBeginInfo bbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     BeginCommandBuffer_fn(s_cmdBuffer, &bbi);
-
-    float uTime = (float)((double)(NanoTime_now() - s_animStartNanos) / 1e9);
 
     // 1. Prep drawable layout: walk to TRANSFER_DST and clear
     VkImageMemoryBarrier toPrep = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -1851,7 +1832,7 @@ static bool presentFrameTail(uint32_t imageIndex) {
                               &cc.color, 1, &rng);
     }
 
-    // 2. Render pass: invoke frame renderer hook, or spinning triangle fallback
+    // 2. Render pass: invoke frame renderer hook (clear-only when none installed)
     {
         VkRenderPassBeginInfo rbi2 = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
         rbi2.renderPass = s_drawablePass;
@@ -1861,18 +1842,8 @@ static bool presentFrameTail(uint32_t imageIndex) {
         CmdBeginRenderPass_fn(s_cmdBuffer, &rbi2, VK_SUBPASS_CONTENTS_INLINE);
     }
 
-    if (s_frameRenderer) {
+    if (s_frameRenderer)
         s_frameRenderer(s_cmdBuffer, (int)s_extent.width, (int)s_extent.height, s_frameRendererUserdata);
-    } else {
-        // Fallback spinning triangle
-        CmdBindPipeline_fn(s_cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, s_triPipeline);
-        VkViewport vp = {0, 0, (float)s_extent.width, (float)s_extent.height, 0.0f, 1.0f};
-        CmdSetViewport_fn(s_cmdBuffer, 0, 1, &vp);
-        VkRect2D sc = { .offset = {0, 0}, .extent = s_extent };
-        CmdSetScissor_fn(s_cmdBuffer, 0, 1, &sc);
-        CmdPushConstants_fn(s_cmdBuffer, s_triLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &uTime);
-        CmdDraw_fn(s_cmdBuffer, 3, 1, 0, 0);
-    }
 
     CmdEndRenderPass_fn(s_cmdBuffer);
 
@@ -1965,7 +1936,7 @@ void Vk_drawTexture(void *cmdBuffer, float surfaceW, float surfaceH,
                     PictureMode mode,
                     float imgW, float imgH) {
     if (!cmdBuffer) return;
-    // Rule 39 hot-minimal clamp: an OOB bindless id (-1 -> 0xFFFFFFFF) reaches
+    // the Ecosystem Vulkan Safety Nets Law hot-minimal clamp: an OOB bindless id (-1 -> 0xFFFFFFFF) reaches
     // u_textures[nonuniformEXT(...)] unclamped and faults the GPU. Skip the quad.
     extern int32_t Texture_maxBoundId(void);
     if (textureId < 0 || (uint32_t)textureId >= (uint32_t)Texture_maxBoundId())
@@ -2229,7 +2200,7 @@ void Vk_drawSDFText(void *cmdBuffer, float surfaceW, float surfaceH,
                     int32_t textureId, float bold, float smoothness,
                     float u0, float v0, float u1, float v1) {
     if (!ensureSdfPipeline()) return;
-    // Rule 39 hot-minimal clamp: an OOB bindless id (-1 -> 0xFFFFFFFF) reaches
+    // the Ecosystem Vulkan Safety Nets Law hot-minimal clamp: an OOB bindless id (-1 -> 0xFFFFFFFF) reaches
     // u_textures[nonuniformEXT(...)] unclamped and faults the GPU. Skip the quad.
     extern int32_t Texture_maxBoundId(void);
     if (textureId < 0 || (uint32_t)textureId >= (uint32_t)Texture_maxBoundId())
@@ -2298,7 +2269,7 @@ void Vk_drawColorGlyph(void *cmdBuffer, float surfaceW, float surfaceH,
                        int32_t textureId,
                        float u0, float v0, float u1, float v1) {
     if (!ensureSdfPipeline()) return;
-    // Rule 39 hot-minimal clamp (see Vk_drawSDFText): never let an OOB id reach
+    // the Ecosystem Vulkan Safety Nets Law hot-minimal clamp (see Vk_drawSDFText): never let an OOB id reach
     // the bindless sampler.
     extern int32_t Texture_maxBoundId(void);
     if (textureId < 0 || (uint32_t)textureId >= (uint32_t)Texture_maxBoundId())

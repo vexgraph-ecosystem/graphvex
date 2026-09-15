@@ -20,6 +20,7 @@ static bool (*s_isTransparentFn)(void *w) = nullptr;
 static VkWindowPresentMode (*s_getPresentModeFn)(void *w) = nullptr;
 static uint64_t (*s_renderGenerationFn)(void *w) = nullptr;
 static bool (*s_isLiveResizingFn)(void *w) = nullptr;
+static bool (*s_isMinimizedFn)(void *w) = nullptr;
 static void (*s_setResizeRenderHookFn)(void *w, void *fn, void *userdata) = nullptr;
 static void (*s_setGravityTopLeftFn)(void *w) = nullptr;
 
@@ -32,7 +33,8 @@ void Vk_setWindowSeam(
     uint64_t (*renderGenerationFn)(void *w),
     bool (*isLiveResizingFn)(void *w),
     void (*setResizeRenderHookFn)(void *w, void *fn, void *userdata),
-    void (*setGravityTopLeftFn)(void *w)
+    void (*setGravityTopLeftFn)(void *w),
+    bool (*isMinimizedFn)(void *w)
 ) {
     s_window = window;
     s_metalLayerFn = metalLayerFn;
@@ -42,6 +44,7 @@ void Vk_setWindowSeam(
     s_isLiveResizingFn = isLiveResizingFn;
     s_setResizeRenderHookFn = setResizeRenderHookFn;
     s_setGravityTopLeftFn = setGravityTopLeftFn;
+    s_isMinimizedFn = isMinimizedFn;
     if (window)
         fprintf(stderr, "vk: window seam installed\n");
 }
@@ -81,6 +84,16 @@ bool Vk_seamIsLiveResizing(void) {
     if (!s_window || !s_isLiveResizingFn)
         return false;
     return s_isLiveResizingFn(s_window);
+}
+
+// True while the window is miniaturized (or mid-genie). The present core
+// drops frames behind this gate: presenting through the miniaturize/restore
+// animation re-snapshots the layer every frame, painting the classic "trail
+// of windows" ghosting into the genie effect.
+bool Vk_seamIsMinimized(void) {
+    if (!s_window || !s_isMinimizedFn)
+        return false;
+    return s_isMinimizedFn(s_window);
 }
 
 void Vk_seamSetResizeRenderHook(void *fn, void *userdata) {

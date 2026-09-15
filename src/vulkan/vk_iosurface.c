@@ -34,7 +34,7 @@
  * ----------------------------------------------------------------------------
  * Constructors:
  *   - VkIOSurface_create(width, height)
- *     (Rule 39 net: export guards the publish seam at entry)
+ *     (the Ecosystem Vulkan Safety Nets Law net: export guards the publish seam at entry)
  *
  * Core Functions:
  *   - VkIOSurface_initModule(instance, gpa, phys, device)
@@ -91,7 +91,7 @@ bool VkIOSurface_initModule(VkInstance instance, PFN_vkGetInstanceProcAddr gpa,
     s_phys = phys;
     s_device = device;
     s_gpa = gpa;
-    s_gdpa = (PFN_vkGetDeviceProcAddr)gpa(instance, "vkGetDeviceProcAddr");
+    s_gdpa = (PFN_vkGetDeviceProcAddr) gpa(instance, "vkGetDeviceProcAddr");
     return s_gdpa != nullptr;
 }
 

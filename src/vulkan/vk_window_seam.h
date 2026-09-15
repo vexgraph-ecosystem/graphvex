@@ -15,6 +15,8 @@
 //   - Transparency state (clear color policy)
 //   - Render generation tracking (swapchain rebuild triggers)
 //   - Live resize detection (present deferral)
+//   - Minimized / occluded detection (present suppression — the genie
+//     minimize animation trails if the swapchain keeps presenting through it)
 //   - Resize render hook installation
 //   - Gravity policy (scissor anchoring)
 //
@@ -40,6 +42,7 @@ bool Vk_seamIsTransparent(void);
 VkWindowPresentMode Vk_seamGetPresentMode(void);
 uint64_t Vk_seamRenderGeneration(void);
 bool Vk_seamIsLiveResizing(void);
+bool Vk_seamIsMinimized(void);
 void Vk_seamSetResizeRenderHook(void *fn, void *userdata);
 void Vk_seamSetGravityTopLeft(void);
 
@@ -52,7 +55,8 @@ void Vk_setWindowSeam(
     uint64_t (*renderGenerationFn)(void *w),
     bool (*isLiveResizingFn)(void *w),
     void (*setResizeRenderHookFn)(void *w, void *fn, void *userdata),
-    void (*setGravityTopLeftFn)(void *w)
+    void (*setGravityTopLeftFn)(void *w),
+    bool (*isMinimizedFn)(void *w)
 );
 
 #endif // VK_WINDOW_SEAM_H
