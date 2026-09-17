@@ -53,7 +53,9 @@
  *   - GfxLoop_findClient(self, window)
  *   - GfxLoop_markDirty(self, window)
  *   - GfxLoop_installPoll(self, pollFn)
- *   - GfxLoop_step(self)
+ *   - GfxLoop_step(self)                     : probe-all, present-on-demand pass — every client's
+ *                                              frameFn runs as a demand probe; a present fires only
+ *                                              while a probe left the client dirty (the Present-On-Demand Law)
  *   - GfxLoop_run(self, context, continueFn)
  *   - GfxLoop_runApplication(context, continueFn, pollFn)
  *   - GfxLoop_modalTick()
@@ -229,15 +231,22 @@ bool GfxLoop_step(GfxLoop *self) {
         }
     }
 
-    // 3. Demand-driven presentation pass (The Present-On-Demand Law)
+    // 3. Demand-driven presentation pass (the Present-On-Demand Law).
+    // Every client is PROBED each step (frameFn = the demand probe: it
+    // observes caret phases, tree dirt, pane demand and live resize, then
+    // re-arms the dirty flag via GfxLoop_markDirty); a present happens only
+    // when a probe (or an external event) left the client dirty. Probing is
+    // the loop's only way to SEE new demand while resting — the present
+    // gate stays strictly on-demand, the probe itself is free (thread 0,
+    // tiny struct reads, zero driver calls).
     bool anyDirty = false;
     for (uint32_t i = 0; i < (*self).clientCount; i++) {
         GfxClient *client = &(*self).clients[i];
+        if ((*client).frameFn)
+            (*client).frameFn((*client).window, dt, (*client).userdata);
         if (atomic_load_explicit(&(*client).dirty, memory_order_relaxed)) {
             anyDirty = true;
             atomic_store_explicit(&(*client).dirty, false, memory_order_relaxed);
-            if ((*client).frameFn)
-                (*client).frameFn((*client).window, dt, (*client).userdata);
         }
     }
 

@@ -6,7 +6,6 @@
 #include <stdint.h>
 
 #include "c23/constructor.h"
-#include "graphvex/type.h"
 #include "vulkan/graphics_layer.h"
 
 // src/graphvex/gfx_loop.h — the demand-driven frame scheduler seam (the Vertical Integration Law:
@@ -19,7 +18,9 @@
 //   <- Scene/panel children of each board
 //
 // GfxLoop owns:
-//   - Demand-driven frame loop (Present-On-Demand Law)
+//   - Demand-probed frame loop (the Present-On-Demand Law): every client is
+//     PROBED each step (frameFn observes caret/tree/pane demand and re-arms
+//     GfxLoop_markDirty); a present fires only on demand, never on rest.
 //   - Thread-0 event pump delegation (Window_pollEvents)
 //   - Frame delta time (dt) and telemetry (fps, frametimeUs)
 //   - Zero-gap live resize modal tick (GfxLoop_modalTick)
@@ -85,7 +86,8 @@ void GfxLoop_markDirty(GfxLoop *self, void *window);
 // Hook installation for OS event pump
 void GfxLoop_installPoll(GfxLoop *self, GfxPollFn pollFn);
 
-// One frame step (calculates dt, pumps events, ticks dirty clients, presents with transaction)
+// One frame step (calculates dt, pumps events, probes every client, presents
+// on demand per the Present-On-Demand Law)
 bool GfxLoop_step(GfxLoop *self);
 
 // Full blocking run loop for an application (used by Kernel_runApplication).
