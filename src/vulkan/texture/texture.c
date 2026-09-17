@@ -24,7 +24,7 @@
  *
  * Replace policy: same-size replace is a fast in-place sub-update
  * (Texture_updateSubRaw only, zero destroy). A resize retires the old
- * (image, view, sampler, memory) onto the bounded retire ring and points
+ * (image, view, sampler, memory) onto the growable retire ring and points
  * the slot at the fresh handles + UpdateDescriptorSets immediately; the
  * old handles die only after their upload fence signals, or the retire
  * guard certifies no bindless-sampling Submit is in flight, or — for
@@ -40,11 +40,12 @@
  *   VkSampler s_retireSampler[i];     // retired sampler
  *   VkFence s_retireFence[i];         // upload fence proving GPU drain (or null)
  *   uint64_t s_retireSeq[i];          // frame seq at retire (2-frame fallback)
- * Ring: s_retireHead + s_retireCount over RETIRE_MAX 8; s_frameSeq ticks
- * per resize/free. Reap is non-blocking (GetFenceStatus poll + the retire
- * guard callback); a full ring with no drainable slot fails the replace
- * loudly (return -1, old content kept, retry next tick) — never an
- * unbounded wait, never a leak.
+ * Ring: six parallel rows over [0, s_retireCap), starting at RETIRE_INIT 8
+ * and doubling on demand (the Dynamic Scalability & Anti-Hardcoding Law);
+ * s_frameSeq ticks per resize/free. Reap is non-blocking (GetFenceStatus
+ * poll + the retire guard callback); OOM on growth fails the replace loudly
+ * (return -1, old content kept, retry next tick) — never an unbounded wait,
+ * never a leak.
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -109,20 +110,24 @@ static VkDescriptorSetLayout s_descLayout;
 static VkDescriptorSet s_bindlessSet;
 static VkCommandPool s_cmdPool;
 
-// Bounded retire ring (SLOT RECORD rows): a resized/freed slot's old
+// Growable retire ring (SLOT RECORD rows): a resized/freed slot's old
 // (image, memory, view, sampler) waits here until the GPU provably drains
 // it — upload-fence signal OR 2 retired frames — instead of dying under a
-// DeviceWaitIdle between another CB Begin/End on the shared queue.
-#define TEXTURE_RETIRE_MAX 8
+// DeviceWaitIdle between another CB Begin/End on the shared queue. The ring
+// starts at TEXTURE_RETIRE_INIT rows and doubles on demand (the Dynamic
+// Scalability & Anti-Hardcoding Law) — a burst of resizes can never wedge
+// on a full ring.
+#define TEXTURE_RETIRE_INIT 8
 #define TEXTURE_RETIRE_FRAME_LAG 2
 #define TEXTURE_FENCE_WAIT_NS 100000000ULL
-static VkImage s_retireImage[TEXTURE_RETIRE_MAX];
-static VkDeviceMemory s_retireMemory[TEXTURE_RETIRE_MAX];
-static VkImageView s_retireView[TEXTURE_RETIRE_MAX];
-static VkSampler s_retireSampler[TEXTURE_RETIRE_MAX];
-static VkFence s_retireFence[TEXTURE_RETIRE_MAX];
-static uint64_t s_retireSeq[TEXTURE_RETIRE_MAX];
+static VkImage *s_retireImage = NULL;
+static VkDeviceMemory *s_retireMemory = NULL;
+static VkImageView *s_retireView = NULL;
+static VkSampler *s_retireSampler = NULL;
+static VkFence *s_retireFence = NULL;
+static uint64_t *s_retireSeq = NULL;
 static int s_retireCount = 0;
+static int s_retireCap = 0;
 static uint64_t s_frameSeq = 0;
 // Sampler-flight destroy probe (the Conflict Triage Law callback seam, registered by the
 // darling compositor): null = legacy standalone mode (CPU-lag fallback).
@@ -162,9 +167,54 @@ static bool textureBytesOk(const void *rgbaData, uint32_t width, uint32_t height
     return true;
 }
 
+// Grow the six parallel retire rows so a burst of resizes never wedges on a
+// full ring (the Dynamic Scalability & Anti-Hardcoding Law). The cap commits
+// only after every array grew; a partial grow is harmless because reads are
+// bounded by s_retireCap. OOM leaves depth/cap untouched: the caller keeps
+// old content live and retries next tick (drop-degrade per the Cold-Strict,
+// Hot-Minimal Validation Law). New tails zero to VK_NULL_HANDLE so the
+// free-slot scan recognizes them.
+static bool retireGrow(void) {
+    if (s_retireCount < s_retireCap)
+        return true;
+    int newCap = (s_retireCap == 0) ? TEXTURE_RETIRE_INIT : s_retireCap * 2;
+    size_t newBytes = (size_t) newCap;
+    VkImage *ni = (VkImage*) realloc(s_retireImage, newBytes * sizeof(VkImage));
+    if (!ni)
+        return false;
+    s_retireImage = ni;
+    VkDeviceMemory *nm = (VkDeviceMemory*) realloc(s_retireMemory, newBytes * sizeof(VkDeviceMemory));
+    if (!nm)
+        return false;
+    s_retireMemory = nm;
+    VkImageView *nv = (VkImageView*) realloc(s_retireView, newBytes * sizeof(VkImageView));
+    if (!nv)
+        return false;
+    s_retireView = nv;
+    VkSampler *ns = (VkSampler*) realloc(s_retireSampler, newBytes * sizeof(VkSampler));
+    if (!ns)
+        return false;
+    s_retireSampler = ns;
+    VkFence *nf = (VkFence*) realloc(s_retireFence, newBytes * sizeof(VkFence));
+    if (!nf)
+        return false;
+    s_retireFence = nf;
+    uint64_t *nq = (uint64_t*) realloc(s_retireSeq, newBytes * sizeof(uint64_t));
+    if (!nq)
+        return false;
+    s_retireSeq = nq;
+    memset(s_retireImage + s_retireCap, 0, (size_t) (newCap - s_retireCap) * sizeof(VkImage));
+    memset(s_retireMemory + s_retireCap, 0, (size_t) (newCap - s_retireCap) * sizeof(VkDeviceMemory));
+    memset(s_retireView + s_retireCap, 0, (size_t) (newCap - s_retireCap) * sizeof(VkImageView));
+    memset(s_retireSampler + s_retireCap, 0, (size_t) (newCap - s_retireCap) * sizeof(VkSampler));
+    memset(s_retireFence + s_retireCap, 0, (size_t) (newCap - s_retireCap) * sizeof(VkFence));
+    memset(s_retireSeq + s_retireCap, 0, (size_t) (newCap - s_retireCap) * sizeof(uint64_t));
+    s_retireCap = newCap;
+    return true;
+}
+
 // Destroy one retired row (fence included). Caller proves drain first.
-static void retireDestroySlot(VkDevice dev, int slot) {
-    VK_LOAD(DestroySampler)
+static void retireDestroySlot(VkDevice dev, int slot) {    VK_LOAD(DestroySampler)
     VK_LOAD(DestroyImageView)
     VK_LOAD(DestroyImage)
     VK_LOAD(FreeMemory)
@@ -196,7 +246,7 @@ static void retireDrain(VkDevice dev) {
         return;
     VK_LOAD(GetFenceStatus)
     int live = 0;
-    for (int i = 0; i < TEXTURE_RETIRE_MAX; i++) {
+    for (int i = 0; i < s_retireCap; i++) {
         if (s_retireImage[i] == VK_NULL_HANDLE)
             continue;
         bool drainable = false;
@@ -233,10 +283,10 @@ static bool retirePush(VkImage image, VkDeviceMemory memory, VkImageView view, V
     if (dev == VK_NULL_HANDLE || image == VK_NULL_HANDLE)
         return false;
     retireDrain(dev);
-    if (s_retireCount >= TEXTURE_RETIRE_MAX)
+    if (s_retireCount >= s_retireCap && !retireGrow())
         return false;
     int slot = -1;
-    for (int i = 0; i < TEXTURE_RETIRE_MAX; i++) {
+    for (int i = 0; i < s_retireCap; i++) {
         if (s_retireImage[i] == VK_NULL_HANDLE) {
             slot = i;
             break;
@@ -418,7 +468,7 @@ void Texture_shutdown(void) {
     // bounded 100ms wait per fence-carrying row, then force-destroy whatever
     // remains (shutdown is the last resort; the device goes away next).
     // Live slots, pool, and descriptors follow in dependency order.
-    for (int i = 0; i < TEXTURE_RETIRE_MAX; i++) {
+    for (int i = 0; i < s_retireCap; i++) {
         if (s_retireImage[i] == VK_NULL_HANDLE)
             continue;
         if (s_retireFence[i] != VK_NULL_HANDLE && WaitForFences_fn)
@@ -427,6 +477,19 @@ void Texture_shutdown(void) {
     }
     s_retireCount = 0;
     s_frameSeq = 0;
+    free(s_retireImage);
+    free(s_retireMemory);
+    free(s_retireView);
+    free(s_retireSampler);
+    free(s_retireFence);
+    free(s_retireSeq);
+    s_retireImage = NULL;
+    s_retireMemory = NULL;
+    s_retireView = NULL;
+    s_retireSampler = NULL;
+    s_retireFence = NULL;
+    s_retireSeq = NULL;
+    s_retireCap = 0;
 
     for (int i = 0; i < s_textureCount; i++) {
         if (s_samplers[i] != VK_NULL_HANDLE && DestroySampler_fn) {
@@ -1429,7 +1492,7 @@ int32_t Texture_retireDepth(void) {
 }
 
 int32_t Texture_retireCapacity(void) {
-    return TEXTURE_RETIRE_MAX;
+    return s_retireCap ? s_retireCap : TEXTURE_RETIRE_INIT;
 }
 
 uint64_t Texture_frameSeq(void) {
