@@ -43,6 +43,10 @@
  *  *   VkRetiredHandle (one parked dylib):
  *  *     void *handle;                          // retired dylib (nullptr = free slot)
  *  *     uint32_t generation;                   // reload generation when retired
+ *  *   Parking lot: VkRetiredHandle *s_vk_retired over [0, s_vk_retiredCap),
+ *  *   cap starting at VK_RETIRED_INIT 16 and doubling via vkRetiredGrow()
+ *  *   (the Dynamic Scalability & Anti-Hardcoding Law); index-safe, OOM
+ *  *   falls back to oldest-entry eviction.
  *  *
  *  *   Module statics:
  *  *     void *s_module_handle;                // currently loaded dylib
@@ -141,22 +145,38 @@ void *hot_vk_get_symbol(const char *name) {
 
 // Generational handle retirement: keeps old dylib handles alive across
 // reload generations to prevent race conditions during module reload.
-#define VK_RETIRED_MAX 16
 #define VK_RETIRED_GENERATIONS 4
+#define VK_RETIRED_INIT 16
 
 typedef struct {
     void *handle;
     uint32_t generation;
 } VkRetiredHandle;
 
-static VkRetiredHandle s_vk_retired[VK_RETIRED_MAX] = {0};
+static VkRetiredHandle *s_vk_retired = NULL;
+static size_t s_vk_retiredCap = 0;
 static uint32_t s_vk_generation = 0;
+
+// Grow the parking lot on demand (the Dynamic Scalability & Anti-Hardcoding
+// Law). Rows are index-accessed only, so realloc's move is invisible. OOM
+// leaves the cap untouched: the caller falls back to oldest-entry eviction
+// (drop-degrade per the Cold-Strict, Hot-Minimal Validation Law).
+static bool vkRetiredGrow(void) {
+    size_t newCap = (s_vk_retiredCap == 0) ? VK_RETIRED_INIT : s_vk_retiredCap * 2;
+    VkRetiredHandle *nb = (VkRetiredHandle*) realloc(s_vk_retired, newCap * sizeof(VkRetiredHandle));
+    if (!nb)
+        return false;
+    memset(nb + s_vk_retiredCap, 0, (newCap - s_vk_retiredCap) * sizeof(VkRetiredHandle));
+    s_vk_retired = nb;
+    s_vk_retiredCap = newCap;
+    return true;
+}
 
 static void vk_retire_handle(void *handle) {
     if (!handle) return;
 
     // Reap old generations
-    for (size_t i = 0; i < VK_RETIRED_MAX; i++) {
+    for (size_t i = 0; i < s_vk_retiredCap; i++) {
         if (s_vk_retired[i].handle && (s_vk_generation - s_vk_retired[i].generation >= VK_RETIRED_GENERATIONS)) {
             dlclose(s_vk_retired[i].handle);
             s_vk_retired[i].handle = nullptr;
@@ -164,19 +184,22 @@ static void vk_retire_handle(void *handle) {
     }
 
     // Find a free slot
-    size_t slot = VK_RETIRED_MAX;
-    for (size_t i = 0; i < VK_RETIRED_MAX; i++) {
+    size_t slot = s_vk_retiredCap;
+    for (size_t i = 0; i < s_vk_retiredCap; i++) {
         if (!s_vk_retired[i].handle) {
             slot = i;
             break;
         }
     }
 
-    if (slot == VK_RETIRED_MAX) {
+    if (slot == s_vk_retiredCap && vkRetiredGrow())
+        slot = s_vk_retiredCap - 1; // the freshly appended, zeroed slot
+
+    if (slot == s_vk_retiredCap) {
         // Evict oldest if all slots full
         size_t oldest_idx = 0;
         uint32_t oldest_gen = UINT32_MAX;
-        for (size_t i = 0; i < VK_RETIRED_MAX; i++) {
+        for (size_t i = 0; i < s_vk_retiredCap; i++) {
             if (s_vk_retired[i].generation < oldest_gen) {
                 oldest_gen = s_vk_retired[i].generation;
                 oldest_idx = i;
@@ -192,7 +215,7 @@ static void vk_retire_handle(void *handle) {
 
 static void vk_advance_generation(void) {
     s_vk_generation++;
-    for (size_t i = 0; i < VK_RETIRED_MAX; i++) {
+    for (size_t i = 0; i < s_vk_retiredCap; i++) {
         if (s_vk_retired[i].handle && (s_vk_generation - s_vk_retired[i].generation >= VK_RETIRED_GENERATIONS)) {
             dlclose(s_vk_retired[i].handle);
             s_vk_retired[i].handle = nullptr;
@@ -350,12 +373,15 @@ void hot_vk_shutdown(void) {
         dlclose(s_module_handle);
         s_module_handle = nullptr;
     }
-    for (size_t i = 0; i < VK_RETIRED_MAX; i++) {
+    for (size_t i = 0; i < s_vk_retiredCap; i++) {
         if (s_vk_retired[i].handle) {
             dlclose(s_vk_retired[i].handle);
             s_vk_retired[i].handle = nullptr;
         }
     }
+    free(s_vk_retired);
+    s_vk_retired = NULL;
+    s_vk_retiredCap = 0;
     s_initialized = false;
 
     // Persist + destroy pipeline cache. vkGetPipelineCacheData sizes the

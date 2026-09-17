@@ -31,7 +31,9 @@
  *
  * STRUCT FIELDS (local registry):
  * ----------------------------------------------------------------------------
- *   VkLayerChain chain[VK_LAYER_CHAIN_MAX];  // one per layer, fixed array
+ *   VkLayerChain *chains;        // growable layer table, doubles on demand
+ *                                // (stable indices — external holders map
+ *                                // indices, never pointers)
  *     images[VK_LAYER_FLIGHT]      // offscreen BGRA8 color targets
  *     views[VK_LAYER_FLIGHT]       // their image views (composite samples)
  *     fbs[VK_LAYER_FLIGHT]         // per-slot framebuffers
@@ -40,7 +42,7 @@
  *     published                    // last-rendered slot (-1 = none yet)
  *     dirty                        // per-layer repaint demand (no new class)
  *     presentCount, skipCount      // lifetime render/skip diagnostics
- *   int count;
+ *   int count, chainCap;
  *   VkRenderPass s_layerPass;      // BGRA8 CLEAR->SHADER_READ_ONLY dedicated
  *   VkCommandPool s_pool;          // per-layer CBs from one pool
  *   VkLayerRenderFn s_renderer;    // darling scene painter hook
@@ -98,7 +100,6 @@ extern bool s_instanceDebugUtils;   // set when VK_EXT_debug_utils is live on th
         name##_fn = (PFN_vk##name)s_instanceGdpa(s_instanceDevice, "vk" #name); \
     }
 
-#define VK_LAYER_CHAIN_MAX 32
 #define VK_LAYER_FLIGHT 2
 #define VK_LAYER_FORMAT VK_FORMAT_B8G8R8A8_UNORM
 
@@ -124,7 +125,8 @@ typedef struct VkLayerChain {
     uint64_t fenceTimeoutNs; // 100ms bounded (the Bounded Wait Law)
 } VkLayerChain;
 
-static VkLayerChain s_chains[VK_LAYER_CHAIN_MAX] = {0};
+static VkLayerChain *s_chains = NULL;
+static int s_chainCap = 0;      // allocated chain slots (grows by doubling)
 // Registry lock (two-thread live-resize contract): the present worker runs
 // VkLayer_visit every frame while thread 0 may VkLayer_resize (settle) or
 // VkLayer_unregister (teardown). All structural mutation and the visit
@@ -134,6 +136,24 @@ static int s_count = 0;
 static VkRenderPass s_layerPass = VK_NULL_HANDLE;
 static VkCommandPool s_pool = VK_NULL_HANDLE;
 static VkLayerRenderFn s_renderer = nullptr;
+
+// Grow the layer chain table so appends never reject (the Dynamic
+// Scalability & Anti-Hardcoding Law). Stable indices are preserved —
+// realloc copies whole rows, and external holders map indices, never
+// pointers, so the move is invisible. OOM leaves the table untouched
+// (drop-degrade per the Cold-Strict, Hot-Minimal Validation Law).
+static bool layerTableGrow(void) {
+    if (s_count < s_chainCap)
+        return true;
+    int newCap = (s_chainCap == 0) ? 8 : s_chainCap * 2;
+    VkLayerChain *nb = (VkLayerChain*) realloc(s_chains, (size_t) newCap * sizeof(VkLayerChain));
+    if (!nb)
+        return false;
+    memset(nb + s_chainCap, 0, (size_t) (newCap - s_chainCap) * sizeof(VkLayerChain));
+    s_chains = nb;
+    s_chainCap = newCap;
+    return true;
+}
 
 // Composite (collage) pipeline — one mutable descriptor set, updated per
 // layer draw on the single present worker (no concurrent access).
@@ -661,7 +681,7 @@ int VkLayer_register(int width, int height, void *owner) {
 
     SpinLock_lock(&s_layerLock);
 
-    if (s_count >= VK_LAYER_CHAIN_MAX) {
+    if (s_count >= s_chainCap && !layerTableGrow()) {
         SpinLock_unlock(&s_layerLock);
         return -1;
     }
@@ -697,7 +717,7 @@ int VkLayer_register(int width, int height, void *owner) {
         }
     }
     if (idx < 0) {
-        if (s_count >= VK_LAYER_CHAIN_MAX) {
+        if (s_count >= s_chainCap && !layerTableGrow()) {
             SpinLock_unlock(&s_layerLock);
             return -1;
         }
@@ -1044,6 +1064,9 @@ void VkLayer_shutdown(void) {
         memset(chain, 0, sizeof(VkLayerChain));
     }
     s_count = 0;
+    free(s_chains);
+    s_chains = NULL;
+    s_chainCap = 0;
 
     if (s_pool != VK_NULL_HANDLE) {
         VK_LAYER_LOAD_DEVICE(DestroyCommandPool)

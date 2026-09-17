@@ -1,6 +1,7 @@
 #include "vulkan/vk_scene.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "vk_guard.h"
 #include "annotation/overview.h"
@@ -43,6 +44,11 @@
  *     VkFramebuffer fb[2]; // Retired framebuffers
  *     VkRenderPass pass;   // Retired shared pass
  *   }
+ *   Slot + graveyard tables are heap-grown: SceneSlot *s_slots over
+ *   [0, s_slotCap) (each canvas individually allocated so its address never
+ *   moves) and SceneRetired *s_retired over [0, s_retiredCap); both double
+ *   via slotTableGrow()/sceneRetiredGrow() (the Dynamic Scalability &
+ *   Anti-Hardcoding Law), OOM failing the acquire / deferring the resize.
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -120,14 +126,32 @@ struct VkSceneCanvas {
 };
 
 // Keyed slot table. Linear scan — scene counts are small by nature (a
-// handful of scenes per engine, not thousands). Full table = acquire fails
-// loudly rather than silently evicting live canvases.
-#define VK_SCENE_CANVASES_MAX 16
-static struct {
+// handful of scenes per engine, not thousands). The table grows on demand
+// (the Dynamic Scalability & Anti-Hardcoding Law) and each canvas lives at
+// its own heap address, so the VkSceneCanvas* handed to callers stays valid
+// for that canvas's whole life — growth moves table rows, never canvases.
+// A failed growth fails the acquire loudly rather than evicting live
+// canvases.
+typedef struct {
     uintptr_t key;
-    VkSceneCanvas canvas;
-} s_slots[VK_SCENE_CANVASES_MAX];
-static size_t s_slotCount = 0;
+    VkSceneCanvas *canvas;
+} SceneSlot;
+static SceneSlot *s_slots = NULL;
+static size_t s_slotCap = 0;
+static size_t s_slotCount = 0; // high-water mark of used slots
+
+// Double the slot table. Callers invoke it only when the scan found no free
+// row; OOM leaves the table untouched (drop-degrade).
+static bool slotTableGrow(void) {
+    size_t newCap = (s_slotCap == 0) ? 16 : s_slotCap * 2;
+    SceneSlot *nb = (SceneSlot*) realloc(s_slots, newCap * sizeof(SceneSlot));
+    if (!nb)
+        return false;
+    memset(nb + s_slotCap, 0, (newCap - s_slotCap) * sizeof(SceneSlot));
+    s_slots = nb;
+    s_slotCap = newCap;
+    return true;
+}
 
 // Generation graveyard for buffer pairs retired while a scene pass was in
 // flight into them (resize-during-drag). Same law as the swapchain
@@ -135,7 +159,6 @@ static size_t s_slotCount = 0;
 // Entries stashed during a pending batch are flushed at that batch's fence
 // completion — queue FIFO ordering means the collage blit that could have
 // sampled the old front also completed by then.
-#define VK_SCENE_RETIRED_MAX 8
 typedef struct {
     VkImage image[2];
     VkDeviceMemory memory[2];
@@ -143,8 +166,23 @@ typedef struct {
     VkFramebuffer fb[2];
     VkRenderPass pass;
 } SceneRetired;
-static SceneRetired s_retired[VK_SCENE_RETIRED_MAX];
+static SceneRetired *s_retired = NULL;
 static uint32_t s_retiredCount = 0;
+static uint32_t s_retiredCap = 0;
+
+// Double the graveyard on demand (the Dynamic Scalability & Anti-Hardcoding
+// Law). Rows are index-accessed only, so realloc's move is invisible; OOM
+// leaves the cap untouched and the caller defers the resize.
+static bool sceneRetiredGrow(void) {
+    uint32_t newCap = (s_retiredCap == 0) ? 8 : s_retiredCap * 2;
+    SceneRetired *nb = (SceneRetired*) realloc(s_retired, (size_t) newCap * sizeof(SceneRetired));
+    if (!nb)
+        return false;
+    memset(nb + s_retiredCap, 0, (size_t) (newCap - s_retiredCap) * sizeof(SceneRetired));
+    s_retired = nb;
+    s_retiredCap = newCap;
+    return true;
+}
 
 // loader plumbing — fetched once through the caller's gpa (vk_view pattern)
 static PFN_vkGetInstanceProcAddr s_gpa = nullptr;
@@ -360,7 +398,7 @@ static void destroyRetiredEntry(SceneRetired *r) {
 static void retireStale(struct VkSceneCanvas *c) {
     if ((*c).staleImage == VK_NULL_HANDLE)
         return;
-    if (s_retiredCount < VK_SCENE_RETIRED_MAX) {
+    if (s_retiredCount < s_retiredCap || sceneRetiredGrow()) {
         SceneRetired *r = &s_retired[s_retiredCount++];
         (*r).image[0] = (*c).staleImage;
         (*r).memory[0] = (*c).staleMemory;
@@ -412,13 +450,20 @@ VkSceneCanvas *VkSceneCanvas_acquire(uintptr_t key, uint32_t width, uint32_t hei
 
     VkSceneCanvas *existing = nullptr;
     size_t freeSlot = SIZE_MAX;
-    for (size_t i = 0; i < VK_SCENE_CANVASES_MAX; i++) {
-        if (i < s_slotCount && s_slots[i].key == key) {
-            existing = &s_slots[i].canvas;
+    for (size_t i = 0; i < s_slotCap; i++) {
+        if (s_slots[i].key == key) {
+            existing = s_slots[i].canvas;
             break;
         }
         if (freeSlot == SIZE_MAX && s_slots[i].key == 0)
             freeSlot = i;
+    }
+    if (!existing && freeSlot == SIZE_MAX) {
+        if (!slotTableGrow()) {
+            fprintf(stderr, "vk_scene: slot table grow failed\n");
+            return nullptr;
+        }
+        freeSlot = s_slotCap - 1; // the freshly appended, zeroed row
     }
 
     if (existing) {
@@ -428,7 +473,7 @@ VkSceneCanvas *VkSceneCanvas_acquire(uintptr_t key, uint32_t width, uint32_t hei
             // Resize during an in-flight scene pass: swap in a FRESH pair
             // right now — the collage tracks geometry every tick — and
             // graveyard the old pair until the batch fence proves it done.
-            if (s_retiredCount >= VK_SCENE_RETIRED_MAX) {
+            if (s_retiredCount >= s_retiredCap && !sceneRetiredGrow()) {
                 fprintf(stderr, "vk_scene: retire table full; deferring resize\n");
                 return existing; // pathological; old defer as last resort
             }
@@ -484,12 +529,20 @@ VkSceneCanvas *VkSceneCanvas_acquire(uintptr_t key, uint32_t width, uint32_t hei
         return existing;
     }
 
-    if (freeSlot == SIZE_MAX || freeSlot >= VK_SCENE_CANVASES_MAX) {
+    if (freeSlot == SIZE_MAX || freeSlot >= s_slotCap) {
         fprintf(stderr, "vk_scene: slot table full\n");
         return nullptr;
     }
 
-    VkSceneCanvas *c = &s_slots[freeSlot].canvas;
+    VkSceneCanvas *c = s_slots[freeSlot].canvas;
+    if (!c) {
+        c = (VkSceneCanvas*) calloc(1, sizeof(VkSceneCanvas));
+        if (!c) {
+            fprintf(stderr, "vk_scene: canvas alloc failed\n");
+            return nullptr;
+        }
+        s_slots[freeSlot].canvas = c;
+    }
     memset(c, 0, sizeof(*c));
     s_slots[freeSlot].key = key;
     (*c).key = key;
@@ -621,21 +674,30 @@ bool VkSceneCanvas_endBackPass(VkSceneCanvas *canvas, VkCommandBuffer cb) {
 
 void VkSceneCanvas_shutdownModule(void) {
     VkSceneCanvas_flushRetired();
-    for (size_t i = 0; i < VK_SCENE_CANVASES_MAX; i++) {
-        if (s_slots[i].key != 0) {
+    for (size_t i = 0; i < s_slotCap; i++) {
+        VkSceneCanvas *c = s_slots[i].canvas;
+        if (s_slots[i].key != 0 && c) {
             // Stale bridges ride outside destroyCanvasObjects' arrays; the
             // device is idle here, so direct disposal is fence-safe. Zeroed
             // BEFORE teardown so its preserve-across-memset can't resurrect
             // already-freed handles.
             SceneRetired stale = {0};
-            stale.image[0] = s_slots[i].canvas.staleImage;
-            stale.memory[0] = s_slots[i].canvas.staleMemory;
-            s_slots[i].canvas.staleImage = VK_NULL_HANDLE;
-            s_slots[i].canvas.staleMemory = VK_NULL_HANDLE;
+            stale.image[0] = (*c).staleImage;
+            stale.memory[0] = (*c).staleMemory;
+            (*c).staleImage = VK_NULL_HANDLE;
+            (*c).staleMemory = VK_NULL_HANDLE;
             destroyRetiredEntry(&stale);
-            destroyCanvasObjects(&s_slots[i].canvas);
+            destroyCanvasObjects(c);
             s_slots[i].key = 0;
         }
+        free(s_slots[i].canvas);
+        s_slots[i].canvas = NULL;
     }
+    free(s_slots);
+    s_slots = NULL;
+    s_slotCap = 0;
     s_slotCount = 0;
+    free(s_retired);
+    s_retired = NULL;
+    s_retiredCap = 0;
 }

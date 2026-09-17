@@ -39,6 +39,10 @@
   *     uint32_t imageCount;                   // used slots in views[]/fbs[]
   *     VkImageView views[VK_SWAP_IMAGES_MAX]; // per-image views (die with the chain)
   *     VkFramebuffer fbs[VK_SWAP_IMAGES_MAX];// per-image framebuffers (die with the chain)
+  *   Graveyard: RetiredChain *s_retired over [0, s_retiredCount), cap
+  *   s_retiredCap starting at 8 and doubling via retiredGrow() (the Dynamic
+  *   Scalability & Anti-Hardcoding Law); growth is index-safe (rows never
+  *   leave the table) and OOM falls back to oldest-entry eviction.
   *
   *   Module statics (file-scope, own the chain across frames):
   *     VkInstance s_instance;                 // loader instance handle
@@ -182,7 +186,7 @@ static SpinLock s_presentLock = SPIN_LOCK_INIT;
 // carries the chain's image views + framebuffers so the whole generation
 // dies together.
 #define VK_SWAP_IMAGES_MAX 8
-#define VK_RETIRED_SWAPCHAINS_MAX 8
+;;INTENTION("VK_SWAP_IMAGES_MAX bounds the harness's per-chain view/fb copies; swapchain image counts are driver-reported (2-4 in practice), and presentFrameTail guards imageIndex against the live count")
 
 typedef struct RetiredChain {
     VkSwapchainKHR chain;
@@ -192,8 +196,27 @@ typedef struct RetiredChain {
     VkFramebuffer fbs[VK_SWAP_IMAGES_MAX];
 } RetiredChain;
 
-static RetiredChain s_retired[VK_RETIRED_SWAPCHAINS_MAX];
+static RetiredChain *s_retired = NULL;
 static uint32_t s_retiredCount = 0;
+static uint32_t s_retiredCap = 0;
+
+// Grow the swapchain graveyard so rapid resize churn never forces an
+// oldest-entry eviction (the Dynamic Scalability & Anti-Hardcoding Law).
+// Rows are index-accessed only, so realloc's move is invisible. OOM leaves
+// the cap untouched: the caller falls back to the oldest-entry eviction path
+// (drop-degrade per the Cold-Strict, Hot-Minimal Validation Law).
+static bool retiredGrow(void) {
+    if (s_retiredCount < s_retiredCap)
+        return true;
+    uint32_t newCap = (s_retiredCap == 0) ? 8 : s_retiredCap * 2;
+    RetiredChain *nb = (RetiredChain*) realloc(s_retired, (size_t) newCap * sizeof(RetiredChain));
+    if (!nb)
+        return false;
+    memset(nb + s_retiredCap, 0, (size_t) (newCap - s_retiredCap) * sizeof(RetiredChain));
+    s_retired = nb;
+    s_retiredCap = newCap;
+    return true;
+}
 static uint32_t s_swapchainGeneration = 0;
 static bool s_dumpEnabled = false;
 static int s_dumpStage = 0;
@@ -683,6 +706,10 @@ static bool rebuildTargets(void) {
     if (caps.maxImageCount > 0 && imageCount > caps.maxImageCount) {
         imageCount = caps.maxImageCount;
     }
+    // Never request more than the harness holds; the driver may still hand
+    // back more (maxImageCount 0 = unlimited), which the fetch clamps loudly.
+    if (imageCount > VK_SWAP_IMAGES_MAX)
+        imageCount = VK_SWAP_IMAGES_MAX;
 
     VkSwapchainCreateInfoKHR swci = { .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     swci.surface = s_surface;
@@ -754,7 +781,7 @@ static bool rebuildTargets(void) {
     // in flight on Metal's queues. Retire it — WITH its views/framebuffers —
     // for deferred destruction.
     if (oldSwapchain != VK_NULL_HANDLE) {
-        if (s_retiredCount < VK_RETIRED_SWAPCHAINS_MAX) {
+        if (s_retiredCount < s_retiredCap || retiredGrow()) {
             s_retired[s_retiredCount].chain = oldSwapchain;
             s_retired[s_retiredCount].generation = s_swapchainGeneration;
             s_retired[s_retiredCount].imageCount = s_swapchainImageCount;
@@ -798,8 +825,14 @@ static bool rebuildTargets(void) {
     // against the drawable pass — the render target of every present frame.
     s_swapchainImageCount = 0;
     GetSwapchainImagesKHR_fn(s_device, s_swapchain, &s_swapchainImageCount, nullptr);
-    if (s_swapchainImageCount > VK_SWAP_IMAGES_MAX)
+    if (s_swapchainImageCount > VK_SWAP_IMAGES_MAX) {
+        // Never silent (the Cold-Strict, Hot-Minimal Validation Law): the
+        // driver handed back more images than the harness holds. Keep the
+        // first VK_SWAP_IMAGES_MAX; present drops any index beyond that.
+        fprintf(stderr, "[vk] swapchain reported %u images; harness holds %d — extra images unused\n",
+                s_swapchainImageCount, VK_SWAP_IMAGES_MAX);
         s_swapchainImageCount = VK_SWAP_IMAGES_MAX;
+    }
     GetSwapchainImagesKHR_fn(s_device, s_swapchain, &s_swapchainImageCount, s_swapchainImages);
 
     if (!ensureDrawablePass())
@@ -907,6 +940,9 @@ static void destroyTargets(void) {
         }
     }
     s_retiredCount = 0;
+    free(s_retired);
+    s_retired = NULL;
+    s_retiredCap = 0;
     s_swapchainGeneration = 0;
 
     for (uint32_t i = 0; i < s_swapchainImageCount; i++) {
@@ -1785,6 +1821,12 @@ static bool presentFrameLocked(void) {
 static bool presentFrameTail(uint32_t imageIndex) {
     // the Ecosystem Vulkan Safety Nets Law seam guard at the board submit/present boundary (device + queue).
     if (!VkGuard_check("presentFrameTail", s_device, s_queue, s_deviceLost))
+        return false;
+    // Hot-path minimal guard (the Cold-Strict, Hot-Minimal Validation Law):
+    // the acquired index comes from the driver's image count, which can
+    // exceed the harness arrays if the driver hands back more images than
+    // requested. Drop-degrade — never index out of bounds.
+    if (imageIndex >= s_swapchainImageCount)
         return false;
     VK_LOAD_DEVICE(BeginCommandBuffer)
     VK_LOAD_DEVICE(EndCommandBuffer)

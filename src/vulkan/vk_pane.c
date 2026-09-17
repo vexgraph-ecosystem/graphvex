@@ -9,6 +9,7 @@
 #include "time/nanotime.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 ;;OVERVIEW
@@ -25,10 +26,13 @@
  *
  * STRUCT FIELDS (local registry):
  * ----------------------------------------------------------------------------
- *   VkPaneChain chain[VK_PANE_CHAIN_MAX];  // one per pane, fixed array
+ *   VkPaneChain *chains;             // growable pane table, doubles on demand
+ *                                    // (stable indices — external holders
+ *                                    // map indices, never pointers)
  *     cb[VK_PANE_FLIGHT], fence[VK_PANE_FLIGHT], flip, announced // flip/flop
  *     dirty // per-chain repaint demand (slot-record bit, no new class)
  *     presentCount, skipCount // lifetime present/skip diagnostics
+ *   int count, chainCap;             // live count + allocated capacity
  *   int count;
  *   VkRenderPass s_panePass;                 // BGRA/compat LOSED dedicated pass
  *   VkCommandPool s_pool;                    // per-pane CBs from one pool
@@ -94,8 +98,6 @@ static void VkPane_nameObject(VkObjectType type, uint64_t handle, const char *na
     nameFn(s_instanceDevice, &info);
 }
 
-#define VK_PANE_CHAIN_MAX 32
-
 // Per-scene flight depth: each chain owns TWO record/submit slots and
 // alternates (flip/flop) every present. While slot A's submit still flies,
 // the next tick records into slot B without stalling on A's fence — each
@@ -128,7 +130,8 @@ typedef struct VkPaneChain {
     uint64_t fenceTimeoutNs; // 100ms bounded (the Bounded Wait Law)
 } VkPaneChain;
 
-static VkPaneChain s_chains[VK_PANE_CHAIN_MAX] = {0};
+static VkPaneChain *s_chains = NULL;
+static int s_chainCap = 0;      // allocated chain slots (grows by doubling)
 // Registry lock (two-thread live-resize contract): the present worker runs
 // VkPane_presentAll every frame while thread 0 may VkPane_resize (settle) or
 // VkPane_unregister (teardown). All structural mutation and the present
@@ -139,6 +142,24 @@ static VkRenderPass s_panePass = VK_NULL_HANDLE;
 static VkFormat s_panePassFormat = VK_FORMAT_UNDEFINED;
 static VkCommandPool s_pool = VK_NULL_HANDLE;
 static VkPaneRenderFn s_renderer = nullptr;
+
+// Grow the pane chain table so appends never reject (the Dynamic
+// Scalability & Anti-Hardcoding Law). Stable indices are preserved —
+// realloc copies whole rows, and external holders map indices, never
+// pointers, so the move is invisible. OOM leaves the table untouched
+// (drop-degrade per the Cold-Strict, Hot-Minimal Validation Law).
+static bool paneTableGrow(void) {
+    if (s_count < s_chainCap)
+        return true;
+    int newCap = (s_chainCap == 0) ? 8 : s_chainCap * 2;
+    VkPaneChain *nb = (VkPaneChain*) realloc(s_chains, (size_t) newCap * sizeof(VkPaneChain));
+    if (!nb)
+        return false;
+    memset(nb + s_chainCap, 0, (size_t) (newCap - s_chainCap) * sizeof(VkPaneChain));
+    s_chains = nb;
+    s_chainCap = newCap;
+    return true;
+}
 
 bool VkPane_ready(void) {
     return s_instanceDevice != VK_NULL_HANDLE && s_count > 0;
@@ -448,7 +469,7 @@ int VkPane_register(void *layer, int width, int height, void *owner) {
 
     SpinLock_lock(&s_paneLock);
 
-    if (s_count >= VK_PANE_CHAIN_MAX) {
+    if (s_count >= s_chainCap && !paneTableGrow()) {
         SpinLock_unlock(&s_paneLock);
         return -1;
     }
@@ -486,7 +507,7 @@ int VkPane_register(void *layer, int width, int height, void *owner) {
         }
     }
     if (idx < 0) {
-        if (s_count >= VK_PANE_CHAIN_MAX) {
+        if (s_count >= s_chainCap && !paneTableGrow()) {
             SpinLock_unlock(&s_paneLock);
             return -1;
         }
@@ -841,5 +862,8 @@ void VkPane_shutdown(void) {
         DestroyRenderPass_fn(s_instanceDevice, s_panePass, nullptr);
         s_panePass = VK_NULL_HANDLE;
     }
+    free(s_chains);
+    s_chains = NULL;
+    s_chainCap = 0;
     s_renderer = nullptr;
 }
