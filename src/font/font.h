@@ -36,8 +36,8 @@ bool Font_getGlyph(Font *font, uint32_t codepoint, float pixelHeight, GlyphMetri
 int32_t Font_getTextureId(const Font *font);
 
 // Multi-page atlas: big coverages (CJK-scale fonts) spill past one 2048^2
-// page, so each glyph names its page and each page owns a texture.
-#define FONT_PAGES_MAX 32
+// page, so each glyph names its page and each page owns a texture. Pages
+// grow on demand without a ceiling (the Dynamic Scalability & Anti-Hardcoding Law).
 
 // Number of allocated atlas pages (>= 1 once loaded).
 size_t Font_pageCount(const Font *font);
@@ -113,8 +113,8 @@ typedef struct FontSdfWork {
 // SDF raster for a covered codepoint. False when uncovered/failed (sdf NULL).
 bool Font_rasterSdfWork(Font *font, uint32_t codepoint, FontSdfWork *outWork);
 
-// Packs a rastered glyph (SDF page spill included). False when the atlas is
-// full (FONT_PAGES_MAX) or the glyph is oversized. Fills outBase on success.
+// Packs a rastered glyph (SDF page spill included). False when the glyph is
+// oversized or a page allocation fails. Fills outBase on success.
 bool Font_packSdfWork(Font *font, const FontSdfWork *work, GlyphMetrics *outBase);
 
 // Frees a work buffer (NULL-safe, zeroes the struct).

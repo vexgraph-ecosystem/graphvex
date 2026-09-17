@@ -44,7 +44,7 @@
  *     float bakedDescent;  // Cached descent for baked handles
  *     float bakedLineGap;  // Cached line gap for baked handles
  *     char family[128];    // Family name for platform color-glyph cascade
- *     FontPage *pages;     // Atlas pages (up to FONT_PAGES_MAX)
+ *     FontPage *pages;     // Atlas pages (grown on demand, no ceiling)
  *     size_t pageCount;    // Allocated page count
  *     size_t pageCap;      // Page array capacity
  *     GlyphSlot *slots;    // Glyph dictionary slots
@@ -145,15 +145,12 @@ extern bool System_rasterColorGlyph(const char *familyName, uint32_t codepoint,
 #define COLOR_REF_HEIGHT 128.0f
 
 // Allocates one atlas page (RGBA + bindless texture) and appends it.
-// Live handles start with page 0 from Font_load; overflow glyphs grow more.
+// Live handles start with page 0 from Font_load; overflow glyphs grow more
+// pages without limit (the Dynamic Scalability & Anti-Hardcoding Law).
 // Color pages hold straight-alpha bitmaps and are never mixed with SDF.
 static bool allocPage(Font *font, bool isColor) {
-    if ((*font).pageCount >= FONT_PAGES_MAX)
-        return false;
     if ((*font).pageCount >= (*font).pageCap) {
         size_t newCap = (*font).pageCap == 0 ? 4 : (*font).pageCap * 2;
-        if (newCap > FONT_PAGES_MAX)
-            newCap = FONT_PAGES_MAX;
         // Memory_realloc rejects NULL, so the first page uses alloc.
         FontPage *next = (*font).pages
             ? (FontPage*) Memory_realloc((*font).pages, newCap * sizeof(FontPage))
@@ -807,7 +804,7 @@ Font *Font_createFromBaked(const uint8_t *atlasMono, size_t pageCount,
                            const uint32_t *codepoints,
                            const GlyphMetrics *metrics, size_t count,
                            float ascent, float descent, float lineGap) {
-    if (!atlasMono || pageCount == 0 || pageCount > FONT_PAGES_MAX ||
+    if (!atlasMono || pageCount == 0 || (count > 0 && pageCount > count) ||
         atlasDim != ATLAS_SIZE)
         return NULL;
     if (count > 0 && (!codepoints || !metrics))

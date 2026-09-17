@@ -223,13 +223,6 @@ static void cpuBakeFlow(Font *font, const uint32_t *cov, size_t covCount,
             memset(&base, 0, sizeof(base));
             if (Font_packSdfWork(font, &works[i], &base)) {
                 Font_indexGlyph(font, cov[i], &base);
-            } else if (Font_pageCount(font) >= (size_t)FONT_PAGES_MAX) {
-                printf("FontBake: '%s' exceeds %d pages at U+%04X, baking partial (%zu glyphs)\n",
-                       familyName, FONT_PAGES_MAX, cov[i], Font_glyphCount(font));
-                Font_freeSdfWork(&works[i]);
-                for (size_t j = i + 1; j < covCount; j++)
-                    Font_freeSdfWork(&works[j]);
-                break;
             }
             Font_freeSdfWork(&works[i]);
         }
@@ -327,7 +320,9 @@ static bool gpuWriteFile(const char *bakedPath, const char *familyName,
                          int64_t srcMtime, const GpuBuild *b, int dim) {
     if ((*b).entryCount == 0 || (*b).entryCount > BAKE_GLYPH_MAX)
         return false;
-    if ((*b).pageCount == 0 || (*b).pageCount > (size_t)FONT_PAGES_MAX)
+    // Every page holds at least one glyph, so pages can never outnumber
+    // entries — the data-derived bound that replaces an arbitrary ceiling.
+    if ((*b).pageCount == 0 || (*b).pageCount > (*b).entryCount)
         return false;
     FILE *f = fopen(bakedPath, "wb");
     if (!f)
@@ -447,8 +442,7 @@ static bool gpuBakeFlow(Font *font, const uint32_t *cov, size_t covCount,
     // peak is one coverage page + coverage backlog, not all pages).
     GpuPageBuild page;
     memset(&page, 0, sizeof(page));
-    bool capped = false;
-    for (size_t i = 0; i < covCount && !capped; i++) {
+    for (size_t i = 0; i < covCount; i++) {
         FontCovWork *w = &works[i];
         if ((*w).w <= 0 || (*w).h <= 0 || !(*w).bmp) {
             Font_freeCovWork(w); // empty (space): same skip as the CPU path
@@ -478,15 +472,6 @@ static bool gpuBakeFlow(Font *font, const uint32_t *cov, size_t covCount,
                 }
             }
             gpuPageFree(&page);
-            if ((*build).pageCount >= (size_t)FONT_PAGES_MAX) {
-                printf("FontBake: '%s' exceeds %d pages at U+%04X, baking partial (gpu, %zu glyphs)\n",
-                       familyName, FONT_PAGES_MAX, cov[i], (*build).entryCount);
-                Font_freeCovWork(w);
-                for (size_t j = i + 1; j < covCount; j++)
-                    Font_freeCovWork(&works[j]);
-                capped = true;
-                break;
-            }
             page.cov = (uint8_t*) calloc(pageBytes, 1);
             page.cells = NULL;
             page.cellCount = page.cellCap = 0;
@@ -600,7 +585,7 @@ static bool readHeader(const char *bakedPath, uint32_t *outGlyphCount,
     // so the next bakeAll/refresh pass rebakes them into v2.
     if (!ok || magic != BAKE_MAGIC || version != BAKE_VERSION ||
         atlasDim != (uint32_t)Font_atlasDim(NULL) ||
-        pageCount == 0 || pageCount > (uint32_t)FONT_PAGES_MAX ||
+        pageCount == 0 || pageCount > glyphCount ||
         glyphCount > BAKE_GLYPH_MAX)
         return false;
     if (outGlyphCount)
@@ -650,7 +635,7 @@ static bool writeBakedFile(const char *bakedPath, const char *familyName,
     size_t pageTotal = Font_pageCount(font);
     if (glyphTotal == 0 || glyphTotal > BAKE_GLYPH_MAX)
         return false;
-    if (pageTotal == 0 || pageTotal > (size_t)FONT_PAGES_MAX)
+    if (pageTotal == 0 || pageTotal > glyphTotal)
         return false;
     uint32_t *cps = (uint32_t*) malloc(glyphTotal * sizeof(uint32_t));
     GlyphMetrics *ms = (GlyphMetrics*) malloc(glyphTotal * sizeof(GlyphMetrics));
@@ -818,8 +803,8 @@ Font *Font_openBaked(const char *familyName) {
     (void)srcMtime;
     if (!ok || magic != BAKE_MAGIC || version != BAKE_VERSION ||
         atlasDim != (uint32_t)Font_atlasDim(NULL) ||
-        pageCount == 0 || pageCount > (uint32_t)FONT_PAGES_MAX ||
-        glyphCount == 0 || glyphCount > BAKE_GLYPH_MAX) {
+        pageCount == 0 || glyphCount == 0 || pageCount > glyphCount ||
+        glyphCount > BAKE_GLYPH_MAX) {
         fclose(f);
         return NULL;
     }

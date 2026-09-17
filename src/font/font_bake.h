@@ -18,7 +18,7 @@
 // dictionary: put a name in, get renderable glyphs out, no FontBook
 // round-trip, no TTF processing. The dictionary covers the font's full cmap
 // (every codepoint the TTF maps, packed across 2048^2 pages — ~350 SDF
-// glyphs per page, up to FONT_PAGES_MAX pages). Codepoints outside the
+// glyphs per page, with no page ceiling). Codepoints outside the
 // dictionary resolve at runtime through the platform color cascade (emoji)
 // when the handle carries a family name — chat-bubble emoji works without
 // prebaking thousands of glyphs.
