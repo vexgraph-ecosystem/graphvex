@@ -6,22 +6,25 @@
 #include "graphvex/type.h"
 #include "paint/brush.h"
 
-// paint/vector_brush.h — Gradient/pattern brush (fixed 8 stops + affine snap).
+// paint/vector_brush.h — Gradient/pattern brush (grown stops + affine snap).
 //
 // A VectorBrush extends Brush by embedding it first (upcast with
 // VectorBrush_asBrush to Brush). Stops live in vector space
 // (resolution-free); pipelines resolve color from stops while tint and
-// master alpha come from the embedded base.
+// master alpha come from the embedded base. The stop table starts at
+// VECTOR_BRUSH_STOPS_INIT and doubles on demand (the Dynamic Scalability &
+// Anti-Hardcoding Law) — there is no stop ceiling.
 
-#define VECTOR_BRUSH_STOPS_MAX 8u
+#define VECTOR_BRUSH_STOPS_INIT 8u
 
 typedef struct VectorBrush {
     // --- VectorBrush core (owner fields: base first for upcast) ---
     Brush base;            // embed-first base (color + opacity + typeId)
-    // --- Stops part (fixed 8 gradient stops) ---
-    uint32_t colors[8];    // packed stop colors (0xAARRGGBB)
-    float offsets[8];      // stop positions [0..1] parallel to colors
-    uint32_t stopCount;    // live stops in [0..8]
+    // --- Stops part (heap-grown stop table) ---
+    uint32_t *colors;      // packed stop colors (0xAARRGGBB)
+    float *offsets;        // stop positions [0..1] parallel to colors
+    uint32_t stopCount;    // live stops in [0..stopCap]
+    uint32_t stopCap;      // allocated stop slots (doubles on demand)
     // --- Transform part (affine snap for gradient space) ---
     float transform[6];    // 2D affine [a b c d tx ty], identity default
 } VectorBrush;
@@ -43,7 +46,10 @@ const Brush *VectorBrush_constBrush(const VectorBrush *self);
 void VectorBrush_setColor(VectorBrush *self, uint32_t color);
 void VectorBrush_setOpacity(VectorBrush *self, float opacity);
 
-// Symmetric mutators for stops + transform (null-safe no-op on null self)
+// Symmetric mutators for stops + transform (null-safe no-op on null self).
+// Growable stop verbs (setStopCount/setStop/setColors/setOffsets) reserve
+// capacity first and are a null-safe no-op if that reservation fails (OOM),
+// keeping the current stops (the Cold-Strict, Hot-Minimal Validation Law).
 void VectorBrush_setStopCount(VectorBrush *self, uint32_t n);
 void VectorBrush_setStop(VectorBrush *self, uint32_t index, uint32_t color, float offset);
 void VectorBrush_setColors(const uint32_t *colors, uint32_t count, VectorBrush *dest);
