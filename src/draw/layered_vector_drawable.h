@@ -12,10 +12,14 @@
 
 // draw/layered_vector_drawable.h — Multi-layer vector board owning N VectorDrawable layers.
 //
-// A LayeredVectorDrawable is the multi-layer vector board: an array of owned
-// VectorDrawable layers with per-layer opacity, blend mode, and a 32-bit visibility
-// bitmask. Layers are exposed exclusively through LayeredVectorDrawable_layer* verbs
-// per the Sub-Part Field Segregation Law. Renders visible vector layers onto a destination raster Drawable.
+// A LayeredVectorDrawable is the multi-layer vector board: a flat,
+// data-oriented row table (LayeredVectorRow) of owned VectorDrawable layers
+// carrying per-row opacity, blend mode, and visibility flag — no fixed layer
+// count and no 32-bit bitmask width limit (the Data-Oriented Storage Law +
+// the Dynamic Scalability & Anti-Hardcoding Law). Rows are grown by doubling
+// and are exposed exclusively through LayeredVectorDrawable_layer* verbs per
+// the Sub-Part Field Segregation Law. Renders visible vector layers onto a
+// destination raster Drawable.
 
 #ifndef LAYER_BLEND_NORMAL
 #define LAYER_BLEND_NORMAL   0u
@@ -24,23 +28,25 @@
 #define LAYER_BLEND_OVERLAY  3u
 #endif
 
-#ifndef LAYER_MAX_COUNT
-#define LAYER_MAX_COUNT 32u
-#endif
+// SLOT RECORD — behaviourless per-layer row owned by LayeredVectorDrawable
+// (the Single Class Per File Law slot-record exception).
+typedef struct LayeredVectorRow {
+    VectorDrawable *drawable; // owned layer drawable
+    float opacity;            // per-layer opacity [0..1]
+    uint32_t blendMode;       // 0=NORMAL, 1=MULTIPLY, 2=SCREEN, 3=OVERLAY
+    bool visible;             // per-row visibility (no bitmask width limit)
+} LayeredVectorRow;
 
 typedef struct LayeredVectorDrawable {
     // --- LayeredVectorDrawable core ---
-    VectorDrawable **layers; // dynamic array of owned VectorDrawable* layers
-    float *opacities;        // per-layer opacity [0..1]
-    uint32_t *blendModes;    // per-layer blend mode (0=NORMAL, 1=MULTIPLY, 2=SCREEN, 3=OVERLAY)
-    size_t layerCount;       // number of active layers (<= 32)
-    size_t layerCapacity;    // allocated layer array capacity
-    uint32_t activeIndex;    // index of active target layer
-    uint32_t visibleMask;    // 32-bit visibility bitmask
-    uint32_t width;          // board pixel width
-    uint32_t height;         // board pixel height
-    bool dirty;              // true when any layer mutated or order changed
-    uint64_t typeId;         // block-header type id (TYPE_LAYERED_VECTOR_DRAWABLE_SINGLETON)
+    LayeredVectorRow *layers; // flat row table, doubles on demand
+    size_t layerCount;        // active rows
+    size_t layerCapacity;     // allocated row slots
+    uint32_t activeIndex;     // index of active target layer
+    uint32_t width;           // board pixel width
+    uint32_t height;          // board pixel height
+    bool dirty;               // true when any layer mutated or order changed
+    uint64_t typeId;          // block-header type id (TYPE_LAYERED_VECTOR_DRAWABLE_SINGLETON)
 } LayeredVectorDrawable;
 
 // Constructors
@@ -65,6 +71,8 @@ void LayeredVectorDrawable_layerSetVisible(LayeredVectorDrawable *self, uint32_t
 bool LayeredVectorDrawable_layerIsVisible(const LayeredVectorDrawable *self, uint32_t index);
 
 // Owner Mutators/Accessors
+// setVisibleMask/getVisibleMask are a 32-row compatibility view (bit i = row i
+// visibility); the row flag is the storage and has no width limit.
 void LayeredVectorDrawable_setActiveIndex(LayeredVectorDrawable *self, uint32_t activeIndex);
 void LayeredVectorDrawable_setVisibleMask(LayeredVectorDrawable *self, uint32_t visibleMask);
 void LayeredVectorDrawable_setWidth(LayeredVectorDrawable *self, uint32_t width);

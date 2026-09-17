@@ -11,31 +11,39 @@
 
 // draw/layered_drawable.h — Multi-layer raster board owning N Drawable layers (Ibis).
 //
-// A LayeredDrawable is the multi-layer raster board: an array of owned
-// Drawable layers with per-layer opacity, blend mode, and a 32-bit visibility
-// bitmask. Layers are exposed exclusively through LayeredDrawable_layer* verbs
-// per the Sub-Part Field Segregation Law. CPU stub: records layer mutations and dirty flag without GPU rasterization.
+// A LayeredDrawable is the multi-layer raster board: a flat, data-oriented
+// row table (LayeredRow) of owned Drawable layers carrying per-row opacity,
+// blend mode, and visibility flag — no fixed layer count and no 32-bit
+// bitmask width limit (the Data-Oriented Storage Law + the Dynamic
+// Scalability & Anti-Hardcoding Law). Rows are grown by doubling and are
+// exposed exclusively through LayeredDrawable_layer* verbs per the Sub-Part
+// Field Segregation Law. CPU stub: records layer mutations and dirty flag
+// without GPU rasterization.
 
 #define LAYER_BLEND_NORMAL   0u
 #define LAYER_BLEND_MULTIPLY 1u
 #define LAYER_BLEND_SCREEN   2u
 #define LAYER_BLEND_OVERLAY  3u
 
-#define LAYER_MAX_COUNT 32u
+// SLOT RECORD — behaviourless per-layer row owned by LayeredDrawable
+// (the Single Class Per File Law slot-record exception).
+typedef struct LayeredRow {
+    Drawable *drawable; // owned layer drawable
+    float opacity;      // per-layer opacity [0..1]
+    uint32_t blendMode; // 0=NORMAL, 1=MULTIPLY, 2=SCREEN, 3=OVERLAY
+    bool visible;       // per-row visibility (no bitmask width limit)
+} LayeredRow;
 
 typedef struct LayeredDrawable {
     // --- LayeredDrawable core ---
-    Drawable **layers;    // array of owned Drawable* layers
-    float *opacities;     // per-layer opacity [0..1]
-    uint32_t *blendModes; // per-layer blend mode (0=NORMAL, 1=MULTIPLY, 2=SCREEN, 3=OVERLAY)
-    size_t layerCount;
-    size_t layerCapacity;
-    uint32_t activeIndex;
-    uint32_t visibleMask;
-    uint32_t width;
-    uint32_t height;
-    uint64_t typeId;
-    bool dirty;
+    LayeredRow *layers;   // flat row table, doubles on demand
+    size_t layerCount;    // active rows
+    size_t layerCapacity; // allocated row slots
+    uint32_t activeIndex; // index of active target layer
+    uint32_t width;       // board pixel width
+    uint32_t height;      // board pixel height
+    uint64_t typeId;      // block-header type id (TYPE_LAYERED_DRAWABLE_SINGLETON)
+    bool dirty;           // true when any layer mutated or order changed
 } LayeredDrawable;
 
 // Constructors
@@ -60,6 +68,8 @@ void LayeredDrawable_layerSetVisible(LayeredDrawable *self, uint32_t index, bool
 bool LayeredDrawable_layerIsVisible(const LayeredDrawable *self, uint32_t index);
 
 // Owner Mutators/Accessors
+// setVisibleMask/getVisibleMask are a 32-row compatibility view (bit i = row i
+// visibility); the row flag is the storage and has no width limit.
 void LayeredDrawable_setActiveIndex(LayeredDrawable *self, uint32_t activeIndex);
 void LayeredDrawable_setVisibleMask(LayeredDrawable *self, uint32_t visibleMask);
 void LayeredDrawable_setWidth(LayeredDrawable *self, uint32_t width);
