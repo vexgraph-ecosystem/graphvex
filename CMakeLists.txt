@@ -130,7 +130,7 @@ if(APPLE)
 endif()
 endif() # NOT TARGET graphvex
 
-set(GRAPHVEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../_tests/graphvex")
+set(GRAPHVEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/graphvex")
 if(NOT EXISTS "${GRAPHVEX_TEST_DIR}")
     set(GRAPHVEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 endif()
@@ -161,3 +161,13 @@ if(EXISTS "${GRAPHVEX_TEST_DIR}/texture_retire_test.c" AND NOT TARGET texture_re
     )
     target_link_libraries(texture_retire_test PRIVATE graphvex)
 endif()
+
+# GfxLoop demand-driven scheduler and 2-VkImage bridge test
+if(EXISTS "${GRAPHVEX_TEST_DIR}/gfx_loop_test.c" AND NOT TARGET gfx_loop_test)
+    add_executable(gfx_loop_test
+        ${GRAPHVEX_TEST_DIR}/gfx_loop_test.c
+    )
+    target_link_libraries(gfx_loop_test PRIVATE graphvex)
+    target_compile_options(gfx_loop_test PRIVATE -Wall -Wextra -Werror)
+endif()
+

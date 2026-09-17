@@ -79,7 +79,7 @@ bool GraphicsLayer_applySize(void *layer, int pxW, int pxH, float scale) {
 }
 
 // Opaque device store: retained by the layer, never dereferenced here.
-void GraphicsLayer_setDevice(void *layer, void *device) {
+void GraphicsLayer_applyDevice(void *layer, void *device) {
     if (!layer)
         return;
     @autoreleasepool {
@@ -87,3 +87,16 @@ void GraphicsLayer_setDevice(void *layer, void *device) {
         metal.device = (__bridge id<MTLDevice>) device;
     }
 }
+
+// Explicit CoreAnimation transaction boundary for zero-gap frame presentation.
+// Wrapping layer drawable flips and swapchain commits inside this bracket ensures
+// WindowServer updates the screen atomically with no tearing or intermediate drag lag.
+void GraphicsLayer_transactionBegin(void) {
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+}
+
+void GraphicsLayer_transactionCommit(void) {
+    [CATransaction commit];
+}
+

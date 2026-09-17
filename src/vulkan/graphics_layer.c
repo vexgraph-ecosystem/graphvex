@@ -86,6 +86,7 @@ typedef struct GraphicsLayer {
     uint64_t typeId;
     void *layer;
     void *device;
+    void *image;
     int role;
     float scale;
     int pointW;
@@ -113,6 +114,7 @@ GraphicsLayer *GraphicsLayer_1(int role) {
     (*self).typeId = TYPE_GRAPHICS_LAYER_SINGLETON;
     (*self).layer = nullptr;
     (*self).device = nullptr;
+    (*self).image = nullptr;
     (*self).role = (role == GRAPHICS_LAYER_CONTENT) ? GRAPHICS_LAYER_CONTENT : GRAPHICS_LAYER_SCENE;
     (*self).scale = 1.0f;
     (*self).pointW = 0;
@@ -131,6 +133,7 @@ void GraphicsLayer_destroy(GraphicsLayer *self) {
     (*self).typeId = 0;
     (*self).layer = nullptr;
     (*self).device = nullptr;
+    (*self).image = nullptr;
     (*self).attached = false;
     free(self);
 }
@@ -242,6 +245,12 @@ void GraphicsLayer_setScale(GraphicsLayer *self, float scale) {
     (*self).resizePending = true;
 }
 
+void GraphicsLayer_setImage(GraphicsLayer *self, void *vkImage) {
+    if (!GraphicsLayer_isValid(self))
+        return;
+    (*self).image = vkImage;
+}
+
 // GETTERS
 void *GraphicsLayer_getLayer(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
@@ -253,6 +262,12 @@ void *GraphicsLayer_getDevice(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return nullptr;
     return (*self).device;
+}
+
+void *GraphicsLayer_getImage(const GraphicsLayer *self) {
+    if (!GraphicsLayer_isValid(self))
+        return nullptr;
+    return (*self).image;
 }
 
 int GraphicsLayer_getRole(const GraphicsLayer *self) {

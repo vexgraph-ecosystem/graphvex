@@ -104,15 +104,25 @@ void GraphicsLayer_setDevice(GraphicsLayer *self, void *device);
 // --- Setters ---
 void GraphicsLayer_setRole(GraphicsLayer *self, int role);
 void GraphicsLayer_setScale(GraphicsLayer *self, float scale);
+void GraphicsLayer_setImage(GraphicsLayer *self, void *vkImage);
 
 // --- Getters (the Symmetric Getter/Setter Completeness Law: null-safe, defaults on nullptr) ---
 void *GraphicsLayer_getLayer(const GraphicsLayer *self);
 void *GraphicsLayer_getDevice(const GraphicsLayer *self);
+void *GraphicsLayer_getImage(const GraphicsLayer *self);
 int GraphicsLayer_getRole(const GraphicsLayer *self);
 float GraphicsLayer_getScale(const GraphicsLayer *self);
 bool GraphicsLayer_isAttached(const GraphicsLayer *self);
 bool GraphicsLayer_needsResize(const GraphicsLayer *self);
 void GraphicsLayer_getPointSize(const GraphicsLayer *self, int *outW, int *outH);
 void GraphicsLayer_getPixelSize(const GraphicsLayer *self, int *outW, int *outH);
+
+// --- Platform layer factory (implemented in objc/graphics_layer_cocoa.m on Apple) ---
+void *GraphicsLayer_makeLayer(int role);
+void  GraphicsLayer_freeLayer(void *layer);
+bool  GraphicsLayer_applySize(void *layer, int pxW, int pxH, float scale);
+void  GraphicsLayer_applyDevice(void *layer, void *device);
+void  GraphicsLayer_transactionBegin(void);
+void  GraphicsLayer_transactionCommit(void);
 
 #endif
