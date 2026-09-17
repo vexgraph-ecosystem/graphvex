@@ -204,6 +204,22 @@ bool VkPane_isDirty(int index) {
     return (*chain).dirty;
 }
 
+// Registry-wide demand probe (the Present-On-Demand Law): true when ANY
+// active chain carries repaint demand. Lock-free single-byte reads exactly
+// like VkPane_isDirty — the loop consumer (a GfxLoop demand probe at 60Hz)
+// may miss an in-flight mark by one tick at worst and repaint a step late,
+// never crash (drop-degrade, the Cold-Strict, Hot-Minimal Validation Law).
+bool VkPane_hasDemand(void) {
+    if (s_count <= 0)
+        return false;
+    for (int i = 0; i < s_count; i++) {
+        VkPaneChain *chain = &s_chains[i];
+        if ((*chain).active && (*chain).dirty)
+            return true;
+    }
+    return false;
+}
+
 // the Ecosystem Vulkan Safety Nets Law flight probe: true only when every pane's last submit fence is
 // signaled — no pane CB that sampled bindless descriptors is still executing.
 // Non-blocking: GetFenceStatus poll only, under a try of the registry lock

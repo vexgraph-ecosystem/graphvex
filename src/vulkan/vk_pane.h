@@ -58,6 +58,12 @@ uint64_t VkPane_skipCount(int index);
 void VkPane_markDirty(int index, bool dirty);
 bool VkPane_isDirty(int index);
 
+// Registry-wide repaint demand (the Present-On-Demand Law): true when ANY
+// active chain is dirty. Lock-free single-byte reads; a loop consumer (e.g.
+// a demand probe) may miss an in-flight mark by one tick at worst — a late
+// repaint, never a crash. Mirrors the per-chain pair above.
+bool VkPane_hasDemand(void);
+
 // Flight probe for texture-retire safety (the Ecosystem Vulkan Safety Nets Law net): true only when no
 // pane submit is pending anywhere in the registry — i.e. no pane CB that
 // sampled bindless descriptors is still executing (FreeMemory under a flying
