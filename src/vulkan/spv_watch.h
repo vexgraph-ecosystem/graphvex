@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "annotation/intention.h"
+
 // vulkan/spv_watch.h — SPV change detector (no Vulkan dependency).
 //
 // Shaders are data: loadSpvAny resolves each name through a precedence
@@ -14,6 +16,7 @@
 // calls Vk_reloadShaders; here detection is the seam.
 
 #define SPV_WATCH_MAX_NAMES 8
+;;INTENTION("the core pipeline shader catalog is a fixed, hand-maintained set of 8 bundled blobs; new core stages extend the list in source, never at runtime")
 
 typedef struct SpvWatch SpvWatch;
 
