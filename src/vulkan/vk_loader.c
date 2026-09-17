@@ -3,6 +3,7 @@
 #include "vulkan/vk.h"
 #include "vulkan/vk_mac.h"
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 
 #include "annotation/overview.h"
 #include "annotation/incomplete.h"
+#include "struct/chunked_list.h"
 
 ;;OVERVIEW
 /**
@@ -35,10 +37,17 @@
  *
  *  * STRUCT FIELDS (local to this file):
  *  * ----------------------------------------------------------------------------
- *  *   Trampoline (one row per exported symbol):
+ *  *   Trampoline (one stable row per exported symbol, held in a ChunkedList):
  *  *     _Atomic(void*) ptr;                    // current generation target
  *  *     _Atomic(void*) fallback_ptr;           // prior generation (mid-swap cover)
  *  *     char name[64];                         // export symbol name
+ *  *   The list replaces the old fixed 64-row array (the Dynamic Scalability &
+ *  *   Anti-Hardcoding Law) and its count-then-check create path, which leaked
+ *  *   the counter past the ceiling on overflow. Rows never move, so
+ *  *   hot_vk_get_symbol stays a lock-free reader while registration runs on
+ *  *   the loader thread (the ChunkedList single-writer contract): a reader may
+ *  *   transiently miss a row whose name is still being written during a load
+ *  *   and fails closed to nullptr.
  *  *
  *  *   VkRetiredHandle (one parked dylib):
  *  *     void *handle;                          // retired dylib (nullptr = free slot)
@@ -95,49 +104,84 @@ static VkModuleShutdownFn s_module_shutdown = nullptr;
 static VkModuleGetTrampolinesFn s_module_get_trampolines = nullptr;
 static VkModuleGetManifestFn s_module_get_manifest = nullptr;
 
-// Trampoline table (atomic)
-#define MAX_TRAMPOLINES 64
+// Trampoline table: one stable row per exported symbol, held in a ChunkedList
+// (the Dynamic Scalability & Anti-Hardcoding Law — no row ceiling, and no
+// leaked counter: the old count-then-check create path incremented past its
+// fixed array on overflow and pinned every later create to failure).
+// The row layout is explicit because the Struct registry does not know it;
+// elementClass 0 tags the chunk blocks as unregistered rows. At 80 bytes per
+// row on the 128-byte default budget each row gets a chunk to itself, so one
+// row's atomics never share chunk bytes with a neighbour row.
 typedef struct {
     _Atomic(void*) ptr;
     _Atomic(void*) fallback_ptr;
     char name[64];
 } Trampoline;
 
-static Trampoline s_trampolines[MAX_TRAMPOLINES];
-static _Atomic uint32_t s_trampoline_count = 0;
+static ChunkedList *s_trampolines = nullptr;
 
-// Find or create a trampoline
+// Loader-thread-only: create the table on first registration. Registration
+// (find-or-create plus patching) runs on the loader thread; hot_vk_get_symbol
+// is the lock-free reader.
+static bool trampolineEnsure(void) {
+    if (!s_trampolines)
+        s_trampolines = ChunkedList_3(0u, sizeof(Trampoline), VEX_CHUNKED_BYTES_DEFAULT);
+    return s_trampolines != nullptr;
+}
+
+static Trampoline *trampolineRow(int idx) {
+    if (idx < 0 || !s_trampolines)
+        return nullptr;
+    return (Trampoline*) ChunkedList_slot(s_trampolines, (uint32_t)idx);
+}
+
+// Find or create a trampoline (loader thread only)
 static int trampoline_find(const char *name) {
-    uint32_t count = atomic_load(&s_trampoline_count);
+    if (!name || !s_trampolines)
+        return -1;
+    uint32_t count = ChunkedList_size(s_trampolines);
     for (uint32_t i = 0; i < count; i++) {
-        if (strcmp(s_trampolines[i].name, name) == 0) return (int)i;
+        Trampoline *row = (Trampoline*) ChunkedList_slot(s_trampolines, i);
+        if (!row || (*row).name[0] == '\0')
+            continue;
+        if (strcmp((*row).name, name) == 0)
+            return (int)i;
     }
     return -1;
 }
 
 static int trampoline_create(const char *name) {
-    uint32_t idx = atomic_fetch_add(&s_trampoline_count, 1);
-    if (idx >= MAX_TRAMPOLINES) return -1;
-    strncpy(s_trampolines[idx].name, name, 63);
-    s_trampolines[idx].name[63] = '\0';
-    atomic_store(&s_trampolines[idx].ptr, nullptr);
-    atomic_store(&s_trampolines[idx].fallback_ptr, nullptr);
-    return (int)idx;
+    if (!name || !trampolineEnsure())
+        return -1;
+    uint8_t *slot = ChunkedList_addSlot(s_trampolines);
+    if (!slot)
+        return -1;
+    Trampoline *row = (Trampoline*) slot;
+    strncpy((*row).name, name, 63);
+    (*row).name[63] = '\0';
+    // ptr/fallback_ptr arrive zeroed from addSlot; the commit already published
+    // the row, and the name store above completes it on this thread.
+    uint32_t count = ChunkedList_size(s_trampolines);
+    if (count == 0u || count > (uint32_t)INT32_MAX)
+        return -1;
+    return (int)(count - 1u);
 }
 
 void *hot_vk_get_symbol(const char *name) {
     int idx = trampoline_find(name);
-    if (idx < 0) return nullptr;
-    void *ptr = atomic_load(&s_trampolines[idx].ptr);
+    Trampoline *row = trampolineRow(idx);
+    if (!row)
+        return nullptr;
+    void *ptr = atomic_load(&(*row).ptr);
     if (!ptr) {
         for (int retry = 0; retry < 4 && !ptr; retry++) {
             #if defined(__aarch64__)
             __asm__ volatile("yield");
             #endif
-            ptr = atomic_load(&s_trampolines[idx].ptr);
+            ptr = atomic_load(&(*row).ptr);
         }
         if (!ptr) {
-            ptr = atomic_load(&s_trampolines[idx].fallback_ptr);
+            ptr = atomic_load(&(*row).fallback_ptr);
         }
     }
     return ptr;
@@ -284,6 +328,11 @@ bool hot_vk_init_loader(void) {
     if (cache_data)
         free(cache_data);
 
+    // The trampoline table lives as long as the loader: rows persist across
+    // reloads so a reload patches familiar rows instead of re-creating them.
+    if (!trampolineEnsure())
+        return false;
+
     s_initialized = true;
     printf("[vk_loader] initialized (device=%p, cache=%p)\n",
            (void*) Vk_getDevice(), (void*) s_cache);
@@ -352,12 +401,13 @@ bool hot_vk_load_module(const char *path) {
     for (uint32_t i = 0; i < trampoline_count; i++) {
         int idx = trampoline_find(trampolines[i].name);
         if (idx < 0) idx = trampoline_create(trampolines[i].name);
-        if (idx >= 0) {
-            void *old = atomic_load(&s_trampolines[idx].ptr);
+        Trampoline *row = trampolineRow(idx);
+        if (row) {
+            void *old = atomic_load(&(*row).ptr);
             if (old && old != trampolines[i].function) {
-                atomic_store(&s_trampolines[idx].fallback_ptr, old);
+                atomic_store(&(*row).fallback_ptr, old);
             }
-            atomic_store(&s_trampolines[idx].ptr, trampolines[i].function);
+            atomic_store(&(*row).ptr, trampolines[i].function);
         }
     }
 
@@ -383,6 +433,14 @@ void hot_vk_shutdown(void) {
     s_vk_retired = NULL;
     s_vk_retiredCap = 0;
     s_initialized = false;
+
+    // The table requires quiescence like every ChunkedList teardown: no
+    // get_symbol readers may be in flight (shutdown already closed the
+    // modules they resolve through).
+    if (s_trampolines) {
+        ChunkedList_free(s_trampolines);
+        s_trampolines = nullptr;
+    }
 
     // Persist + destroy pipeline cache. vkGetPipelineCacheData sizes the
     // blob; a zero size or error simply skips the write. All handles come
