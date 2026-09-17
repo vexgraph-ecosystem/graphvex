@@ -192,10 +192,10 @@ VkRenderPass VkMac_getIOSurfacePass(void) {
 }
 
 // Resize render trampoline: attempts a synchronized present on thread 0 during OS resize.
+// The seam canvas always presents — it composites the retained board targets
+// (the window's primary on-screen layer); DIRECT pane chains present through
+// their own paths on demand.
 void VkMac_resizeRenderTrampoline(void *userdata) {
     (void) userdata;
-    extern int VkPane_count(void);
-    if (VkPane_count() == 0) {
-        Vk_clearPresent();
-    }
+    Vk_clearPresent();
 }
