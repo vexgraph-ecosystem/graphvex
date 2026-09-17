@@ -54,8 +54,8 @@
  *   - GfxLoop_markDirty(self, window)
  *   - GfxLoop_installPoll(self, pollFn)
  *   - GfxLoop_step(self)
- *   - GfxLoop_run(self, app)
- *   - GfxLoop_runApplication(app)
+ *   - GfxLoop_run(self, context, continueFn)
+ *   - GfxLoop_runApplication(context, continueFn, pollFn)
  *   - GfxLoop_modalTick()
  * Getters:
  *   - GfxLoop_getClientCount(self)
@@ -252,7 +252,7 @@ bool GfxLoop_step(GfxLoop *self) {
     return true;
 }
 
-int GfxLoop_run(GfxLoop *self, void *app) {
+int GfxLoop_run(GfxLoop *self, void *context, GfxContinueFn continueFn) {
     if (!GfxLoop_isValid(self))
         return -1;
 
@@ -262,21 +262,15 @@ int GfxLoop_run(GfxLoop *self, void *app) {
     uint64_t targetSliceNs = 1000000000ULL / (*self).targetFps;
     const struct timespec restSlice = {0, 1000000L}; // 1ms sleep
 
+    // The lifecycle contract is the caller's: each pass asks continueFn —
+    // completion AND per-pass host servicing live there. No layout mirroring.
     while (atomic_load_explicit(&(*self).running, memory_order_relaxed)) {
+        if (continueFn && !continueFn(context))
+            break;
+
         uint64_t startNs = NanoTime_now();
 
         GfxLoop_step(self);
-
-        // Check if all windows belonging to app closed
-        if (app) {
-            typedef struct AppFinishedMirror {
-                char dummy[64 + 64 + 16 + 512 + sizeof(void*) * 16 + sizeof(uint32_t)];
-                _Atomic bool running;
-            } AppFinishedMirror;
-            AppFinishedMirror *am = (AppFinishedMirror*) app;
-            if (!atomic_load_explicit(&(*am).running, memory_order_relaxed))
-                break;
-        }
 
         uint64_t spentNs = NanoTime_now() - startNs;
         if (spentNs < targetSliceNs) {
@@ -291,9 +285,11 @@ int GfxLoop_run(GfxLoop *self, void *app) {
     return 0;
 }
 
-int GfxLoop_runApplication(void *app) {
+int GfxLoop_runApplication(void *context, GfxContinueFn continueFn, GfxPollFn pollFn) {
     GfxLoop *loop = GfxLoop_default();
-    return GfxLoop_run(loop, app);
+    if (pollFn)
+        GfxLoop_installPoll(loop, pollFn);
+    return GfxLoop_run(loop, context, continueFn);
 }
 
 void GfxLoop_modalTick(void) {

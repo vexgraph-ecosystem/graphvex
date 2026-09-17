@@ -88,11 +88,19 @@ void GfxLoop_installPoll(GfxLoop *self, GfxPollFn pollFn);
 // One frame step (calculates dt, pumps events, ticks dirty clients, presents with transaction)
 bool GfxLoop_step(GfxLoop *self);
 
-// Full blocking run loop for an application (used by Kernel_runApplication)
-int GfxLoop_run(GfxLoop *self, void *app);
+// Full blocking run loop for an application (used by Kernel_runApplication).
+// The LIFECYCLE CONTRACT is explicit — graphvex never inspects a foreign
+// object's layout:
+//   continueFn — "keep looping?" query, asked once per pass. It owns the
+//                completion predicate AND any per-pass host servicing (e.g.
+//                hot-reload polls). Null means loop until GfxLoop_stop.
+//   pollFn     — the Thread-0 event pump, installed on the default loop for
+//                the duration of the run. Null keeps whatever is installed.
+typedef bool (*GfxContinueFn)(void *context);
+int GfxLoop_run(GfxLoop *self, void *context, GfxContinueFn continueFn);
 
 // Global bridge for hotcwap Kernel_runApplication
-int GfxLoop_runApplication(void *app);
+int GfxLoop_runApplication(void *context, GfxContinueFn continueFn, GfxPollFn pollFn);
 
 // Modal tracking bridge: keeps presentation alive through live-resize drags
 void GfxLoop_modalTick(void);
