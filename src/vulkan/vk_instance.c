@@ -1767,6 +1767,17 @@ static bool presentFrameLocked(void) {
         s_preFrameRenderer(s_window, (int)s_extent.width, (int)s_extent.height, s_frameRendererUserdata);
     }
 
+    // The Pane-of-Glass Law steady-state present split: board panes (the
+    // scene/content board chains attached by Darling_attachPanelBoards inside
+    // preFrame) ARE the visual stack — their CAMetalLayers sit over the
+    // window's own seam layer, so the window swapchain would only paint
+    // behind glass. When panes exist, paint + present every chain and skip
+    // the window swapchain entirely — the exact mirror of the resize hook's
+    // split, in steady state (Darling_renderFrame never stamps plain UI into
+    // this chain, so the seam layer is the pane-less legacy fallback only).
+    if (VkPane_count() > 0)
+        return VkPane_presentAll();
+
     uint32_t imageIndex = 0;
     VkResult ar = AcquireNextImageKHR_fn(s_device, s_swapchain, 25000000ULL /* ~1 frame */,
                                          s_semAcquire, VK_NULL_HANDLE, &imageIndex);
