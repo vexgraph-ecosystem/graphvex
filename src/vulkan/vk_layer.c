@@ -79,6 +79,7 @@
  *   - VkLayer_ready() / VkLayer_count()
  *   - VkLayer_find(owner)           : slot index for the owner handle
  *   - VkLayer_isDirty(index)        : per-layer repaint demand probe
+ *   - VkLayer_hasDemand()           : registry-wide demand probe (the Present-On-Demand Law)
  *   - VkLayer_flightIdle()          : true when no layer submit is pending
  *   - VkLayer_presentCount(index) / VkLayer_skipCount(index)
  * ============================================================================
@@ -203,6 +204,23 @@ bool VkLayer_isDirty(int index) {
     if (!(*chain).active)
         return false;
     return (*chain).dirty;
+}
+
+// Registry-wide demand probe (the Present-On-Demand Law): true when ANY
+// active layer chain carries repaint demand. Lock-free single-byte reads
+// exactly like VkLayer_isDirty — the consumer (a GfxLoop demand probe at
+// thread-0 cadence) may miss an in-flight mark by one tick at worst and
+// repaint a step late, never crash (drop-degrade, the Cold-Strict,
+// Hot-Minimal Validation Law).
+bool VkLayer_hasDemand(void) {
+    if (s_count <= 0)
+        return false;
+    for (int i = 0; i < s_count; i++) {
+        VkLayerChain *chain = &s_chains[i];
+        if ((*chain).active && (*chain).dirty)
+            return true;
+    }
+    return false;
 }
 
 // the Ecosystem Vulkan Safety Nets Law flight probe: true only when every layer's last submit fence is

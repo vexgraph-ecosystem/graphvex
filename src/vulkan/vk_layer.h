@@ -63,6 +63,12 @@ int VkLayer_find(void *owner);
 bool VkLayer_ready(void);
 int VkLayer_count(void);
 
+// Registry-wide repaint-demand probe (the Present-On-Demand Law): true when
+// ANY active layer chain is dirty. The GfxLoop demand probe calls this every
+// pass so retained boards/COMPOSITED scenes re-present on demand while the
+// loop rests.
+bool VkLayer_hasDemand(void);
+
 // Lifetime diagnostics per layer (stale index answers 0): successful renders
 // and fence-poll/clean skips. Read by the ANTI_VK_TRACE probe; zero hot-path
 // logging.
