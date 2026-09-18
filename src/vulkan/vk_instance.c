@@ -721,7 +721,10 @@ static bool rebuildTargets(void) {
     swci.imageArrayLayers = 1;
     // The blit is the writer now: transfer-dst is a spec-mandated supported
     // usage for swapchain images, color-attachment stays for safety.
-    swci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    // Per the Ecosystem Vulkan Safety Nets Law: the drawable pass ends in
+    // TRANSFER_SRC_OPTIMAL and the dump copy samples from TRANSFER_SRC, so
+    // TRANSFER_SRC usage is required or MoltenVK page-faults the submit.
+    swci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     swci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swci.preTransform = caps.currentTransform;
 
@@ -1897,17 +1900,6 @@ static bool presentFrameTail(uint32_t imageIndex) {
         s_frameRenderer(s_cmdBuffer, (int)s_extent.width, (int)s_extent.height, s_frameRendererUserdata);
 
     CmdEndRenderPass_fn(s_cmdBuffer);
-
-    // 3. Availability hand-off: color writes -> transfer (for dump) / present
-    VkImageMemoryBarrier drawDone = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-    drawDone.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    drawDone.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    drawDone.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    drawDone.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    drawDone.image = s_swapchainImages[imageIndex];
-    drawDone.subresourceRange = toPrep.subresourceRange;
-    CmdPipelineBarrier_fn(s_cmdBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &drawDone);
 
     if (s_dumpEnabled && s_dumpStage == 0) {
         if (dumpAllocStage(s_extent.width, s_extent.height)) {
