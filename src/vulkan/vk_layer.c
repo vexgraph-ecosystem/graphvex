@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 ;;OVERVIEW
 /**
@@ -49,6 +50,8 @@
  *   s_compLayout/s_compPipeline    // composite quad pipeline (single sampler)
  *   s_compDescLayout/Pool/Set      // one mutable sampler2D set, per-draw update
  *   s_compSampler                  // linear clamp-to-edge, shared
+ * Diagnostics env: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated
+ *   fallback (the Identity & Naming Transition Law).
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -66,8 +69,11 @@
  *                                    render; publishes the flipped slot)
  *   - VkLayer_composite(cb, ...)    : sample a published layer as a quad into
  *                                    an already-begun render pass (collage)
- *   - VkLayer_unregister(index)     : destroy targets, release CBs
- *   - VkLayer_resize(index, w, h)   : offscreen rebuild (no-op when unchanged)
+ *   - VkLayer_unregister(index)     : destroy targets, release CBs (present-flight
+ *                                    idle wait first; skip+false on budget expiry)
+ *   - VkLayer_resize(index, w, h)   : offscreen rebuild (no-op when unchanged;
+ *                                    present-flight idle wait first, skip+false
+ *                                    on budget expiry for next-tick retry)
  *   - VkLayer_shutdown()            : destroy all chains + pipeline + pool
  *
  * Setters:
@@ -78,6 +84,8 @@
  * Getters:
  *   - VkLayer_ready() / VkLayer_count()
  *   - VkLayer_find(owner)           : slot index for the owner handle
+ *   - VkLayer_extent(index)         : fixed pixel extent probe (zero-extent
+ *                                    on stale/inactive index)
  *   - VkLayer_isDirty(index)        : per-layer repaint demand probe
  *   - VkLayer_hasDemand()           : registry-wide demand probe (the Present-On-Demand Law)
  *   - VkLayer_flightIdle()          : true when no layer submit is pending
@@ -196,6 +204,16 @@ uint64_t VkLayer_skipCount(int index) {
         return 0;
     return s_chains[index].skipCount;
 }
+VkExtent2D VkLayer_extent(int index) {
+    VkExtent2D zero = { 0, 0 };
+    if (index < 0 || index >= s_count)
+        return zero;
+    VkLayerChain *chain = &s_chains[index];
+    if (!(*chain).active)
+        return zero;
+    return (*chain).extent;
+}
+
 
 bool VkLayer_isDirty(int index) {
     if (index < 0 || index >= s_count)
@@ -482,6 +500,26 @@ static bool buildLayerTargets(VkLayerChain *chain) {
 }
 
 // Tear down a layer's offscreen targets (images, views, framebuffers, memory).
+// Present-flight idle wait shared by resize/unregister: the previous tick's
+// seam submit may still sample these targets after the layer's own flight
+// fences signal — layer fences alone do not cover the composite sampler
+// (the Ecosystem Vulkan Safety Nets Law). Polls in ~1ms slices with a ~50ms
+// total budget (the Bounded Wait Law — bounded slices, never unbounded).
+// Aborts early on device loss; false means skip this tick (drop-degrade).
+static bool layerWaitPresentIdle(void) {
+    struct timespec slice;
+    slice.tv_sec = 0;
+    slice.tv_nsec = 1000000;
+    for (int i = 0; i < 50; i++) {
+        if (Vk_isDeviceLost())
+            return false;
+        if (Vk_presentFlightIdle())
+            return true;
+        nanosleep(&slice, nullptr);
+    }
+    return false;
+}
+
 static void destroyLayerTargets(VkLayerChain *chain) {
     if (!chain)
         return;
@@ -829,6 +867,15 @@ bool VkLayer_unregister(int index) {
 
 bool VkLayer_resize(int index, int width, int height) {
     SpinLock_lock(&s_layerLock);
+    // Seam sampler may still fly over these targets after the layer fences
+    // signal (the Ecosystem Vulkan Safety Nets Law — layer fences alone do
+    // not cover it). Bounded ~1ms slices, ~50ms budget; expiry skips this
+    // tick (drop-degrade, caller retries). VkLayer_shutdown already idles
+    // the device first, so teardown passes through instantly (the Teardown Order Law).
+    if (!layerWaitPresentIdle()) {
+        SpinLock_unlock(&s_layerLock);
+        return false;
+    }
 
     if (index < 0 || index >= s_count || width <= 0 || height <= 0) {
         SpinLock_unlock(&s_layerLock);
@@ -872,6 +919,16 @@ bool VkLayer_visit(void) {
         return false;
 
     SpinLock_lock(&s_layerLock);
+    // Seam sampler may still fly over these targets after the layer fences
+    // signal (the Ecosystem Vulkan Safety Nets Law — layer fences alone do
+    // not cover it). Bounded ~1ms slices, ~50ms budget; expiry skips the
+    // destroy+rebuild this tick (drop-degrade, next tick retries).
+    // VkLayer_shutdown already idles the device first, so teardown passes
+    // through instantly (the Teardown Order Law).
+    if (!layerWaitPresentIdle()) {
+        SpinLock_unlock(&s_layerLock);
+        return false;
+    }
     if (!s_renderer || s_count == 0 || !s_instanceDevice) {
         SpinLock_unlock(&s_layerLock);
         return false;
@@ -907,6 +964,11 @@ bool VkLayer_visit(void) {
         // block the walk. Non-blocking poll only: drop-degrade per the Bounded Wait Law,
         // zero logging per the Cold-Strict, Hot-Minimal Validation Law hot-minimal.
         if (GetFenceStatus_fn(s_instanceDevice, fence) != VK_SUCCESS) {
+    static int s_visitDiag = -1;
+    // per the Identity & Naming Transition Law: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated fallback.
+    if (s_visitDiag < 0)
+        s_visitDiag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
+
             (*chain).skipCount++;
             continue;
         }
@@ -981,7 +1043,13 @@ bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
     if (index < 0 || index >= s_count)
         return false;
     VkLayerChain *chain = &s_chains[index];
-    if (!(*chain).active || (*chain).published < 0)
+    if (!(*chain).active || (*chain).published < 0) {
+        static int s_compDiag = -1;
+        // per the Identity & Naming Transition Law: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated fallback.
+        if (s_compDiag < 0)
+            s_compDiag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
+        if (s_compDiag)
+            fprintf(stderr, "vk:composite %d NO-PUB (active=%d pub=%d)\n", index, (*chain).active, (*chain).published);
         return false;
     if (w <= 0.0f || h <= 0.0f)
         return false;
@@ -1069,6 +1137,15 @@ void VkLayer_shutdown(void) {
 
     VK_LAYER_LOAD_DEVICE(DestroyFence)
     VK_LAYER_LOAD_DEVICE(FreeCommandBuffers)
+    {
+        static int s_compDiag2 = -1;
+        // per the Identity & Naming Transition Law: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated fallback.
+        if (s_compDiag2 < 0)
+            s_compDiag2 = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
+        if (s_compDiag2)
+            fprintf(stderr, "vk:composite %d DREW pub=%d tint=(%.1f,%.1f,%.1f,%.1f) rect=(%.0f,%.0f,%.0f,%.0f)\n",
+                    index, (*chain).published, r, g, b, a, x, y, w, h);
+    }
 
     for (int i = 0; i < s_count; i++) {
         VkLayerChain *chain = &s_chains[i];

@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <vulkan/vulkan_core.h>
 
 // vulkan/vk_layer.h — retained offscreen render-target registry ("layers").
 //
@@ -59,6 +60,12 @@ bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
 // Slot lookup for an owner handle (the darling Panel*). Returns the layer
 // index or -1. The composite pass resolves child -> index here.
 int VkLayer_find(void *owner);
+
+// Current fixed pixel extent of a layer chain (diagnostic probe for the
+// board/child resize logging in the darling bridge). Bounds-checked: a
+// stale, out-of-range, or inactive index answers zero-extent. Lock-free
+// read like the other diagnostic getters.
+VkExtent2D VkLayer_extent(int index);
 
 bool VkLayer_ready(void);
 int VkLayer_count(void);
