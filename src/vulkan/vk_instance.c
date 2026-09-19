@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <stdatomic.h>
 #include "nio/mem.h"
 #include "oop/type.h"
@@ -71,9 +72,23 @@
   *   - destroyTargets(void)
   *   - buildPipelines(void)
  *   - presentFrameLocked(void)     : board present chain (the Ecosystem Vulkan Safety Nets Law seam guard;
- *                                    continuous-chase mid-drag: caps-drift
- *                                    rebuilds at throttle rate, OUT_OF_DATE
- *                                    rebuilds + retries inline)
+ *                                    live-drag freeze: caps-drift rebuilds
+ *                                    are SKIPPED while Vk_seamIsLiveResizing
+ *                                    (settle rebuilds once), OUT_OF_DATE
+ *                                    rebuilds + retries inline regardless)
+  *   - Vk_clearPresent(void)          : bounded present contract — silent false
+  *                                    on null device/swapchain, false on the
+  *                                    device-lost latch, try-lock drop with
+  *                                    dirty retained; fence 100ms, acquire
+  *                                    25ms, zero hot logging
+  *   - Vk_clearPresentLive(void)      : live-drag variant — same single-frame
+  *                                    contract, but the try-lock retries in
+  *                                    ~1ms slices up to ~8ms before dropping
+  *                                    (the Bounded Wait Law)
+ *   - presentFrameTail(imageIndex)   : submit + present tail; present-time
+ *                                    OUT_OF_DATE rebuilds once and returns
+ *                                    false (retry next tick), SUBOPTIMAL is
+ *                                    success without rebuild
  *   - presentNote(reason)
  *   - presentNoteCode(what, code)
  *   - presentRefenceSignaled(void)
@@ -1638,6 +1653,10 @@ bool Vk_isDebugUtilsEnabled(void) {
 }
 
 bool Vk_clearPresent(void) {
+    // Cold null guard (the Cold-Strict, Hot-Minimal Validation Law): silent
+    // false, zero logging — teardown/inflight races retire here, never crash.
+    if (s_device == VK_NULL_HANDLE || s_swapchain == VK_NULL_HANDLE)
+        return false;
     // Dead device: every wait/rebuild below would burn CPU behind a lying
     // title. Short-circuit; the latch announcement already named the site.
     if (s_deviceLost)
@@ -1648,6 +1667,33 @@ bool Vk_clearPresent(void) {
     if (!SpinLock_tryLock(&s_presentLock)) {
         presentNote("present lock busy");
         return false;
+    }
+    bool ok = presentFrameLocked();
+    SpinLock_unlock(&s_presentLock);
+    return ok;
+}
+
+bool Vk_clearPresentLive(void) {
+    // Same cold guards as the resting path: silent false, zero logging —
+    // teardown/inflight races retire here, never crash.
+    if (s_device == VK_NULL_HANDLE || s_swapchain == VK_NULL_HANDLE)
+        return false;
+    if (s_deviceLost)
+        return false;
+    // Live-drag contention: the worker may hold the present lock mid-frame
+    // while thread 0 owns the modal drag step. Retry the TRY-LOCK ONLY in
+    // ~1ms slices up to an ~8ms budget (half a 60Hz vsync), then drop with
+    // dirty retained — the next drag step retries with fresher state. The
+    // fence (100ms) and acquire (25ms) bounds inside presentFrameLocked run
+    // exactly once per call, never retried (the Bounded Wait Law: bounded
+    // total, no modal-loop freeze, no hot spin).
+    for (int i = 0; i < 8; i++) {
+        if (SpinLock_tryLock(&s_presentLock))
+            break;
+        if (i == 7)
+            return false;
+        struct timespec slice = {0, 1000000L};
+        nanosleep(&slice, nullptr);
     }
     bool ok = presentFrameLocked();
     SpinLock_unlock(&s_presentLock);
@@ -1675,13 +1721,17 @@ static bool presentFrameLocked(void) {
         return false;
     }
 
-    // the Continuous Real-Time Live Resize Law CONTINUOUS-CHASE (live resize): every applied drag step
-    // already chased drawableSize on thread 0 (setFrameSize /
-    // windowDidResize), so surface caps drift off the chain here and the
-    // extent block below rebuilds at the throttle rate — the pass keeps
-    // presenting the freshest chain at worker cadence, TopLeft-pinned, no
-    // stretch, no settle-only jump. Fence (100ms) and acquire (25ms)
-    // bounds stay (the Bounded Wait Law / the Ecosystem Vulkan Safety Nets Law).
+    // Live-drag freeze (sticky, no churn): while the seam reports a live
+    // resize, surface caps drift off the chain every step and the extent
+    // block below is SKIPPED — no swapchain destroy/create, no fence-chasing
+    // rebuild latency, so the presented frame can never lag one step behind
+    // the edge. The pass presents the current chain TopLeft-pinned (shrink
+    // drags are pixel-perfect; grow drags pin with a clear strip that fills
+    // on settle) and the FIRST settled present rebuilds exactly once. The
+    // render-gen block above keeps its own live gate; OUT_OF_DATE stays
+    // reactive (driver truth, not churn). Fence (100ms) and acquire (25ms)
+    // bounds stay (the Bounded Wait Law / the Ecosystem Vulkan Safety Nets
+    // Law).
 
     // Retire the PREVIOUS frame through its fence BEFORE touching the chain.
     // Bounded wait: if the surface died (e.g. fullscreen close yanked the
@@ -1739,30 +1789,40 @@ static bool presentFrameLocked(void) {
     if (!s_hzInit) {
         s_hzInit = 1;
         const char *hzEnv = getenv("ANTI_RESIZE_HZ");
-        // Default 30Hz: bounds swapchain rebuilds across rapid extents
-        // (programmatic resize floods, drag steps). Between rebuilds the
-        // worker keeps presenting the freshest chain, so a drag costs
-        // throttled rebuilds and tracks live. The CAMetalLayer
+        // Default 0 (immediate): rebuild the swapchain on EVERY extent
+        // drift so each drag step renders and presents at the NEW size
+        // (the Continuous Real-Time Live Resize Law — no dropped frames,
+        // no settle-only jump). Set ANTI_RESIZE_HZ=N to cap rebuilds per
+        // second (e.g. 30 for programmatic resize floods); when throttled,
+        // the pass still falls through to present at the current chain
+        // extent, top-left pinned, never frozen. The CAMetalLayer
         // panes never rebuild anyway (the Pane-of-Glass Law).
-        int hz = hzEnv ? atoi(hzEnv) : 30;
+        int hz = hzEnv ? atoi(hzEnv) : 0;
         s_minRebuildGapNs = hz > 0 ? (int64_t)(1000000000LL / hz) : 0;
     }
+    bool dragLive = Vk_seamIsLiveResizing();
     VkSurfaceCapabilitiesKHR live;
     memset(&live, 0, sizeof(live));
-    if (GetPhysicalDeviceSurfaceCapabilitiesKHR_fn(s_phys, s_surface, &live) == VK_SUCCESS
+    if (!dragLive
+        && GetPhysicalDeviceSurfaceCapabilitiesKHR_fn(s_phys, s_surface, &live) == VK_SUCCESS
         && (live.currentExtent.width != s_extent.width || live.currentExtent.height != s_extent.height)) {
         uint64_t nowNs = NanoTime_now();
-        if (s_lastRebuildNs != 0 && s_minRebuildGapNs > 0
-            && nowNs - s_lastRebuildNs < (uint64_t)s_minRebuildGapNs) {
-            presentNote("rebuild throttled on extent drift");
-            return false;
+        bool throttled = s_lastRebuildNs != 0 && s_minRebuildGapNs > 0
+            && nowNs - s_lastRebuildNs < (uint64_t)s_minRebuildGapNs;
+        if (!throttled) {
+            if (!rebuildTargets()) {
+                presentNote("extent rebuild failed");
+                return false;
+            }
+            s_lastRebuildNs = NanoTime_now();
+        } else {
+            // ANTI_RESIZE_HZ throttle active: present at the current chain
+            // extent instead of DROPPING the frame — top-left pinned, live,
+            // never stretched, never frozen (the Continuous Real-Time Live
+            // Resize Law). The next drift past the gap rebuilds the chain.
+            presentNote("rebuild throttled (present at current extent)");
         }
-        if (!rebuildTargets()) {
-            presentNote("extent rebuild failed");
-            return false;
-        }
-        s_lastRebuildNs = NanoTime_now();
-    } else {
+    } else if (!dragLive) {
         s_lastRebuildNs = 0;
     }
 
@@ -1960,13 +2020,17 @@ static bool presentFrameTail(uint32_t imageIndex) {
         presentDeviceLost("present");
         return false;
     }
-    if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR) {
-        if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
-            s_appliedRenderGen = 0;
-            presentNote("present out-of-date");
-        }
-        return pr == VK_SUBOPTIMAL_KHR;
+    // Present-time OUT_OF_DATE: the chain this frame just painted is stale —
+    // rebuild once so the next tick acquires fresh (the false return keeps
+    // demand armed and the caller retries; exactly one rebuild, no spin).
+    // SUBOPTIMAL presented a valid image: success, no rebuild.
+    if (pr == VK_ERROR_OUT_OF_DATE_KHR) {
+        s_appliedRenderGen = 0;
+        rebuildTargets();
+        return false;
     }
+    if (pr == VK_SUBOPTIMAL_KHR)
+        return true;
     if (pr != VK_SUCCESS)
         presentNoteCode("present failed", (int) pr);
     return pr == VK_SUCCESS;
