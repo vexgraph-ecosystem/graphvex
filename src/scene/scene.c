@@ -26,7 +26,7 @@
  *     float cameraProj[16];     // 4x4 projection matrix
  *     uint32_t clearColor;      // scene clear color (0xAARRGGBB)
  *     bool dirty;               // true when nodes or camera are updated
- *     uint64_t typeId;          // block-header type id (TYPE_SCENE_SINGLETON)
+ *     uint64_t typeId;          // block-header type id (TYPE_GFX_SCENE_SINGLETON)
  *   }
  *
  * SLOT RECORD (dumb entry struct owned exclusively by Scene):
@@ -69,7 +69,7 @@
 // CONSTRUCTORS
 
 Scene *Scene_0(void) {
-    Scene *self = (Scene*) Memory_alloc(TYPE_SCENE_SINGLETON, sizeof(Scene));
+    Scene *self = (Scene*) Memory_alloc(TYPE_GFX_SCENE_SINGLETON, sizeof(Scene));
     if (!self)
         self = (Scene*) calloc(1, sizeof(Scene));
     if (!self)
@@ -83,7 +83,7 @@ Scene *Scene_0(void) {
     }
     (*self).clearColor = 0;
     (*self).dirty = false;
-    (*self).typeId = TYPE_SCENE_SINGLETON;
+    (*self).typeId = TYPE_GFX_SCENE_SINGLETON;
     return self;
 }
 
