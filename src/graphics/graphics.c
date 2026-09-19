@@ -74,9 +74,11 @@ bool Graphics_setGraphics(uint32_t backendId) {
             row = DirectGraphics_getRow();
             break;
         case GRAPHICS_BACKEND_VULKAN:
+            row = VkGraphics_getRow();
+            break;
         case GRAPHICS_BACKEND_METAL:
-            // Rows land in their own feature commits (Cohesive Commits Law);
-            // until then selection cold-returns false.
+            // MetalGraphics stub lands in its own commit (Cohesive Commits
+            // Law); until then selection cold-returns false.
             break;
         default:
             break;

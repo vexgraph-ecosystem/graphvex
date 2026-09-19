@@ -62,6 +62,7 @@ add_library(graphvex STATIC
     src/vulkan/vk_scene.c
     src/vulkan/vk_view.c
     src/vulkan/vk_iosurface.c
+    src/vulkan/vk_graphics.c
     src/vulkan/texture/texture.c
     src/image/image.c
     src/image/frame_importer.c
