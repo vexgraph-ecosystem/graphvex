@@ -83,6 +83,8 @@ add_library(graphvex STATIC
     src/mesh/meshlet.c
     src/image/swapchain.c
     src/vector/shape.c
+    src/graphics/graphics.c
+    src/direct/direct_graphics.c
     src/draw/layered_drawable.c
     src/draw/vector_drawable.c
     src/draw/layered_vector_drawable.c
@@ -169,5 +171,15 @@ if(EXISTS "${GRAPHVEX_TEST_DIR}/gfx_loop_test.c" AND NOT TARGET gfx_loop_test)
     )
     target_link_libraries(gfx_loop_test PRIVATE graphvex)
     target_compile_options(gfx_loop_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+# Unified Graphics seam: setGraphics/forwarder cold matrix + DirectGraphics
+# pixel-exact software row tests (headless, no GPU, no AppKit).
+if(EXISTS "${GRAPHVEX_TEST_DIR}/direct_graphics_test.c" AND NOT TARGET direct_graphics_test)
+    add_executable(direct_graphics_test
+        ${GRAPHVEX_TEST_DIR}/direct_graphics_test.c
+    )
+    target_link_libraries(direct_graphics_test PRIVATE graphvex)
+    target_compile_options(direct_graphics_test PRIVATE -Wall -Wextra -Werror)
 endif()
 

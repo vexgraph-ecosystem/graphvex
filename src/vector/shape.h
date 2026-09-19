@@ -14,6 +14,13 @@
 // segments. Computes bounding boxes, supports SVG path parsing, and procedural
 // primitives (rect, circle) without raster dependencies.
 
+// Path verb codes (stored in the verbs array; mirror the enum inside
+// shape.c — consumers must use these, never re-declare them).
+#define SHAPE_VERB_MOVE  0u
+#define SHAPE_VERB_LINE  1u
+#define SHAPE_VERB_CUBIC 2u
+#define SHAPE_VERB_CLOSE 3u
+
 typedef struct Shape {
     float *points;        // dynamic array of (x, y) coordinates
     uint8_t *verbs;       // dynamic array of ShapeVerb

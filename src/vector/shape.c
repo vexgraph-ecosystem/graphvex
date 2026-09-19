@@ -75,12 +75,8 @@
 
 // vector/shape.c — Pure vector path geometry implementation.
 
-typedef enum ShapeVerb {
-    SHAPE_VERB_MOVE = 0,
-    SHAPE_VERB_LINE = 1,
-    SHAPE_VERB_CUBIC = 2,
-    SHAPE_VERB_CLOSE = 3
-} ShapeVerb;
+// Verb codes live in vector/shape.h (SHAPE_VERB_*); consumers such as
+// DirectGraphics flatten paths by verb, so the header owns them.
 
 static void shapeFreeStorage(Shape *self) {
     if (Memory_length(self) != 0)
