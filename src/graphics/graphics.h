@@ -67,7 +67,8 @@ typedef struct Graphics {
     bool (*drawImage)(const Image *image, const Rectangle *dst); // dst comes last
 } Graphics;
 
-// Backend rows (one class pair per backend; VULKAN/METAL land later).
+// Backend rows (one class pair per backend; DirectGraphics + VkGraphics
+// are live, MetalGraphics stub follows).
 const Graphics *DirectGraphics_getRow(void);
 const Graphics *VkGraphics_getRow(void);
 const Graphics *MetalGraphics_getRow(void);
