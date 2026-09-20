@@ -24,8 +24,10 @@
  * exactly width * height * 4 bytes (byte 0 = ALPHA, 1 = RED, 2 = GREEN,
  * 3 = BLUE — mirroring the 0xAARRGGBB stored word per the Strict Color Law).
  * Struct memory allocations are serviced via
- * the vexspoke typed memory arena (TYPE_IMAGE_SINGLETON) when available, falling
- * back safely to standard heap allocation in standalone environments. The pixel
+ * the vexspoke typed memory arena (TYPE_IMAGE_SINGLETON) — the single
+ * allocation source; the arena falls back to a private malloc block when its
+ * bump region is full, and Image_free reclaims (or safely declines) through
+ * Memory_free, never a raw free of the struct. The pixel
  * payload buffer is strictly owned by the Image handle and released upon destruction.
  * In accordance with the Unified Graphics Abstraction Law, coordinate systems,
  * formats, and dimensions remain backend-neutral and zero-tolerant.
@@ -106,9 +108,10 @@ static Image *imageCreate(uint32_t w, uint32_t h, uint32_t format, uint32_t usag
         return nullptr;
     Image *img = (Image*) Memory_alloc(TYPE_IMAGE_SINGLETON, sizeof(Image));
     if (!img)
-        img = (Image*) calloc(1, sizeof(Image));
-    if (!img)
-        return nullptr;
+        return nullptr; // single allocation source: the arena. Memory_alloc
+                        // itself falls back to a private malloc block when the
+                        // bump region is full, and Memory_free reclaims (or
+                        // safely declines) accordingly — see imageFreeStorage.
     uint8_t *pixels = (uint8_t*) calloc(bytes, 1);
     if (!pixels) {
         imageFreeStorage(img);
@@ -150,10 +153,13 @@ static bool imageByteCount(uint32_t w, uint32_t h, size_t *outBytes) {
 }
 
 static void imageFreeStorage(Image *img) {
-    if (Memory_length(img) != 0)
-        Memory_free(img);
-    else
-        free(img);
+    // The struct is ALWAYS arena-managed (Memory_alloc): imageCreate has no
+    // calloc fallback, so a raw free() can never be correct here. Memory_free
+    // is safe on every block Memory_alloc can return — bump-resident, slab
+    // slots, and the arena's own malloc-fallback blocks (which arena_free
+    // deliberately declines to reclaim, an OOM-only leak by design). A raw
+    // free() of an arena block would trip malloc's zone ownership checks.
+    Memory_free(img);
 }
 
 static void imageResize(Image *img, uint32_t w, uint32_t h) {
