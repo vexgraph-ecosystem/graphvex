@@ -12,12 +12,12 @@
 // this struct; pipelines resolve the solid fill from color * opacity.
 
 typedef struct Brush {
-    uint32_t color;   // packed base color (0xRRGGBBAA)
+    uint32_t color;   // packed base color (0xAARRGGBB: alpha high byte)
     float opacity;    // master alpha multiplier [0..1]
     uint64_t typeId;  // block-header type id (TYPE_BRUSH_SINGLETON)
 } Brush;
 
-// Default brush (opaque black 0x000000FF, opacity 1)
+// Default brush (opaque black 0xFF000000, opacity 1)
 Brush *Brush_0(void);
 
 // Color + opacity brush

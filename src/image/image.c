@@ -20,8 +20,10 @@
  * legacy bindless textures and platform-specific surface bridges by decoupling
  * host CPU image allocations from downstream graphics device driver specifics.
  *
- * Each image instance maintains an owned CPU-side RGBA8 shadow buffer sized to
- * exactly width * height * 4 bytes. Struct memory allocations are serviced via
+ * Each image instance maintains an owned CPU-side alpha-first ARGB8 shadow buffer sized to
+ * exactly width * height * 4 bytes (byte 0 = ALPHA, 1 = RED, 2 = GREEN,
+ * 3 = BLUE — mirroring the 0xAARRGGBB stored word per the Strict Color Law).
+ * Struct memory allocations are serviced via
  * the vexspoke typed memory arena (TYPE_IMAGE_SINGLETON) when available, falling
  * back safely to standard heap allocation in standalone environments. The pixel
  * payload buffer is strictly owned by the Image handle and released upon destruction.
@@ -39,17 +41,17 @@
  * SUMMARY:
  *   Backend-agnostic GPU image primitive and successor to legacy bindless
  *   registries and platform-specific surface bridges. Maintains an owned
- *   CPU-side RGBA8 shadow buffer (width * height * 4 bytes) zero-initialized
+ *   CPU-side alpha-first ARGB8 shadow buffer (width * height * 4 bytes) zero-initialized
  *   to transparent black until bound to a hardware rasterization pipeline.
  *
  * STRUCT FIELDS (Mirroring image/image.h):
  * ----------------------------------------------------------------------------
  *   uint32_t width;   // pixels across (>= 1)
  *   uint32_t height;  // pixels down (>= 1)
- *   uint32_t format;  // backend-agnostic pixel format code (0 = RGBA8 stub default)
+ *   uint32_t format;  // backend-agnostic pixel format code (0 = ARGB8 stub default)
  *   uint32_t usage;   // backend-agnostic usage flags (0 = none)
  *   uint64_t typeId;  // block-header type id (TYPE_IMAGE_SINGLETON)
- *   uint8_t *rgba;    // OWNED CPU shadow, width*height*4 bytes RGBA8 (null = no backing); freed by Image_free, never borrowed
+ *   uint8_t *rgba;    // OWNED CPU shadow, width*height*4 bytes alpha-first ARGB8 (null = no backing); freed by Image_free, never borrowed
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -63,7 +65,7 @@
  *
  * Public Core Functions: (.h)
  *   - Image_free(img)                                    : Release image shadow and struct memory
- *   - Image_upload(rgba, w, h, dest)                     : Copy RGBA8 pixels into destination shadow
+ *   - Image_upload(rgba, w, h, dest)                     : Copy alpha-first ARGB8 pixels into destination shadow
  *
  * Private Core Functions: (.c static)
  *   - imageByteCount(w, h, outBytes)                     : Validate dimensions and compute byte size

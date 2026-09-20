@@ -22,11 +22,11 @@
  * Software rasterization backend row fulfilling the unified Graphics seam.
  * Executes drawing primitives, clipping, and blits directly onto CPU host memory
  * via an arena-backed RGBA8 pixel buffer in strict compliance with the
- * Unified Graphics Abstraction Law and the Strict 0xRRGGBBAA Color Law.
+ * Unified Graphics Abstraction Law and the Strict 0xAARRGGBB Color Law.
  *
- * All color manipulation adheres monotonically to 32-bit packed 0xRRGGBBAA:
- * channel 0 (red) extracts from bits 24..31, channel 1 (green) from bits 16..23,
- * channel 2 (blue) from bits 8..15, and channel 3 (alpha) from bits 0..7.
+ * All color manipulation adheres monotonically to 32-bit packed 0xAARRGGBB:
+ * channel 0 (alpha) extracts from bits 24..31, channel 1 (red) from bits 16..23,
+ * channel 2 (green) from bits 8..15, and channel 3 (blue) from bits 0..7.
  * DirectGraphics serves as the software reference standard that all hardware-
  * accelerated Vulkan and Metal backends must mirror.
  * ============================================================================
@@ -53,7 +53,7 @@
  * Dynamic Scalability & Anti-Hardcoding Law; ;;DRAFT — an arena slab with
  * exponential growth replaces the fixed scratch in a later commit).
  *
- * Color encoding follows the Strict 0xRRGGBBAA Color Law across all operations.
+ * Color encoding follows the Strict 0xAARRGGBB Color Law across all operations.
  *
  * STRUCT FIELDS (Mirroring direct/direct_graphics.h):
  * ----------------------------------------------------------------------------
@@ -92,7 +92,7 @@
  *   - implEnd(void)                           : Complete frame rendering
  *   - implPresent(void)                       : Present frame to target surface
  *   - implResize(width, height)               : Allocate arena-backed framebuffer
- *   - implClear(color)                        : Clear entire drawable with 0xRRGGBBAA
+ *   - implClear(color)                        : Clear entire drawable with 0xAARRGGBB
  *   - implClip(rect)                          : Update or disable scissor clipping
  *   - implFillRect(rect, brush)               : Fill rectangle with solid brush
  *   - implDrawRect(rect, stroke)              : Stroke rectangle perimeter
@@ -146,10 +146,12 @@ static bool brushRgba(const Brush *brush, uint32_t *outRgba) {
         op = 0.0f;
     if (op > 1.0f)
         op = 1.0f;
-    uint32_t a = (uint32_t) ((float) ((*brush).color & 0xFFu) * op + 0.5f);
+    // 0xAARRGGBB: alpha lives in bits 24..31; opacity modulates it. The
+    // stored word keeps red/green/blue and replaces only the alpha byte.
+    uint32_t a = (uint32_t) ((float) (((*brush).color >> 24) & 0xFFu) * op + 0.5f);
     if (a > 0xFFu)
         a = 0xFFu;
-    *outRgba = ((*brush).color & 0xFFFFFF00u) | (a & 0xFFu);
+    *outRgba = ((*brush).color & 0x00FFFFFFu) | (a << 24);
     return true;
 }
 

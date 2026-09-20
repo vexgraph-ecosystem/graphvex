@@ -7,10 +7,9 @@
 
 #include "vulkan/vk.h"
 
-// ;;DRAFT — present/clear/resize are live over the Vk_ seam; the drawable
-// verbs defer to Vk_fillRect/Vk_draw* once the seam's frame renderer pass
-// is exposed to this row (the Phase-2 darling integration).
-// ;;INTENTION("same rationale, per the Two-Semicolon Annotation Style Law")
+// ;;INTENTION("fillRect/drawRect are live over the Vk_fillRect quad primitive;
+// circles/path/image await their tessellation / bindless-texture plumbing and
+// cold-return false, per the Two-Semicolon Annotation Style Law")
 
 ;;DEFINITION
 /**
@@ -20,11 +19,15 @@
  * Live hardware Vulkan backend row fulfilling the unified Graphics seam.
  * Adapts the Vulkan loader and swapchain presentation pipeline into the
  * uniform Graphics vtable in compliance with the Unified Graphics Abstraction Law
- * and the Strict 0xRRGGBBAA Color Law.
+ * and the Strict 0xAARRGGBB Color Law.
  *
- * Encodes all viewport clearing and blit operations strictly in 0xRRGGBBAA:
- * channel 0 (red) extracts from bits 24..31, channel 1 (green) from bits 16..23,
- * channel 2 (blue) from bits 8..15, and channel 3 (alpha) from bits 0..7.
+ * Encodes all viewport clearing and blit operations strictly in 0xAARRGGBB:
+ * channel 0 (alpha) extracts from bits 24..31, channel 1 (red) from bits 16..23,
+ * channel 2 (green) from bits 8..15, and channel 3 (blue) from bits 0..7.
+ * Drawable verbs record into the live command buffer bound by
+ * VkGraphics_bindFrame inside the host's frame-renderer pass (the seam's
+ * Vk_clearPresent invokes that callback INSIDE the swapchain render pass, so
+ * recording here is recording on screen: one table verb per quad).
  * ============================================================================
  */
 
@@ -46,9 +49,12 @@
  * ----------------------------------------------------------------------------
  *   uint32_t width;        // newest native-px drawable extent; 0 until resize
  *   uint32_t height;       // newest native-px drawable extent
- *   uint32_t clearColor;   // staged 0xRRGGBBAA for the next demand-present
+ *   uint32_t clearColor;   // staged 0xAARRGGBB for the next demand-present
  *   bool clearPending;     // a clear staged since the last present
  *   bool frameOpen;        // begin() succeeded and end() has not run
+ *   void *boundCmdBuffer;  // live seam command buffer (VkGraphics_bindFrame)
+ *   uint32_t boundW;       // drawable extent of the bound pass, native px
+ *   uint32_t boundH;       // drawable extent of the bound pass, native px
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
@@ -65,16 +71,17 @@
  * Public Core Functions: (.h)
  *   - VkGraphics_getRow(void)                 : Query const Graphics row table
  *   - VkGraphics_resize(width, height)        : Bind native-px drawable extent
+ *   - VkGraphics_bindFrame(cb, w, h)          : Bind live seam render-pass command buffer
  *
  * Private Core Functions: (.c static)
  *   - vkBegin(void)                           : Gate readiness and open frame
- *   - vkEnd(void)                             : Close frame window
+ *   - vkEnd(void)                             : Close frame window, release bound buffer
  *   - vkPresent(void)                         : Demand-present clear to swapchain
  *   - vkResize(width, height)                 : Record latest extent
- *   - vkClear(color)                          : Stage 0xRRGGBBAA clear into seam
+ *   - vkClear(color)                          : Stage 0xAARRGGBB clear into seam
  *   - vkClip(rect)                            : Update scissor clip (draft)
- *   - vkFillRect(rect, brush)                 : Solid rectangle fill (draft)
- *   - vkDrawRect(rect, stroke)                : Rectangle stroke (draft)
+ *   - vkFillRect(rect, brush)                 : Solid rectangle fill (LIVE — Vk_fillRect)
+ *   - vkDrawRect(rect, stroke)                : Rectangle stroke (LIVE — Vk_fillRect bars)
  *   - vkFillCircle(cx, cy, radius, brush)     : Circle fill (draft)
  *   - vkDrawCircle(cx, cy, radius, stroke)    : Circle stroke (draft)
  *   - vkFillPath(shape, brush)                : Path fill (draft)
@@ -120,6 +127,7 @@ static bool vkEnd(void) {
     if (registered == false)
         return false;
     vkGraphics.frameOpen = false;
+    vkGraphics.boundCmdBuffer = nullptr;
     return true;
 }
 
@@ -151,11 +159,13 @@ static bool vkClear(uint32_t color) {
         return false;
     vkGraphics.clearColor = color;
     vkGraphics.clearPending = true;
+    // 0xAARRGGBB (alpha high byte): swap the old RRGGBBAA assignment whose
+    // alpha byte landed in the red channel (the Strict 0xAARRGGBB Color Law).
     Vk_setClearColor(
-        (float) ((color >> 24) & 0xFFu) / 255.0f,
         (float) ((color >> 16) & 0xFFu) / 255.0f,
         (float) ((color >> 8) & 0xFFu) / 255.0f,
-        (float) (color & 0xFFu) / 255.0f
+        (float) (color & 0xFFu) / 255.0f,
+        (float) ((color >> 24) & 0xFFu) / 255.0f
     );
     return true;
 }
@@ -168,18 +178,79 @@ static bool vkClip(const Rectangle *rect) {
 }
 
 static bool vkFillRect(const Rectangle *rect, const Brush *brush) {
-    // ;;DRAFT — maps to Vk_fillRect inside the open frame renderer pass
-    // (Phase-2 darling integration).
-    (void) rect;
-    (void) brush;
-    return false;
+    // LIVE: the seam's VkGraphics_bindFrame hands the open swapchain render
+    // pass to this row; Vk_fillRect records the quad at drawable-pixel
+    // coords with its own scissor (the exact primitive the Panel rows paint).
+    if (registered == false || Vk_isDeviceLost())
+        return false;
+    if (Vk_ready() == false)
+        return false;
+    if (vkGraphics.frameOpen == false || vkGraphics.boundCmdBuffer == nullptr)
+        return false;
+    if (rect == nullptr || brush == nullptr)
+        return false;
+    if ((*rect).width <= 0.0f || (*rect).height <= 0.0f)
+        return false;
+    // 0xAARRGGBB alpha-top decode (the Strict 0xAARRGGBB Color Law):
+    // red = bits 16..23, green = bits 8..15, blue = bits 0..7; alpha =
+    // bits 24..31 modulated by brush opacity (clamped 0..1).
+    float op = (*brush).opacity;
+    if (op < 0.0f)
+        op = 0.0f;
+    if (op > 1.0f)
+        op = 1.0f;
+    uint32_t color = (*brush).color;
+    float a = (float) (((color >> 24) & 0xFFu) * op) / 255.0f;
+    Vk_fillRect(vkGraphics.boundCmdBuffer,
+                (float) vkGraphics.boundW, (float) vkGraphics.boundH,
+                (*rect).x, (*rect).y, (*rect).width, (*rect).height,
+                (float) ((color >> 16) & 0xFFu) / 255.0f,
+                (float) ((color >> 8) & 0xFFu) / 255.0f,
+                (float) (color & 0xFFu) / 255.0f,
+                a);
+    return true;
 }
 
 static bool vkDrawRect(const Rectangle *rect, const Stroke *stroke) {
-    // ;;DRAFT — maps to Vk_fillRect (stroke->fill thickness) later.
-    (void) rect;
-    (void) stroke;
-    return false;
+    // LIVE: the same 4-bar model DirectGraphics implDrawRect uses — top,
+    // bottom, left, right bands recorded through Vk_fillRect. Hairline
+    // (width < 1) draws a 1px band, matching the Direct row.
+    if (registered == false || Vk_isDeviceLost())
+        return false;
+    if (Vk_ready() == false)
+        return false;
+    if (vkGraphics.frameOpen == false || vkGraphics.boundCmdBuffer == nullptr)
+        return false;
+    if (rect == nullptr || stroke == nullptr)
+        return false;
+    if ((*rect).width <= 0.0f || (*rect).height <= 0.0f)
+        return false;
+    float wf = (*stroke).width;
+    if (wf < 1.0f)
+        wf = 1.0f;
+    float th = (float) (int32_t) (wf + 0.5f);
+    float x0 = (*rect).x;
+    float y0 = (*rect).y;
+    float x1 = (*rect).x + (*rect).width;
+    float y1 = (*rect).y + (*rect).height;
+    uint32_t color = (*stroke).color;
+    float r = (float) ((color >> 16) & 0xFFu) / 255.0f;
+    float g = (float) ((color >> 8) & 0xFFu) / 255.0f;
+    float b = (float) (color & 0xFFu) / 255.0f;
+    float a = (float) ((color >> 24) & 0xFFu) / 255.0f;
+    Vk_fillRect(vkGraphics.boundCmdBuffer,
+                (float) vkGraphics.boundW, (float) vkGraphics.boundH,
+                x0, y0, x1 - x0, th, r, g, b, a);
+    Vk_fillRect(vkGraphics.boundCmdBuffer,
+                (float) vkGraphics.boundW, (float) vkGraphics.boundH,
+                x0, y1 - th, x1 - x0, th, r, g, b, a);
+    Vk_fillRect(vkGraphics.boundCmdBuffer,
+                (float) vkGraphics.boundW, (float) vkGraphics.boundH,
+                x0, y0 + th, th, y1 - y0 - 2.0f * th, r, g, b, a);
+    Vk_fillRect(vkGraphics.boundCmdBuffer,
+                (float) vkGraphics.boundW, (float) vkGraphics.boundH,
+                x1 - th, y0 + th, th, y1 - y0 - 2.0f * th, r, g, b, a);
+    return true;
 }
 
 static bool vkFillCircle(float cx, float cy, float radius, const Brush *brush) {
@@ -257,6 +328,18 @@ bool VkGraphics_resize(uint32_t width, uint32_t height) {
         return false;
     vkGraphics.width = width;
     vkGraphics.height = height;
+    return true;
+}
+
+bool VkGraphics_bindFrame(void *cmdBuffer, uint32_t width, uint32_t height) {
+    if (registered == false || Vk_isDeviceLost())
+        return false;
+    if (cmdBuffer == nullptr || width == 0 || height == 0)
+        return false;
+    vkGraphics.boundCmdBuffer = cmdBuffer;
+    vkGraphics.boundW = width;
+    vkGraphics.boundH = height;
+    vkGraphics.frameOpen = true;
     return true;
 }
 

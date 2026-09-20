@@ -28,14 +28,17 @@
 //   present  demand-present: runs Vk_clearPresent once when a clear was
 //            staged since the last present, else rests (the Present-On-
 //            Demand Law — clean content is never re-presented)
-//   end      closes the frame window (submit lives inside the seam present)
+//   end      closes the frame window and releases the bound command buffer
 //   resize   records the newest native-pixel extent; the seam rebuilds the
 //            swapchain out-of-date inside its own present path (the
 //            Continuous Real-Time Live Resize Law)
 //
-// Drawable verbs (fillRect/drawRect/circles/path/image) are ;;DRAFT until
-// the seam's frame-renderer pass is exposed to this row (the Phase-2
-// darling integration); they cold-return false.
+// Drawable verbs record into the command buffer bound by
+// VkGraphics_bindFrame (the seam's swapchain render-pass callback hands the
+// live command buffer to this row once per present). fillRect/drawRect are
+// LIVE over the Vk_fillRect primitive (the exact quad the Panel rows paint
+// with — one primitive, two table verbs); circles/path/image remain ;;DRAFT
+// until their tessellation / bindless-texture plumbing lands (cold-false).
 //
 // Lifecycle: one file-local process-global value, zero steady-state
 // allocation. Before a device is up (Vk_ready false) every device-backed
@@ -45,9 +48,12 @@
 typedef struct VkGraphics {
     uint32_t width;       // newest native-px drawable extent; 0 until resize
     uint32_t height;      // newest native-px drawable extent
-    uint32_t clearColor;  // staged 0xRRGGBBAA for the next demand-present
+    uint32_t clearColor;  // staged 0xAARRGGBB for the next demand-present
     bool clearPending;    // a clear staged since the last present
     bool frameOpen;       // begin() succeeded and end() has not run
+    void *boundCmdBuffer; // live seam command buffer (VkGraphics_bindFrame); null until bound
+    uint32_t boundW;      // drawable extent of the bound pass, native px
+    uint32_t boundH;      // drawable extent of the bound pass, native px
 } VkGraphics;
 
 // The row: pass to Graphics_setGraphics via GRAPHICS_BACKEND_VULKAN.
@@ -63,6 +69,14 @@ VkGraphics *VkGraphics_0(void);
 // attach/resize). Returns false on zero dims or a latched dead device
 // (Vk_isDeviceLost).
 bool VkGraphics_resize(uint32_t width, uint32_t height);
+
+// Bind the seam's live command buffer for one swapchain render pass (called
+// by the host's frame-renderer callback — the conduit that hands the open
+// render pass to this row; the Vk_clearPresent atomic calls it inside the
+// pass). Records the drawable extent + opens the frame window. Returns
+// false on null buffer, zero extent, or a dead device. Idempotent re-bind
+// per present is the normal shape (one bind per frame callback).
+bool VkGraphics_bindFrame(void *cmdBuffer, uint32_t width, uint32_t height);
 
 // Null-safe inspectors (before registration yields 0 / false):
 uint32_t VkGraphics_getWidth(void);
