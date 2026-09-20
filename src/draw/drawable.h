@@ -38,7 +38,7 @@ void Drawable_drawCircle(Drawable *self, float cx, float cy, float r, const Stro
 void Drawable_fillPath(Drawable *self, const Shape *shape, const Brush *brush);
 void Drawable_drawPath(Drawable *self, const Shape *shape, const Stroke *stroke);
 
-// Clear stub (color is packed 0xAARRGGBB like Brush/Stroke): null-guard + mark dirty
+// Clear stub (color is packed 0xRRGGBBAA like Brush/Stroke): null-guard + mark dirty
 void Drawable_clear(Drawable *self, uint32_t color);
 
 // Release the owned Image then the struct (null-safe no-op)

@@ -55,7 +55,7 @@ typedef struct Graphics {
     bool (*present)(void);                        // swap/present the frame
     bool (*resize)(uint32_t width, uint32_t height); // native px, cold path
     // State
-    bool (*clear)(uint32_t color);                // 0xAARRGGBB, full drawable
+    bool (*clear)(uint32_t color);                // 0xRRGGBBAA, full drawable
     bool (*clip)(const Rectangle *rect);          // scissor; NULL = reset
     // Verbs — native pixels; each compiles to 1..N quads in a GPU backend.
     bool (*fillRect)(const Rectangle *rect, const Brush *brush);
