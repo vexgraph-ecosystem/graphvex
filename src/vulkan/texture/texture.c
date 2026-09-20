@@ -8,7 +8,26 @@
 
 #include <vulkan/vulkan.h>
 #include "vulkan/vk_guard.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Texture
+ * ============================================================================
+ * Procedural bindless texture registry managing GPU images, views, and samplers.
+ * Provides a 1024-slot bindless array accessible to fragment shaders, backed by
+ * a generational retirement ring and staged asynchronous upload pipelines in
+ * compliance with the Unified Graphics Abstraction Law and the Strict 0xRRGGBBAA Color Law.
+ *
+ * Employs safe non-blocking retirement and in-place dimension-preserving updates
+ * to eliminate CPU stalls and GPU page faults while dynamically streaming texture
+ * assets and font atlases.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -16,7 +35,7 @@
  * MODULE: Texture (vulkan/texture/texture.c — bindless 1024-slot registry)
  * LEVEL: L4 — Self-Management (owns GPU images/views/samplers + retire ring)
  * ============================================================================
- * Procedural bindless registry: slot id -> (image, memory, view, sampler,
+ * Procedural bindless registry: slot id to (image, memory, view, sampler,
  * width, height). Uploads stage through a host-visible buffer, transition
  * with a one-shot CB from the module-owned transient pool, submit with a
  * per-upload fence, and wait at most 100ms (the Bounded Wait Law) — never DeviceWaitIdle
@@ -29,7 +48,7 @@
  * old handles die only after their upload fence signals, or the retire
  * guard certifies no bindless-sampling Submit is in flight, or — for
  * standalone builds with no guard — 2 drained frames pass. A submitted
- * batch/pane CB that still samples the old slot must never meet a
+ * batch/present CB that still samples the old slot must never meet a
  * FreeMemory under it (the Ecosystem Vulkan Safety Nets Law net: GPU page-fault on freed memory).
  *
  * SLOT RECORD (retired row — behaviorless, owned by the retire ring):
@@ -47,41 +66,53 @@
  * (return -1, old content kept, retry next tick) — never an unbounded wait,
  * never a leak.
  *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   retireGrow()                              : Expand dynamic retirement ring
+ *   retireDrain(blocking)                     : Clean up drained retired resources
+ *   retirePush(img, mem, view, smp, fence)    : Enqueue resource to retire ring
+ *   findMemoryType(...)                       : Query appropriate memory type index
+ *   createTextureSampler(...)                 : Allocate texture sampler
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Core Functions:
- *   - Texture_initModule(instance, gpa, phys, device, queue, queueFamily)
- *   - Texture_shutdown(void)            : bounded-drain retire ring, then
- *                                         live slots, pool, descriptors (the Teardown Order Law)
- *   - Texture_load(vfsPath)
- *   - Texture_loadRaw(rgbaData, width, height)
- *   - Texture_updateSubRaw(id, rgbaData, x, y, width, height)
- *   - Texture_replaceRaw(id, rgbaData, width, height)
- *                                         : fast path (same-size -> sub-update);
- *                                           retire path (resize -> new handles
- *                                           + ring the old ones)
- *   - Texture_free(id)                  : ring the slot, do not destroy inline
- *     (the Ecosystem Vulkan Safety Nets Law net: load/loadRaw/updateSubRaw/replaceRaw guard the driver
- *      at entry; submit seams pass the live queue per VkGuard contract)
+ * Public Constructors: (.h)
+ *   - (none)
  *
- * Getters:
- *   - Texture_isReady(void)
- *   - Texture_getDescriptorSet(void)
- *   - Texture_getDescriptorSetLayout(void)
- *   - Texture_getSize(id, outW, outH)
- *   - Texture_maxBoundId(void)       — the Ecosystem Vulkan Safety Nets Law: ceiling for draw-site texId clamps
- *   - Texture_retireDepth(void)      — live retire-ring occupancy [0, 8]
- *   - Texture_retireCapacity(void)   — RETIRE_MAX 8 (bounded, the Bounded Wait Law)
- *   - Texture_frameSeq(void)         — retire frame clock (2-frame reap proof)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Texture_setRetireGuard(guard)  — bind the sampler-flight destroy probe
- *     (the Conflict Triage Law downward callback; registered by the compositor, null in
- *     standalone/headless builds -> CPU-lag fallback)
- * Slot mutation still flows only through load/replace/free core verbs.
- * Cold validation (the Cold-Strict, Hot-Minimal Validation Law): null data, zero width/height, id OOB, and
- * width*height*4 overflow reject loudly once at entry (return -1/false);
- * hot upload paths carry the nullptr entry guard only, zero per-texel work.
+ * Public Core Functions: (.h)
+ *   - Texture_initModule(instance, gpa, phys, dev, q, qFam) : Initialize texture registry
+ *   - Texture_shutdown(void)                  : Drain retire ring and free descriptors
+ *   - Texture_load(vfsPath)                   : Load image file from VFS path
+ *   - Texture_loadRaw(rgbaData, width, height): Upload raw RGBA8 image buffer
+ *   - Texture_updateSubRaw(id, rgba, x, y, w, h) : Update sub-region of texture
+ *   - Texture_replaceRaw(id, rgba, w, h)      : Replace or resize texture in-place
+ *   - Texture_free(id)                        : Retire texture slot safely
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Texture_setRetireGuard(guard)           : Register compositor sampler flight probe
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Texture_isReady(void)                   : Check if texture system is ready
+ *   - Texture_getDescriptorSet(void)          : Query global bindless descriptor set
+ *   - Texture_getDescriptorSetLayout(void)    : Query bindless set layout
+ *   - Texture_getSize(id, outW, outH)         : Query texture pixel dimensions
+ *   - Texture_maxBoundId(void)                : Query maximum valid bound slot count
+ *   - Texture_retireDepth(void)               : Query active retire ring depth
+ *   - Texture_retireCapacity(void)            : Query current retire ring capacity
+ *   - Texture_frameSeq(void)                  : Query retire frame sequence clock
+ *   - Texture_getRetireGuard(void)            : Query registered retire guard callback
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -255,7 +286,7 @@ static void retireDrain(VkDevice dev) {
                 drainable = true;
         }
         // Fence-less rows (free / resize rollovers) are sampled by submitted
-        // batch + pane CBs, NOT proven by the upload fence. When a retire
+        // batch + present CBs, NOT proven by the upload fence. When a retire
         // guard is registered it is the ONLY destroy proof for them: it tells
         // us no bindless-sampling Submit is in flight, so FreeMemory under a
         // flying CB (the kIOGPUCommandBufferCallbackErrorPageFault defect) can
@@ -357,9 +388,15 @@ static bool submitUploadTail(VkDevice dev, VkQueue queue, VkCommandBuffer cb, Vk
     return ok;
 }
 
-bool Texture_isReady(void) {
-    return s_device != VK_NULL_HANDLE && s_instance != VK_NULL_HANDLE && s_gpa != nullptr;
-}
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 bool Texture_initModule(void *instance, void *gpa, void *phys, void *device, void *queue, uint32_t queueFamily) {
     s_instance = (VkInstance) instance;
@@ -1130,24 +1167,6 @@ bool Texture_updateSubRaw(int32_t id, const void *rgbaData, uint32_t x, uint32_t
 
     return true;
 }
-void *Texture_getDescriptorSet(void) {
-    return s_bindlessSet;
-}
-
-void *Texture_getDescriptorSetLayout(void) {
-    return s_descLayout;
-}
-
-bool Texture_getSize(int32_t id, uint32_t *outW, uint32_t *outH) {
-    if (id < 0 || id >= s_textureCount) return false;
-    if (outW) *outW = s_widths[id];
-    if (outH) *outH = s_heights[id];
-    return true;
-}
-
-int32_t Texture_maxBoundId(void) {
-    return s_textureCount;
-}
 
 int32_t Texture_replaceRaw(int32_t id, const void *rgbaData, uint32_t width, uint32_t height) {
     if (!VkGuard_check("Texture_replaceRaw", s_device, s_queue, false))
@@ -1485,26 +1504,63 @@ void Texture_free(int32_t id) {
     s_heights[id] = 0;
 }
 
-// GETTERS (the Symmetric Getter/Setter Completeness Law: symmetric, null-safe; statics need no guard)
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
-int32_t Texture_retireDepth(void) {
-    return s_retireCount;
-}
-
-int32_t Texture_retireCapacity(void) {
-    return s_retireCap ? s_retireCap : TEXTURE_RETIRE_INIT;
-}
-
-uint64_t Texture_frameSeq(void) {
-    return s_frameSeq;
-}
-
+;;SETTER
 void Texture_setRetireGuard(bool (*guard)(void)) {
     s_retireGuard = guard;
 }
 
-// the Symmetric Getter/Setter Completeness Law — symmetric introspection for the registered retire guard. Returns
-// NULL when none is bound (standalone fallback path), never blocks.
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
+bool Texture_isReady(void) {
+    return s_device != VK_NULL_HANDLE && s_instance != VK_NULL_HANDLE && s_gpa != nullptr;
+}
+
+;;GETTER
+void *Texture_getDescriptorSet(void) {
+    return s_bindlessSet;
+}
+
+;;GETTER
+void *Texture_getDescriptorSetLayout(void) {
+    return s_descLayout;
+}
+
+;;GETTER
+bool Texture_getSize(int32_t id, uint32_t *outW, uint32_t *outH) {
+    if (id < 0 || id >= s_textureCount) return false;
+    if (outW) *outW = s_widths[id];
+    if (outH) *outH = s_heights[id];
+    return true;
+}
+
+;;GETTER
+int32_t Texture_maxBoundId(void) {
+    return s_textureCount;
+}
+
+;;GETTER
+int32_t Texture_retireDepth(void) {
+    return s_retireCount;
+}
+
+;;GETTER
+int32_t Texture_retireCapacity(void) {
+    return s_retireCap ? s_retireCap : TEXTURE_RETIRE_INIT;
+}
+
+;;GETTER
+uint64_t Texture_frameSeq(void) {
+    return s_frameSeq;
+}
+
+;;GETTER
 bool (*Texture_getRetireGuard(void))(void) {
     return s_retireGuard;
 }

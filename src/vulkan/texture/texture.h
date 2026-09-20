@@ -48,7 +48,7 @@ uint64_t Texture_frameSeq(void);
 // reaches up for sampler-flight state): the sampler-flight owner (the
 // darling compositor) registers a non-blocking "safe to destroy retired
 // images" probe. retireDrain destroys fence-less rows (free/resize rollovers
-// that a submitted batch/pane CB may still sample) ONLY while the guard
+// that a submitted batch/present CB may still sample) ONLY while the guard
 // returns true — the 2-frame CPU lag is a fallback for standalone builds
 // with no guard registered. Never blocks, never allocates, headless-safe.
 void Texture_setRetireGuard(bool (*guard)(void));

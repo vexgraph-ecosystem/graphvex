@@ -3,9 +3,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Pipeline
+ * ============================================================================
+ * Backend-agnostic compiled graphics and compute pipeline state encapsulation.
+ * Configures execution stage masks, Porter-Duff color blending operations, polygon
+ * backface culling, and depth test/write state flags.
+ *
+ * Provides safe state tracking and shader entry point specification across direct
+ * and accelerated graphics render loops in compliance with the Unified Graphics
+ * Abstraction Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -30,33 +48,47 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Pipeline()                           : Pipeline_0()
- *   - Pipeline(shaderName)                 : Pipeline_1(shaderName)
+ * Public Constructors: (.h)
+ *   - Pipeline_0(void)                             : Allocate default pipeline state
+ *   - Pipeline_1(shaderName)                       : Allocate pipeline bound to shader
  *
- * Core Functions:
- *   - Pipeline_free(self)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Pipeline_setStageMask(self, stageMask)
- *   - Pipeline_setBlendMode(self, blendMode)
- *   - Pipeline_setCullMode(self, cullMode)
- *   - Pipeline_setDepthTest(self, depthTest)
- *   - Pipeline_setDepthWrite(self, depthWrite)
- *   - Pipeline_setShaderName(self, shaderName)
+ * Public Core Functions: (.h)
+ *   - Pipeline_free(self)                          : Release pipeline heap storage
  *
- * Getters:
- *   - Pipeline_getStageMask(self)
- *   - Pipeline_getBlendMode(self)
- *   - Pipeline_getCullMode(self)
- *   - Pipeline_isDepthTest(self)
- *   - Pipeline_isDepthWrite(self)
- *   - Pipeline_getShaderName(self)
- *   - Pipeline_getTypeId(self)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Pipeline_setStageMask(self, stageMask)       : Set execution stage mask
+ *   - Pipeline_setBlendMode(self, blendMode)       : Set color blending mode
+ *   - Pipeline_setCullMode(self, cullMode)         : Set polygon culling mode
+ *   - Pipeline_setDepthTest(self, depthTest)       : Enable/disable depth testing
+ *   - Pipeline_setDepthWrite(self, depthWrite)     : Enable/disable depth writing
+ *   - Pipeline_setShaderName(self, shaderName)     : Assign shader entry identifier
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Pipeline_getStageMask(self)                  : Query execution stage mask
+ *   - Pipeline_getBlendMode(self)                  : Query color blending mode
+ *   - Pipeline_getCullMode(self)                   : Query polygon culling mode
+ *   - Pipeline_isDepthTest(self)                   : Query depth testing status
+ *   - Pipeline_isDepthWrite(self)                  : Query depth writing status
+ *   - Pipeline_getShaderName(self)                 : Query shader entry identifier
+ *   - Pipeline_getTypeId(self)                     : Query block type ID
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
 Pipeline *Pipeline_0(void) {
     Pipeline *self = (Pipeline*) Memory_alloc(TYPE_PIPELINE_SINGLETON, sizeof(Pipeline));
@@ -82,7 +114,9 @@ Pipeline *Pipeline_1(const char *shaderName) {
     return self;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 void Pipeline_free(Pipeline *self) {
     if (!self)
@@ -93,38 +127,46 @@ void Pipeline_free(Pipeline *self) {
         free(self);
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;SETTER
 void Pipeline_setStageMask(Pipeline *self, uint32_t stageMask) {
     if (!self)
         return;
     (*self).stageMask = stageMask;
 }
 
+;;SETTER
 void Pipeline_setBlendMode(Pipeline *self, uint32_t blendMode) {
     if (!self)
         return;
     (*self).blendMode = blendMode;
 }
 
+;;SETTER
 void Pipeline_setCullMode(Pipeline *self, uint32_t cullMode) {
     if (!self)
         return;
     (*self).cullMode = cullMode;
 }
 
+;;SETTER
 void Pipeline_setDepthTest(Pipeline *self, bool depthTest) {
     if (!self)
         return;
     (*self).depthTest = depthTest;
 }
 
+;;SETTER
 void Pipeline_setDepthWrite(Pipeline *self, bool depthWrite) {
     if (!self)
         return;
     (*self).depthWrite = depthWrite;
 }
 
+;;SETTER
 void Pipeline_setShaderName(Pipeline *self, const char *shaderName) {
     if (!self)
         return;
@@ -136,32 +178,41 @@ void Pipeline_setShaderName(Pipeline *self, const char *shaderName) {
     (*self).shaderName[sizeof((*self).shaderName) - 1] = '\0';
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;GETTER
 uint32_t Pipeline_getStageMask(const Pipeline *self) {
     return self ? (*self).stageMask : 0;
 }
 
+;;GETTER
 uint32_t Pipeline_getBlendMode(const Pipeline *self) {
     return self ? (*self).blendMode : 0;
 }
 
+;;GETTER
 uint32_t Pipeline_getCullMode(const Pipeline *self) {
     return self ? (*self).cullMode : 0;
 }
 
+;;GETTER
 bool Pipeline_isDepthTest(const Pipeline *self) {
     return self ? (*self).depthTest : false;
 }
 
+;;GETTER
 bool Pipeline_isDepthWrite(const Pipeline *self) {
     return self ? (*self).depthWrite : false;
 }
 
+;;GETTER
 const char *Pipeline_getShaderName(const Pipeline *self) {
     return self ? (*self).shaderName : nullptr;
 }
 
+;;GETTER
 uint64_t Pipeline_getTypeId(const Pipeline *self) {
     return self ? (*self).typeId : 0;
 }

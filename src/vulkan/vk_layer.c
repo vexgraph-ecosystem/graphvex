@@ -3,7 +3,10 @@
 #include "vulkan/vk.h"
 #include "vulkan/vk_mac.h"
 #include "vulkan/vk_guard.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "atomic/spin.h"
 
 #include <mach-o/dyld.h>
@@ -12,84 +15,96 @@
 #include <string.h>
 #include <time.h>
 
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: VkLayer
+ * ============================================================================
+ * Retained offscreen render target registry coordinating multi-target composited
+ * scenes under the Present-On-Demand Law. Decouples scene rasterization from
+ * main canvas presentation by rendering active sub-scenes into independent,
+ * fixed-resolution offscreen flight targets on the present worker, which are
+ * subsequently sampled as textured quads during the main canvas render pass.
+ *
+ * Each layer chain maintains a double-buffered flight target with dedicated
+ * image views, framebuffers, command buffers, and synchronization fences.
+ * Repaint demand is tracked per layer; clean layers bypass execution and reuse
+ * previously published frames. Thread contracts strictly separate registration
+ * and resizing on the main thread from offscreen execution and quad collaging
+ * on the presentation worker thread.
+ * ============================================================================
+ */
+
 ;;OVERVIEW
 /**
  * ============================================================================
  * CLASS: VkLayer (vulkan/vk_layer.c)
  * LEVEL: L4 — Self-Management (retained offscreen GPU target lifecycle)
  * ============================================================================
- * Registry of retained offscreen render targets — the COMPOSITED scene model
- * of the Present-On-Demand Law. A scene owns a fixed pixel-size
- * flight target (two record/submit slots, flip/flop) rendered into on the
- * present worker by VkLayer_visit; the canvas painter samples the
- * last-published flight image as a textured quad via VkLayer_composite,
- * collaged into the board pass at the scene's anchor rect. One canvas total
- * — no per-scene CAMetalLayer surfaces. DIRECT scenes use VkPane instead.
+ * SUMMARY:
+ *   Registry of retained offscreen render targets for composited scenes.
+ *   Each scene renders into a fixed pixel-size double-buffered flight target
+ *   on the present worker, which is sampled as a quad into the canvas pass.
  *
- * structural invariant (the Present-On-Demand Law): composite != render. visit() invokes the
- * scene's render handler into its retained target; composite() only copies
- * published pixels. The canvas can never re-invoke a scene render.
- *
- * STRUCT FIELDS (local registry):
+ * STRUCT FIELDS (Local registry):
  * ----------------------------------------------------------------------------
  *   VkLayerChain *chains;        // growable layer table, doubles on demand
- *                                // (stable indices — external holders map
- *                                // indices, never pointers)
- *     images[VK_LAYER_FLIGHT]      // offscreen BGRA8 color targets
- *     views[VK_LAYER_FLIGHT]       // their image views (composite samples)
- *     fbs[VK_LAYER_FLIGHT]         // per-slot framebuffers
- *     mem[VK_LAYER_FLIGHT]         // backing device memory (molten unified)
- *     cb[VK_LAYER_FLIGHT], fence[VK_LAYER_FLIGHT], flip // flip/flop pace
- *     published                    // last-rendered slot (-1 = none yet)
- *     dirty                        // per-layer repaint demand (no new class)
- *     presentCount, skipCount      // lifetime render/skip diagnostics
- *   int count, chainCap;
- *   VkRenderPass s_layerPass;      // BGRA8 CLEAR->SHADER_READ_ONLY dedicated
- *   VkCommandPool s_pool;          // per-layer CBs from one pool
- *   VkLayerRenderFn s_renderer;    // darling scene painter hook
- *   s_compLayout/s_compPipeline    // composite quad pipeline (single sampler)
- *   s_compDescLayout/Pool/Set      // one mutable sampler2D set, per-draw update
- *   s_compSampler                  // linear clamp-to-edge, shared
- * Diagnostics env: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated
- *   fallback (the Identity & Naming Transition Law).
+ *   int count, chainCap;         // active layer count and table capacity
+ *   VkRenderPass s_layerPass;    // BGRA8 CLEAR to SHADER_READ_ONLY dedicated pass
+ *   VkCommandPool s_pool;        // per-layer command buffers from single pool
+ *   VkLayerRenderFn s_renderer;  // scene painter callback hook
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - VkLayer_register(w, h, owner) : allocate flight targets + CBs + fences
- *                                    (marks layer dirty: first render)
- *   - ensureLayerPass(format)       : BGRA8 offscreen render pass
- *   - buildLayerTargets(chain)      : images + views + framebuffers + memory
- *   - ensureCompositePipeline()     : collaging quad pipeline + sampler
+ * Public Constructors: (.h)
+ *   - (none)
  *
- * Core Functions:
- *   - VkLayer_visit()               : render dirty layers into flight targets
- *                                    (the Ecosystem Vulkan Safety Nets Law seam guard at entry; skips clean
- *                                    layers after fence poll; clears demand on
- *                                    render; publishes the flipped slot)
- *   - VkLayer_composite(cb, ...)    : sample a published layer as a quad into
- *                                    an already-begun render pass (collage)
- *   - VkLayer_unregister(index)     : destroy targets, release CBs (present-flight
- *                                    idle wait first; skip+false on budget expiry)
- *   - VkLayer_resize(index, w, h)   : offscreen rebuild (no-op when unchanged;
- *                                    present-flight idle wait first, skip+false
- *                                    on budget expiry for next-tick retry)
- *   - VkLayer_shutdown()            : destroy all chains + pipeline + pool
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - VkLayer_setRenderer(fn)
- *   - VkLayer_markDirty(index, dirty) : per-layer repaint demand (the Symmetric Getter/Setter Completeness Law
- *                                       symmetric pair with isDirty)
+ * Public Core Functions: (.h)
+ *   - VkLayer_register(width, height, owner)             : Register new offscreen layer target
+ *   - VkLayer_unregister(index)                          : Teardown and release layer flight targets
+ *   - VkLayer_resize(index, width, height)               : Resize offscreen target extents
+ *   - VkLayer_visit(void)                                : Render all dirty layers on present queue
+ *   - VkLayer_composite(cmdBuffer, surfaceW, surfaceH, index, x, y, w, h, r, g, b, a) : Sample published layer into quad
+ *   - VkLayer_shutdown(void)                             : Teardown all chains and composite resources
  *
- * Getters:
- *   - VkLayer_ready() / VkLayer_count()
- *   - VkLayer_find(owner)           : slot index for the owner handle
- *   - VkLayer_extent(index)         : fixed pixel extent probe (zero-extent
- *                                    on stale/inactive index)
- *   - VkLayer_isDirty(index)        : per-layer repaint demand probe
- *   - VkLayer_hasDemand()           : registry-wide demand probe (the Present-On-Demand Law)
- *   - VkLayer_flightIdle()          : true when no layer submit is pending
- *   - VkLayer_presentCount(index) / VkLayer_skipCount(index)
+ * Private Core Functions: (.c static)
+ *   - layerTableGrow(void)                               : Expand dynamic layer table capacity
+ *   - layerLoadSpv(path, outSize)                        : Load compiled SPIR-V shader file
+ *   - layerLoadSpvAny(name, outSize)                     : Search bundle paths for SPIR-V shader
+ *   - layerLoadModule(name)                              : Compile Vulkan shader module
+ *   - ensureLayerPass(void)                              : Create dedicated offscreen render pass
+ *   - layerMemoryType(typeBits)                          : Resolve device memory type index
+ *   - buildLayerTargets(chain)                           : Allocate flight images, views, and fbs
+ *   - layerWaitPresentIdle(void)                         : Wait for pending layer queue completion
+ *   - destroyLayerTargets(chain)                         : Release flight images and framebuffers
+ *   - abortLayerRegistration(chain)                      : Clean up failed registration allocation
+ *   - ensureCompositePipelineLocked(void)                : Build quad pipeline under registry lock
+ *   - ensureCompositePipeline(void)                      : Thread-safe composite pipeline builder
+ *
+ * Public Setters: (.h)
+ *   - VkLayer_setRenderer(fn)                            : Install global scene painter callback
+ *   - VkLayer_markDirty(index, dirty)                    : Set per-layer repaint demand flag
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - VkLayer_ready(void)                                : Probe whether layer subsystem is initialized
+ *   - VkLayer_count(void)                                : Query active layer chain count
+ *   - VkLayer_find(owner)                                : Lookup layer index for owner pointer
+ *   - VkLayer_extent(index)                              : Query fixed pixel dimensions of layer
+ *   - VkLayer_isDirty(index)                             : Query per-layer repaint demand status
+ *   - VkLayer_hasDemand(void)                            : Probe whether any active layer is dirty
+ *   - VkLayer_presentCount(index)                        : Query lifetime render frame count
+ *   - VkLayer_skipCount(index)                           : Query lifetime clean skip frame count
+ *   - VkLayer_publishGeneration(void)                    : Query global publish generation stamp
+ *   - VkLayer_flightIdle(void)                           : Probe whether all layer fence flights are idle
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -123,6 +138,7 @@ typedef struct VkLayerChain {
     VkImageView views[VK_LAYER_FLIGHT];
     VkFramebuffer fbs[VK_LAYER_FLIGHT];
     VkDeviceMemory mem[VK_LAYER_FLIGHT];
+    VkDescriptorSet descSets[VK_LAYER_FLIGHT]; // per-flight slot composite descriptor set
     VkCommandBuffer cb[VK_LAYER_FLIGHT]; // per-scene record buffers (flip/flop)
     VkFence fence[VK_LAYER_FLIGHT];      // per-slot submit fences (start signaled)
     uint32_t flip;           // next slot to record (alternates each render)
@@ -134,6 +150,10 @@ typedef struct VkLayerChain {
     uint64_t fenceTimeoutNs; // 100ms bounded (the Bounded Wait Law)
 } VkLayerChain;
 
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+
+// (none)
+
 static VkLayerChain *s_chains = NULL;
 static int s_chainCap = 0;      // allocated chain slots (grows by doubling)
 // Registry lock (two-thread live-resize contract): the present worker runs
@@ -142,6 +162,7 @@ static int s_chainCap = 0;      // allocated chain slots (grows by doubling)
 // iteration serialize here; the waits inside remain bounded (the Bounded Wait Law).
 static SpinLock s_layerLock = SPIN_LOCK_INIT;
 static int s_count = 0;
+static uint64_t s_publishGeneration = 0; // bumps on every layer publish (probe re-arm)
 static VkRenderPass s_layerPass = VK_NULL_HANDLE;
 static VkCommandPool s_pool = VK_NULL_HANDLE;
 static VkLayerRenderFn s_renderer = nullptr;
@@ -164,25 +185,26 @@ static bool layerTableGrow(void) {
     return true;
 }
 
-// Composite (collage) pipeline — one mutable descriptor set, updated per
-// layer draw on the single present worker (no concurrent access).
+// Composite (collage) pipeline — immutable per-slot descriptor sets allocated on build.
 static VkPipelineLayout s_compLayout = VK_NULL_HANDLE;
 static VkPipeline s_compPipeline = VK_NULL_HANDLE;
 static VkDescriptorSetLayout s_compDescLayout = VK_NULL_HANDLE;
 static VkDescriptorPool s_compDescPool = VK_NULL_HANDLE;
-static VkDescriptorSet s_compDescSet = VK_NULL_HANDLE;
 static VkSampler s_compSampler = VK_NULL_HANDLE;
 
-// // GETTERS
+// GETTERS (PUBLIC & PRIVATE)
 
+;;GETTER
 bool VkLayer_ready(void) {
     return s_instanceDevice != VK_NULL_HANDLE && s_count > 0;
 }
 
+;;GETTER
 int VkLayer_count(void) {
     return s_count;
 }
 
+;;GETTER
 int VkLayer_find(void *owner) {
     if (!owner)
         return -1;
@@ -193,17 +215,26 @@ int VkLayer_find(void *owner) {
     return -1;
 }
 
+;;GETTER
 uint64_t VkLayer_presentCount(int index) {
     if (index < 0 || index >= s_count)
         return 0;
     return s_chains[index].presentCount;
 }
 
+;;GETTER
 uint64_t VkLayer_skipCount(int index) {
     if (index < 0 || index >= s_count)
         return 0;
     return s_chains[index].skipCount;
 }
+
+;;GETTER
+uint64_t VkLayer_publishGeneration(void) {
+    return s_publishGeneration;
+}
+
+;;GETTER
 VkExtent2D VkLayer_extent(int index) {
     VkExtent2D zero = { 0, 0 };
     if (index < 0 || index >= s_count)
@@ -214,7 +245,7 @@ VkExtent2D VkLayer_extent(int index) {
     return (*chain).extent;
 }
 
-
+;;GETTER
 bool VkLayer_isDirty(int index) {
     if (index < 0 || index >= s_count)
         return false;
@@ -230,6 +261,7 @@ bool VkLayer_isDirty(int index) {
 // thread-0 cadence) may miss an in-flight mark by one tick at worst and
 // repaint a step late, never crash (drop-degrade, the Cold-Strict,
 // Hot-Minimal Validation Law).
+;;GETTER
 bool VkLayer_hasDemand(void) {
     if (s_count <= 0)
         return false;
@@ -245,6 +277,7 @@ bool VkLayer_hasDemand(void) {
 // signaled — no offscreen CB that sampled bindless descriptors is still
 // executing. Non-blocking: GetFenceStatus poll only, under a try of the
 // registry lock. Fences start SIGNALED, so a never-submitted layer is idle.
+;;GETTER
 bool VkLayer_flightIdle(void) {
     if (!VkLayer_ready())
         return true;
@@ -267,8 +300,9 @@ bool VkLayer_flightIdle(void) {
     return idle;
 }
 
-// // SETTERS
+// SETTERS (PUBLIC & PRIVATE)
 
+;;SETTER
 void VkLayer_setRenderer(VkLayerRenderFn fn) {
     s_renderer = fn;
 }
@@ -278,6 +312,7 @@ void VkLayer_setRenderer(VkLayerRenderFn fn) {
 // matching the presentCount/skipCount diagnostic pattern: the worker reads
 // and clears under the registry lock while the bridge sets from outside —
 // a missed mark only delays one render to the next tick (drop-degrade).
+;;SETTER
 void VkLayer_markDirty(int index, bool dirty) {
     if (index < 0 || index >= s_count)
         return;
@@ -287,7 +322,7 @@ void VkLayer_markDirty(int index, bool dirty) {
     (*chain).dirty = dirty;
 }
 
-// // CORE FUNCTIONS (shader loading)
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
 
 // Bundle-aware spv lookup shared by the composite pipeline build: the CMake
 // staging dir, adjacent spv, then cwd relative — the same resolution the
@@ -378,6 +413,8 @@ static VkShaderModule layerLoadModule(const char *name) {
 
 // // CONSTRUCTORS
 
+static bool ensureCompositePipeline(void);
+
 // Offscreen layer render pass: BGRA8, cleared on BEGIN (a layer owns its
 // whole extent), stored to SHADER_READ_ONLY so the composite pass can sample
 // the published flight image.
@@ -439,15 +476,23 @@ static uint32_t layerMemoryType(uint32_t typeBits) {
     return UINT32_MAX;
 }
 
+static bool ensureCompositePipelineLocked(void);
+static bool ensureCompositePipeline(void);
+
 // Per-layer offscreen flight targets: two color images (sampled+attachment),
-// their views, and framebuffers on the dedicated layer pass.
+// their views, framebuffers, and per-slot immutable composite descriptor sets.
 static bool buildLayerTargets(VkLayerChain *chain) {
+    if (s_compPipeline == VK_NULL_HANDLE && !ensureCompositePipelineLocked())
+        return false;
+
     VK_LAYER_LOAD_DEVICE(CreateImage)
     VK_LAYER_LOAD_DEVICE(GetImageMemoryRequirements)
     VK_LAYER_LOAD_DEVICE(AllocateMemory)
     VK_LAYER_LOAD_DEVICE(BindImageMemory)
     VK_LAYER_LOAD_DEVICE(CreateImageView)
     VK_LAYER_LOAD_DEVICE(CreateFramebuffer)
+    VK_LAYER_LOAD_DEVICE(AllocateDescriptorSets)
+    VK_LAYER_LOAD_DEVICE(UpdateDescriptorSets)
 
     uint32_t w = (*chain).extent.width;
     uint32_t h = (*chain).extent.height;
@@ -495,11 +540,35 @@ static bool buildLayerTargets(VkLayerChain *chain) {
         fci.layers = 1;
         if (CreateFramebuffer_fn(s_instanceDevice, &fci, nullptr, &(*chain).fbs[s]) != VK_SUCCESS)
             return false;
+
+        // Dedicated immutable descriptor set for this flight slot (no CPU/GPU race on present)
+        VkDescriptorSetAllocateInfo dsai = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = s_compDescPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &s_compDescLayout,
+        };
+        if (AllocateDescriptorSets_fn(s_instanceDevice, &dsai, &(*chain).descSets[s]) != VK_SUCCESS)
+            return false;
+
+        VkDescriptorImageInfo dii = {
+            .sampler = s_compSampler,
+            .imageView = (*chain).views[s],
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        };
+        VkWriteDescriptorSet wds = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = (*chain).descSets[s],
+            .dstBinding = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &dii,
+        };
+        UpdateDescriptorSets_fn(s_instanceDevice, 1, &wds, 0, nullptr);
     }
     return true;
 }
 
-// Tear down a layer's offscreen targets (images, views, framebuffers, memory).
 // Present-flight idle wait shared by resize/unregister: the previous tick's
 // seam submit may still sample these targets after the layer's own flight
 // fences signal — layer fences alone do not cover the composite sampler
@@ -520,6 +589,7 @@ static bool layerWaitPresentIdle(void) {
     return false;
 }
 
+// Tear down a layer's offscreen targets (images, views, framebuffers, memory, descriptor sets).
 static void destroyLayerTargets(VkLayerChain *chain) {
     if (!chain)
         return;
@@ -530,8 +600,14 @@ static void destroyLayerTargets(VkLayerChain *chain) {
     VK_LAYER_LOAD_DEVICE(DestroyImageView)
     VK_LAYER_LOAD_DEVICE(DestroyImage)
     VK_LAYER_LOAD_DEVICE(FreeMemory)
+    VK_LAYER_LOAD_DEVICE(FreeDescriptorSets)
 
     for (uint32_t s = 0; s < VK_LAYER_FLIGHT; s++) {
+        if ((*chain).descSets[s] != VK_NULL_HANDLE) {
+            if (FreeDescriptorSets_fn && s_compDescPool != VK_NULL_HANDLE)
+                FreeDescriptorSets_fn(s_instanceDevice, s_compDescPool, 1, &(*chain).descSets[s]);
+            (*chain).descSets[s] = VK_NULL_HANDLE;
+        }
         if ((*chain).fbs[s] != VK_NULL_HANDLE) {
             DestroyFramebuffer_fn(s_instanceDevice, (*chain).fbs[s], nullptr);
             (*chain).fbs[s] = VK_NULL_HANDLE;
@@ -571,23 +647,16 @@ static void abortLayerRegistration(VkLayerChain *chain) {
 // push is the same NDC rect); the fragment (layer_quad_frag.spv) samples a
 // single bounded sampler2D and applies the tint. Built against the BGRA8
 // layer pass; Vulkan render-pass compatibility (same format + single color
-// attachment) makes it bind in every board/pane BGRA8 pass too.
-static bool ensureCompositePipeline(void) {
+// attachment) makes it bind in every board BGRA8 pass too.
+static bool ensureCompositePipelineLocked(void) {
     if (s_instanceGdpa == nullptr || s_layerPass == VK_NULL_HANDLE)
         return false;
 
-    // Build is idempotent under the registry lock: the warm-up presents (thread
-    // 0) and the present worker can race the first composite at startup, and
-    // two concurrent builds would orphan one whole pipeline + descriptor set.
-    SpinLock_lock(&s_layerLock);
-    if (s_compPipeline != VK_NULL_HANDLE) {
-        SpinLock_unlock(&s_layerLock);
+    if (s_compPipeline != VK_NULL_HANDLE)
         return true;
-    }
 
     VK_LAYER_LOAD_DEVICE(CreateDescriptorSetLayout)
     VK_LAYER_LOAD_DEVICE(CreateDescriptorPool)
-    VK_LAYER_LOAD_DEVICE(AllocateDescriptorSets)
     VK_LAYER_LOAD_DEVICE(CreateSampler)
     VK_LAYER_LOAD_DEVICE(CreatePipelineLayout)
     VK_LAYER_LOAD_DEVICE(CreateGraphicsPipelines)
@@ -601,31 +670,19 @@ static bool ensureCompositePipeline(void) {
     VkDescriptorSetLayoutCreateInfo dlci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     dlci.bindingCount = 1;
     dlci.pBindings = &binding;
-    if (CreateDescriptorSetLayout_fn(s_instanceDevice, &dlci, nullptr, &s_compDescLayout) != VK_SUCCESS) {
-        SpinLock_unlock(&s_layerLock);
+    if (CreateDescriptorSetLayout_fn(s_instanceDevice, &dlci, nullptr, &s_compDescLayout) != VK_SUCCESS)
         return false;
-    }
 
     VkDescriptorPoolSize psize = {0};
     psize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    psize.descriptorCount = 1;
+    psize.descriptorCount = 256;
     VkDescriptorPoolCreateInfo dpci = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    dpci.maxSets = 1;
+    dpci.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    dpci.maxSets = 256;
     dpci.poolSizeCount = 1;
     dpci.pPoolSizes = &psize;
-    if (CreateDescriptorPool_fn(s_instanceDevice, &dpci, nullptr, &s_compDescPool) != VK_SUCCESS) {
-        SpinLock_unlock(&s_layerLock);
+    if (CreateDescriptorPool_fn(s_instanceDevice, &dpci, nullptr, &s_compDescPool) != VK_SUCCESS)
         return false;
-    }
-
-    VkDescriptorSetAllocateInfo dsai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-    dsai.descriptorPool = s_compDescPool;
-    dsai.descriptorSetCount = 1;
-    dsai.pSetLayouts = &s_compDescLayout;
-    if (AllocateDescriptorSets_fn(s_instanceDevice, &dsai, &s_compDescSet) != VK_SUCCESS) {
-        SpinLock_unlock(&s_layerLock);
-        return false;
-    }
 
     VkSamplerCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     sci.magFilter = VK_FILTER_LINEAR;
@@ -635,10 +692,8 @@ static bool ensureCompositePipeline(void) {
     sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sci.maxLod = 0.0f;
-    if (CreateSampler_fn(s_instanceDevice, &sci, nullptr, &s_compSampler) != VK_SUCCESS) {
-        SpinLock_unlock(&s_layerLock);
+    if (CreateSampler_fn(s_instanceDevice, &sci, nullptr, &s_compSampler) != VK_SUCCESS)
         return false;
-    }
 
     // Vertex: offset=0 size=16 (rectNdc). Fragment: offset=16 size=16 (tint).
     VkPushConstantRange compPush[2] = {{0}, {0}};
@@ -654,17 +709,13 @@ static bool ensureCompositePipeline(void) {
     plci.pSetLayouts = &s_compDescLayout;
     plci.pushConstantRangeCount = 2;
     plci.pPushConstantRanges = compPush;
-    if (CreatePipelineLayout_fn(s_instanceDevice, &plci, nullptr, &s_compLayout) != VK_SUCCESS) {
-        SpinLock_unlock(&s_layerLock);
+    if (CreatePipelineLayout_fn(s_instanceDevice, &plci, nullptr, &s_compLayout) != VK_SUCCESS)
         return false;
-    }
 
     VkShaderModule compVert = layerLoadModule("texture_quad_vert.spv");
     VkShaderModule compFrag = layerLoadModule("layer_quad_frag.spv");
-    if (compVert == VK_NULL_HANDLE || compFrag == VK_NULL_HANDLE) {
-        SpinLock_unlock(&s_layerLock);
+    if (compVert == VK_NULL_HANDLE || compFrag == VK_NULL_HANDLE)
         return false;
-    }
 
     VkPipelineVertexInputStateCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
     VkPipelineInputAssemblyStateCreateInfo ia = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
@@ -716,17 +767,22 @@ static bool ensureCompositePipeline(void) {
     gpci.pColorBlendState = &cb2;
     gpci.pDynamicState = &ds;
     gpci.layout = s_compLayout;
-    gpci.renderPass = s_layerPass;  // BGRA8 — compatible with every BGRA8 board/pane pass
+    gpci.renderPass = s_layerPass;  // BGRA8 — compatible with every BGRA8 board pass
     gpci.subpass = 0;
 
     if (CreateGraphicsPipelines_fn(s_instanceDevice, VK_NULL_HANDLE, 1, &gpci, nullptr, &s_compPipeline) != VK_SUCCESS) {
         s_compPipeline = VK_NULL_HANDLE;
-        SpinLock_unlock(&s_layerLock);
         return false;
     }
-    SpinLock_unlock(&s_layerLock);
     printf("vk: layer composite pipeline built\n");
     return true;
+}
+
+static bool ensureCompositePipeline(void) {
+    SpinLock_lock(&s_layerLock);
+    bool ok = ensureCompositePipelineLocked();
+    SpinLock_unlock(&s_layerLock);
+    return ok;
 }
 
 int VkLayer_register(int width, int height, void *owner) {
@@ -786,7 +842,7 @@ int VkLayer_register(int width, int height, void *owner) {
     (*chain).active = true;
     (*chain).owner = owner;
     // Layer pixel size is fixed NOW (register args) — the registered ground
-    // truth the offscreen targets are built at (the Pane-of-Glass Law).
+    // truth the offscreen targets are built at (the Single-Seam Canvas Law).
     (*chain).extent = (VkExtent2D){ .width = (uint32_t) width, .height = (uint32_t) height };
     (*chain).fenceTimeoutNs = 100000000ULL;
     (*chain).dirty = true;      // registration demands the first render
@@ -847,6 +903,15 @@ bool VkLayer_unregister(int index) {
         if ((*chain).fence[s] != VK_NULL_HANDLE)
             WaitForFences_fn(s_instanceDevice, 1, &(*chain).fence[s], VK_TRUE, (*chain).fenceTimeoutNs);
     }
+    // Seam sampler may still fly over these targets after the layer fences
+    // signal (the Ecosystem Vulkan Safety Nets Law — layer fences alone do
+    // not cover it). Bounded ~1ms slices, ~50ms budget; expiry skips this
+    // tick (drop-degrade, caller retries). VkLayer_shutdown already idles
+    // the device first, so teardown passes through instantly (the Teardown Order Law).
+    if (!layerWaitPresentIdle()) {
+        SpinLock_unlock(&s_layerLock);
+        return false;
+    }
     destroyLayerTargets(chain);
 
     VK_LAYER_LOAD_DEVICE(DestroyFence)
@@ -867,15 +932,6 @@ bool VkLayer_unregister(int index) {
 
 bool VkLayer_resize(int index, int width, int height) {
     SpinLock_lock(&s_layerLock);
-    // Seam sampler may still fly over these targets after the layer fences
-    // signal (the Ecosystem Vulkan Safety Nets Law — layer fences alone do
-    // not cover it). Bounded ~1ms slices, ~50ms budget; expiry skips this
-    // tick (drop-degrade, caller retries). VkLayer_shutdown already idles
-    // the device first, so teardown passes through instantly (the Teardown Order Law).
-    if (!layerWaitPresentIdle()) {
-        SpinLock_unlock(&s_layerLock);
-        return false;
-    }
 
     if (index < 0 || index >= s_count || width <= 0 || height <= 0) {
         SpinLock_unlock(&s_layerLock);
@@ -889,7 +945,7 @@ bool VkLayer_resize(int index, int width, int height) {
     }
     if ((*chain).extent.width == (uint32_t) width && (*chain).extent.height == (uint32_t) height) {
         SpinLock_unlock(&s_layerLock);
-        return true; // fixed layer: no rebuild on window resize (the Pane-of-Glass Law)
+        return true; // fixed layer: no rebuild on window resize (the Single-Seam Canvas Law)
     }
 
     // Bound the wait on in-flight renders (both flight slots) before
@@ -898,6 +954,16 @@ bool VkLayer_resize(int index, int width, int height) {
     for (uint32_t s = 0; s < VK_LAYER_FLIGHT; s++) {
         if ((*chain).fence[s] != VK_NULL_HANDLE)
             WaitForFences_fn(s_instanceDevice, 1, &(*chain).fence[s], VK_TRUE, (*chain).fenceTimeoutNs);
+    }
+    // Seam sampler may still fly over these targets after the layer fences
+    // signal (the Ecosystem Vulkan Safety Nets Law — layer fences alone do
+    // not cover it). Bounded ~1ms slices, ~50ms budget; expiry skips the
+    // destroy+rebuild this tick (drop-degrade, next tick retries).
+    // VkLayer_shutdown already idles the device first, so teardown passes
+    // through instantly (the Teardown Order Law).
+    if (!layerWaitPresentIdle()) {
+        SpinLock_unlock(&s_layerLock);
+        return false;
     }
     destroyLayerTargets(chain);
     (*chain).extent = (VkExtent2D){ .width = (uint32_t) width, .height = (uint32_t) height };
@@ -919,16 +985,6 @@ bool VkLayer_visit(void) {
         return false;
 
     SpinLock_lock(&s_layerLock);
-    // Seam sampler may still fly over these targets after the layer fences
-    // signal (the Ecosystem Vulkan Safety Nets Law — layer fences alone do
-    // not cover it). Bounded ~1ms slices, ~50ms budget; expiry skips the
-    // destroy+rebuild this tick (drop-degrade, next tick retries).
-    // VkLayer_shutdown already idles the device first, so teardown passes
-    // through instantly (the Teardown Order Law).
-    if (!layerWaitPresentIdle()) {
-        SpinLock_unlock(&s_layerLock);
-        return false;
-    }
     if (!s_renderer || s_count == 0 || !s_instanceDevice) {
         SpinLock_unlock(&s_layerLock);
         return false;
@@ -943,6 +999,11 @@ bool VkLayer_visit(void) {
     VK_LAYER_LOAD_DEVICE(ResetFences)
     VK_LAYER_LOAD_DEVICE(CreateFence)
     VK_LAYER_LOAD_DEVICE(DestroyFence)
+
+    static int s_visitDiag = -1;
+    // per the Identity & Naming Transition Law: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated fallback.
+    if (s_visitDiag < 0)
+        s_visitDiag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
 
     bool rendered = false;
     for (int i = 0; i < s_count; i++) {
@@ -964,14 +1025,14 @@ bool VkLayer_visit(void) {
         // block the walk. Non-blocking poll only: drop-degrade per the Bounded Wait Law,
         // zero logging per the Cold-Strict, Hot-Minimal Validation Law hot-minimal.
         if (GetFenceStatus_fn(s_instanceDevice, fence) != VK_SUCCESS) {
-    static int s_visitDiag = -1;
-    // per the Identity & Naming Transition Law: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated fallback.
-    if (s_visitDiag < 0)
-        s_visitDiag = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
-
+            if (s_visitDiag)
+                fprintf(stderr, "vk:visit %d slot%d FENCE-SKIP (dirty=%d pub=%d flip=%d)\n", i, slot, (*chain).dirty, (*chain).published, (*chain).flip);
             (*chain).skipCount++;
             continue;
         }
+
+        if (s_visitDiag && !(*chain).dirty)
+            fprintf(stderr, "vk:visit %d slot%d CLEAN-SKIP (pub=%d flip=%d)\n", i, slot, (*chain).published, (*chain).flip);
 
         // Clean-layer skip: no repaint demand since the last successful
         // render — keep the stale published image, never re-record. Scenes
@@ -1010,7 +1071,7 @@ bool VkLayer_visit(void) {
             // Failed submits queue nothing: the just-reset fence would never
             // signal again, wedging this layer on its stale frame forever.
             // Recreate it signaled so the next tick retries (same refence
-            // contract the pane walk honors).
+            // contract the seam present honors).
             if (CreateFence_fn && DestroyFence_fn) {
                 VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
                 fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -1028,8 +1089,11 @@ bool VkLayer_visit(void) {
         (*chain).published = (int) slot;
         (*chain).flip ^= 1u;
         (*chain).presentCount++;
+        s_publishGeneration++;
         (*chain).dirty = false; // demand satisfied; bridge re-arms next tick
         rendered = true;
+        if (s_visitDiag)
+            fprintf(stderr, "vk:visit %d slot%d RENDER -> pub=%d dirty=false\n", i, slot, (*chain).published);
     }
     SpinLock_unlock(&s_layerLock);
     return rendered;
@@ -1051,11 +1115,12 @@ bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
         if (s_compDiag)
             fprintf(stderr, "vk:composite %d NO-PUB (active=%d pub=%d)\n", index, (*chain).active, (*chain).published);
         return false;
-    if (w <= 0.0f || h <= 0.0f)
+    }
+    int pub = (*chain).published;
+    if (pub < 0 || pub >= VK_LAYER_FLIGHT)
         return false;
-
-    VkImageView view = (*chain).views[(*chain).published];
-    if (view == VK_NULL_HANDLE)
+    VkDescriptorSet ds = (*chain).descSets[pub];
+    if (ds == VK_NULL_HANDLE)
         return false;
 
     if (s_instanceDevice == VK_NULL_HANDLE)
@@ -1069,27 +1134,12 @@ bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
     VK_LAYER_LOAD_DEVICE(CmdDraw)
     VK_LAYER_LOAD_DEVICE(CmdSetViewport)
     VK_LAYER_LOAD_DEVICE(CmdSetScissor)
-    VK_LAYER_LOAD_DEVICE(UpdateDescriptorSets)
 
     VkCommandBuffer cb = (VkCommandBuffer) cmdBuffer;
 
-    // Point the single composite descriptor set at this layer's published
-    // image. Single present worker – no concurrent access, no per-layer sets.
-    VkDescriptorImageInfo dii = {
-        .sampler = s_compSampler,
-        .imageView = view,
-        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-    };
-    VkWriteDescriptorSet wds = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    wds.dstSet = s_compDescSet;
-    wds.descriptorCount = 1;
-    wds.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    wds.pImageInfo = &dii;
-    UpdateDescriptorSets_fn(s_instanceDevice, 1, &wds, 0, nullptr);
-
     CmdBindPipeline_fn(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, s_compPipeline);
     CmdBindDescriptorSets_fn(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, s_compLayout,
-                             0, 1, &s_compDescSet, 0, nullptr);
+                             0, 1, &ds, 0, nullptr);
 
     float scLeft = x < 0.0f ? 0.0f : x;
     float scRight = (x + w > surfaceW) ? surfaceW : (x + w);
@@ -1098,10 +1148,10 @@ bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
     if (scRight <= scLeft || scTop <= scBottom)
         return false;
 
-    VkViewport viewport = { .x = 0.0f, .y = surfaceH, .width = surfaceW, .height = -surfaceH, .maxDepth = 1.0f };
+    VkViewport viewport = { .x = 0.0f, .y = 0.0f, .width = surfaceW, .height = surfaceH, .minDepth = 0.0f, .maxDepth = 1.0f };
     VkRect2D scissor = {
         .offset.x = (int32_t) scLeft,
-        .offset.y = (int32_t) (surfaceH - scTop),
+        .offset.y = (int32_t) scBottom,
         .extent.width = (uint32_t) (scRight - scLeft),
         .extent.height = (uint32_t) (scTop - scBottom),
     };
@@ -1124,6 +1174,15 @@ bool VkLayer_composite(void *cmdBuffer, float surfaceW, float surfaceH,
     CmdPushConstants_fn(cb, s_compLayout, VK_SHADER_STAGE_VERTEX_BIT,   0,  16, push.rect);
     CmdPushConstants_fn(cb, s_compLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 16, 16, push.color);
     CmdDraw_fn(cb, 6, 1, 0, 0);
+    {
+        static int s_compDiag2 = -1;
+        // per the Identity & Naming Transition Law: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated fallback.
+        if (s_compDiag2 < 0)
+            s_compDiag2 = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
+        if (s_compDiag2)
+            fprintf(stderr, "vk:composite %d DREW pub=%d tint=(%.1f,%.1f,%.1f,%.1f) rect=(%.0f,%.0f,%.0f,%.0f)\n",
+                    index, (*chain).published, r, g, b, a, x, y, w, h);
+    }
     return true;
 }
 
@@ -1137,15 +1196,6 @@ void VkLayer_shutdown(void) {
 
     VK_LAYER_LOAD_DEVICE(DestroyFence)
     VK_LAYER_LOAD_DEVICE(FreeCommandBuffers)
-    {
-        static int s_compDiag2 = -1;
-        // per the Identity & Naming Transition Law: GRAPHICS_VK_STATS primary, ANTI_VK_STATS deprecated fallback.
-        if (s_compDiag2 < 0)
-            s_compDiag2 = getenv("GRAPHICS_VK_STATS") != nullptr || getenv("ANTI_VK_STATS") != nullptr;
-        if (s_compDiag2)
-            fprintf(stderr, "vk:composite %d DREW pub=%d tint=(%.1f,%.1f,%.1f,%.1f) rect=(%.0f,%.0f,%.0f,%.0f)\n",
-                    index, (*chain).published, r, g, b, a, x, y, w, h);
-    }
 
     for (int i = 0; i < s_count; i++) {
         VkLayerChain *chain = &s_chains[i];

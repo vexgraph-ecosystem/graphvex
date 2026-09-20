@@ -2,8 +2,30 @@
 
 #include <stdlib.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "graphvex/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: GraphicsLayer
+ * ============================================================================
+ * Hardware presentation board shim representing an individual composited layer
+ * within the platform window stack, differentiating the background 3D viewport
+ * scene board from the foreground 2D UI content board.
+ *
+ * Encapsulates the GPU-side presentation state per board, including native
+ * pixel extents, display backing scale, opaque device context, and opaque platform
+ * layer handles (such as CAMetalLayer on macOS). Operates under strict vertical
+ * separation: window system shims (hotcwap) control window hierarchy parenting
+ * without inspecting graphics driver handles, while GraphicsLayer manages content
+ * resolution and resize pulses without depending on window system APIs. All window
+ * bindings pass through validated type-provenance gates (TYPE_GRAPHICS_LAYER_SINGLETON).
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -11,32 +33,21 @@
  * CLASS: GraphicsLayer (vulkan/graphics_layer.c)
  * LEVEL: L2 — Behavior (per-board GPU shim state, the Four System Levels Law)
  * ============================================================================
- * One composited board in the window stack: the scene board (3D viewport,
- * bottom) or the content board (UI canvas, top). Owns the GPU side per
- * board — native pixel extent, backing scale, opaque device handle, opaque
- * platform layer handle — and nothing else. Never sees NSWindow, AppKit,
- * or hotcwap's Window: both handles stay void* (the Vertical Integration Law R3 sees vexspoke
- * only; the R3 -> R1 direction is void* + seam callbacks per the Conflict Triage Law).
+ * SUMMARY:
+ *   One composited board in the window stack: the scene board (3D viewport,
+ *   bottom) or the content board (UI canvas, top). Owns the GPU presentation
+ *   state per board (native pixel extent, backing scale, opaque device handle,
+ *   opaque platform layer handle). The window shim manages parenting while
+ *   GraphicsLayer manages content dimensions and resize pulses.
  *
- * The window shim stores two platform handles as Window topLayer /
- * bottomLayer void* slots and owns PARENTING ONLY. This class owns CONTENT
- * ONLY (device, drawableSize, resize pulse). The resize pulse is the whole
- * live-resize contract: setPointSize raises it on movement, the renderer
- * converts points to pixels via scale, pushes them through the cocoa
- * applySize, then commits via setPixelSize which lowers it. Provenance is
- * the project type registry (graphvex/type.h ID_GRAPHICS_LAYER): the id is
- * stamped at construction and gated by GraphicsLayer_isValid on every cold
- * entry — no bespoke magic, same stamp rule as Swapchain's typeId.
- * Allocation is calloc-owned (Phase-1, like Application_0); the stamp, not
- * the allocator, carries provenance.
- *
- * STRUCT FIELDS (Mirroring vulkan/graphics_layer.h — exactly this file's class):
+ * STRUCT FIELDS (Mirroring vulkan/graphics_layer.h):
  * ----------------------------------------------------------------------------
  *   uint64_t typeId;      // TYPE_GRAPHICS_LAYER_SINGLETON while live, 0 after destroy
  *   void *layer;          // platform layer handle (CAMetalLayer*, stored never dereferenced)
  *   void *device;         // opaque device handle (MTLDevice*, stored never dereferenced)
+ *   void *image;          // opaque Vulkan image handle (VkImage, stored never dereferenced)
  *   int role;             // GRAPHICS_LAYER_SCENE (bottom) or GRAPHICS_LAYER_CONTENT (top)
- *   float scale;          // backing scale factor (points -> pixels)
+ *   float scale;          // backing scale factor (points to pixels)
  *   int pointW;           // live bounds width in window points
  *   int pointH;           // live bounds height in window points
  *   int pixelW;           // committed extent width in native pixels
@@ -44,41 +55,55 @@
  *   bool attached;        // true once a platform layer is attached
  *   bool resizePending;   // true once point size moved past committed pixels
  *
- * WINDOW BIND SEAM (file-local, no struct — two installed fn pointers):
+ * WINDOW BIND SEAM:
  * ----------------------------------------------------------------------------
  *   s_bindTop;            // window-side top slot setter (installed at boot)
  *   s_bindBottom;         // window-side bottom slot setter (installed at boot)
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - GraphicsLayer()           : GraphicsLayer_0()
- *   - GraphicsLayer(role)       : GraphicsLayer_1(role)
+ * Public Constructors: (.h)
+ *   - GraphicsLayer_0(void)                              : Scene board, 0x0, detached
+ *   - GraphicsLayer_1(role)                              : Specified role board, 0x0, detached
  *
- * Core Functions:
- *   - GraphicsLayer_destroy(self)
- *   - GraphicsLayer_isValid(self)
- *   - GraphicsLayer_installWindowBind(setTop, setBottom)
- *   - GraphicsLayer_bindWindow(self, window, slot)
- *   - GraphicsLayer_attach(self, layer)
- *   - GraphicsLayer_detach(self)
- *   - GraphicsLayer_setPointSize(self, width, height)
- *   - GraphicsLayer_setPixelSize(self, width, height)
- *   - GraphicsLayer_setDevice(self, device)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - GraphicsLayer_setRole(self, role)
- *   - GraphicsLayer_setScale(self, scale)
+ * Public Core Functions: (.h)
+ *   - GraphicsLayer_destroy(self)                        : Clear provenance stamp and free layer memory
+ *   - GraphicsLayer_isValid(self)                        : Validate typeId provenance stamp
+ *   - GraphicsLayer_installWindowBind(setTop, setBottom) : Register window subsystem bind callbacks
+ *   - GraphicsLayer_bindWindow(self, window, slot)       : Dispatch layer handle to window slot
+ *   - GraphicsLayer_attach(self, layer)                  : Bind platform CAMetalLayer handle
+ *   - GraphicsLayer_detach(self)                         : Unbind platform layer handle
+ *   - GraphicsLayer_setPointSize(self, width, height)    : Update window point size and raise resize pulse
+ *   - GraphicsLayer_setPixelSize(self, width, height)    : Commit native pixel extent and lower resize pulse
+ *   - GraphicsLayer_setDevice(self, device)              : Bind opaque graphics device handle
  *
- * Getters:
- *   - GraphicsLayer_getLayer(self)
- *   - GraphicsLayer_getDevice(self)
- *   - GraphicsLayer_getRole(self)
- *   - GraphicsLayer_getScale(self)
- *   - GraphicsLayer_isAttached(self)
- *   - GraphicsLayer_needsResize(self)
- *   - GraphicsLayer_getPointSize(self, outW, outH)
- *   - GraphicsLayer_getPixelSize(self, outW, outH)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - GraphicsLayer_setRole(self, role)                  : Mutate board stack role
+ *   - GraphicsLayer_setScale(self, scale)                : Mutate backing display scale factor
+ *   - GraphicsLayer_setImage(self, vkImage)              : Bind active presentation image handle
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - GraphicsLayer_getLayer(self)                       : Query platform layer handle
+ *   - GraphicsLayer_getDevice(self)                      : Query graphics device handle
+ *   - GraphicsLayer_getImage(self)                       : Query presentation image handle
+ *   - GraphicsLayer_getRole(self)                        : Query board stack role
+ *   - GraphicsLayer_getScale(self)                       : Query display backing scale factor
+ *   - GraphicsLayer_isAttached(self)                     : Query whether platform layer is bound
+ *   - GraphicsLayer_needsResize(self)                    : Query whether resize pulse is pending
+ *   - GraphicsLayer_getPointSize(self, outW, outH)       : Query bounds dimensions in window points
+ *   - GraphicsLayer_getPixelSize(self, outW, outH)       : Query committed extent in native pixels
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -102,7 +127,8 @@ typedef struct GraphicsLayer {
 static GraphicsLayerWindowSetFn s_bindTop = nullptr;
 static GraphicsLayerWindowSetFn s_bindBottom = nullptr;
 
-// CONSTRUCTORS
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+
 GraphicsLayer *GraphicsLayer_0(void) {
     return GraphicsLayer_1(GRAPHICS_LAYER_SCENE);
 }
@@ -126,7 +152,8 @@ GraphicsLayer *GraphicsLayer_1(int role) {
     return self;
 }
 
-// CORE FUNCTIONS
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+
 void GraphicsLayer_destroy(GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return;
@@ -225,7 +252,9 @@ void GraphicsLayer_setDevice(GraphicsLayer *self, void *device) {
     (*self).device = device;
 }
 
-// SETTERS
+// SETTERS (PUBLIC & PRIVATE)
+
+;;SETTER
 void GraphicsLayer_setRole(GraphicsLayer *self, int role) {
     if (!GraphicsLayer_isValid(self))
         return;
@@ -234,6 +263,7 @@ void GraphicsLayer_setRole(GraphicsLayer *self, int role) {
     (*self).role = role;
 }
 
+;;SETTER
 void GraphicsLayer_setScale(GraphicsLayer *self, float scale) {
     if (!GraphicsLayer_isValid(self))
         return;
@@ -245,55 +275,65 @@ void GraphicsLayer_setScale(GraphicsLayer *self, float scale) {
     (*self).resizePending = true;
 }
 
+;;SETTER
 void GraphicsLayer_setImage(GraphicsLayer *self, void *vkImage) {
     if (!GraphicsLayer_isValid(self))
         return;
     (*self).image = vkImage;
 }
 
-// GETTERS
+// GETTERS (PUBLIC & PRIVATE)
+
+;;GETTER
 void *GraphicsLayer_getLayer(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return nullptr;
     return (*self).layer;
 }
 
+;;GETTER
 void *GraphicsLayer_getDevice(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return nullptr;
     return (*self).device;
 }
 
+;;GETTER
 void *GraphicsLayer_getImage(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return nullptr;
     return (*self).image;
 }
 
+;;GETTER
 int GraphicsLayer_getRole(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return GRAPHICS_LAYER_SCENE;
     return (*self).role;
 }
 
+;;GETTER
 float GraphicsLayer_getScale(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return 1.0f;
     return (*self).scale;
 }
 
+;;GETTER
 bool GraphicsLayer_isAttached(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return false;
     return (*self).attached && (*self).layer != nullptr;
 }
 
+;;GETTER
 bool GraphicsLayer_needsResize(const GraphicsLayer *self) {
     if (!GraphicsLayer_isValid(self))
         return false;
     return (*self).resizePending;
 }
 
+;;GETTER
 void GraphicsLayer_getPointSize(const GraphicsLayer *self, int *outW, int *outH) {
     bool valid = GraphicsLayer_isValid(self);
     if (outW)
@@ -302,6 +342,7 @@ void GraphicsLayer_getPointSize(const GraphicsLayer *self, int *outW, int *outH)
         *outH = valid ? (*self).pointH : 0;
 }
 
+;;GETTER
 void GraphicsLayer_getPixelSize(const GraphicsLayer *self, int *outW, int *outH) {
     bool valid = GraphicsLayer_isValid(self);
     if (outW)

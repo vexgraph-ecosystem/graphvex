@@ -124,5 +124,10 @@ bool  GraphicsLayer_applySize(void *layer, int pxW, int pxH, float scale);
 void  GraphicsLayer_applyDevice(void *layer, void *device);
 void  GraphicsLayer_transactionBegin(void);
 void  GraphicsLayer_transactionCommit(void);
+// Diagnostic read-back of a CAMetalLayer's CURRENT drawableSize (native px).
+// Read-only; zeroes for a non-Metal layer. Used by the ANTI_RESIZE_TRACE
+// resize probe to prove whether the per-step drawableSize write survives to
+// the driver's surface-caps query.
+void  GraphicsLayer_drawableSizeOf(void *layer, int *outW, int *outH);
 
 #endif

@@ -4,6 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <vulkan/vulkan.h>
+#if defined(__APPLE__)
+// libdispatch first: the Xcode SDK's IOSurface -> xpc headers need
+// dispatch_queue_t, and plain C translation units never pull Foundation.
+#include <dispatch/dispatch.h>
+#endif
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOSurface/IOSurface.h>
 

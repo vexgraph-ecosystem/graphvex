@@ -45,7 +45,7 @@
 typedef struct VkGraphics {
     uint32_t width;       // newest native-px drawable extent; 0 until resize
     uint32_t height;      // newest native-px drawable extent
-    uint32_t clearColor;  // staged 0xAARRGGBB for the next demand-present
+    uint32_t clearColor;  // staged 0xRRGGBBAA for the next demand-present
     bool clearPending;    // a clear staged since the last present
     bool frameOpen;       // begin() succeeded and end() has not run
 } VkGraphics;

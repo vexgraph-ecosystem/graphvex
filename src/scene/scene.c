@@ -2,10 +2,30 @@
 
 #include <stdlib.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "draw/drawable.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Scene
+ * ============================================================================
+ * Rendered scene representing an aggregated graph of renderable nodes, spatial
+ * transforms, material IDs, and camera view-projection matrices. Manages a dynamically
+ * growing array of SceneNode slots that borrow Mesh geometry pointers and 4x4 coordinate
+ * frames without claiming ownership over external mesh buffers. Maintains camera state
+ * as column-major 4x4 view and projection matrices alongside a frame clear color strictly
+ * formatted in monotonic 0xRRGGBBAA representation (bits 31..24 red, 23..16 green, 15..8 blue,
+ * 7..0 alpha) in accordance with the Strict 0xRRGGBBAA Color Law. Tracks state mutations
+ * through a dirty flag that triggers scene invalidation and marks target Drawables as dirty
+ * upon rendering.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -24,7 +44,7 @@
  *     size_t nodeCapacity;      // allocated node storage capacity
  *     float cameraView[16];     // 4x4 view matrix
  *     float cameraProj[16];     // 4x4 projection matrix
- *     uint32_t clearColor;      // scene clear color (0xAARRGGBB)
+ *     uint32_t clearColor;      // scene clear color (0xRRGGBBAA)
  *     bool dirty;               // true when nodes or camera are updated
  *     uint64_t typeId;          // block-header type id (TYPE_GFX_SCENE_SINGLETON)
  *   }
@@ -40,33 +60,47 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Scene()                                        : Scene_0()
+ * Public Constructors: (.h)
+ *   - Scene_0(void)                                        : Allocate default scene
  *
- * Core Functions:
- *   - Scene_free(self)
- *   - Scene_addMesh(self, mesh, transform16, matId)
- *   - Scene_removeMesh(self, nodeIndex)
- *   - Scene_clear(self)
- *   - Scene_render(self, drawable)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Scene_setCamera(self, view16, proj16)
- *   - Scene_setClearColor(self, clearColor)
- *   - Scene_setDirty(self, dirty)
+ * Public Core Functions: (.h)
+ *   - Scene_free(self)                                     : Release scene storage
+ *   - Scene_addMesh(self, mesh, transform16, materialId)   : Add mesh node
+ *   - Scene_removeMesh(self, nodeIndex)                    : Remove node by index
+ *   - Scene_clear(self)                                    : Clear all scene nodes
+ *   - Scene_render(self, drawable)                         : Dispatch to drawable
  *
- * Getters:
- *   - Scene_getNodeCount(self)
- *   - Scene_getNode(self, index)
- *   - Scene_getNodes(self)
- *   - Scene_getClearColor(self)
- *   - Scene_isDirty(self)
- *   - Scene_getTypeId(self)
- *   - Scene_getCamera(self, outView16, outProj16)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Scene_setCamera(self, view16, proj16)                : Set camera matrices
+ *   - Scene_setClearColor(self, clearColor)                : Set clear color (0xRRGGBBAA)
+ *   - Scene_setDirty(self, dirty)                          : Set scene dirty flag
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Scene_getNodeCount(self)                             : Query node count
+ *   - Scene_getNode(self, index)                           : Query node by index
+ *   - Scene_getNodes(self)                                 : Query node array base
+ *   - Scene_getClearColor(self)                            : Query clear color (0xRRGGBBAA)
+ *   - Scene_isDirty(self)                                  : Query dirty flag
+ *   - Scene_getTypeId(self)                                : Query block type ID
+ *   - Scene_getCamera(self, outView16, outProj16)          : Query camera matrices
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
 Scene *Scene_0(void) {
     Scene *self = (Scene*) Memory_alloc(TYPE_GFX_SCENE_SINGLETON, sizeof(Scene));
@@ -87,7 +121,9 @@ Scene *Scene_0(void) {
     return self;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 void Scene_free(Scene *self) {
     if (!self)
@@ -157,8 +193,11 @@ void Scene_render(Scene *self, Drawable *drawable) {
     (*self).dirty = false;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;SETTER
 void Scene_setCamera(Scene *self, const float *view16, const float *proj16) {
     if (!self)
         return;
@@ -173,24 +212,30 @@ void Scene_setCamera(Scene *self, const float *view16, const float *proj16) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void Scene_setClearColor(Scene *self, uint32_t clearColor) {
     if (!self)
         return;
     (*self).clearColor = clearColor;
 }
 
+;;SETTER
 void Scene_setDirty(Scene *self, bool dirty) {
     if (!self)
         return;
     (*self).dirty = dirty;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;GETTER
 size_t Scene_getNodeCount(const Scene *self) {
     return self ? (*self).nodeCount : 0;
 }
 
+;;GETTER
 const SceneNode *Scene_getNode(const Scene *self, size_t index) {
     if (!self)
         return nullptr;
@@ -199,22 +244,27 @@ const SceneNode *Scene_getNode(const Scene *self, size_t index) {
     return &(*self).nodes[index];
 }
 
+;;GETTER
 const SceneNode *Scene_getNodes(const Scene *self) {
     return self ? (*self).nodes : nullptr;
 }
 
+;;GETTER
 uint32_t Scene_getClearColor(const Scene *self) {
     return self ? (*self).clearColor : 0;
 }
 
+;;GETTER
 bool Scene_isDirty(const Scene *self) {
     return self ? (*self).dirty : false;
 }
 
+;;GETTER
 uint64_t Scene_getTypeId(const Scene *self) {
     return self ? (*self).typeId : 0;
 }
 
+;;GETTER
 void Scene_getCamera(const Scene *self, float *outView16, float *outProj16) {
     if (!self) {
         if (outView16) {

@@ -4,7 +4,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include "vk_guard.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: VkSceneCanvas
+ * ============================================================================
+ * Per-scene offscreen Vulkan canvas abstraction managing double-buffered GPU
+ * render targets for isolated scene rendering. Provides native fixed-extent
+ * framebuffers, memory allocations, views, and single-subpass render passes
+ * in compliance with the Unified Graphics Abstraction Law.
+ *
+ * Employs a generation graveyard and a stale front-image bridge to survive
+ * dynamic window resize and geometry drift without stalling in-flight command
+ * buffer batches or causing visual holes in composite presentations.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -50,24 +69,54 @@
  *   via slotTableGrow()/sceneRetiredGrow() (the Dynamic Scalability &
  *   Anti-Hardcoding Law), OOM failing the acquire / deferring the resize.
  *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   slotTableGrow()           : Expand dynamic slot table
+ *   sceneRetiredGrow()        : Expand dynamic retired buffers graveyard
+ *   destroyCanvasObjects(c)   : Free Vulkan resources of a canvas
+ *   destroyRetiredEntry(r)    : Free retired Vulkan images and views
+ *   findMemoryType(...)       : Locate matching device memory index
+ *   buildCanvas(c)            : Create double-buffered images, views, pass, fb
+ *   stashStale(c)             : Retain previous front buffer as bridge
+ *   retireStale(c)            : Move bridge buffer to retirement graveyard
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Core Functions:
- *   - VkSceneCanvas_initModule(instance, gpa, phys, device)
- *   - VkSceneCanvas_acquire(key, width, height)
- *   - VkSceneCanvas_flushRetired(void)
- *     (the Ecosystem Vulkan Safety Nets Law net: beginBackPass guards the record seam at entry)
- *   - VkSceneCanvas_width(canvas)
- *   - VkSceneCanvas_height(canvas)
- *   - VkSceneCanvas_frontImage(canvas)
- *   - VkSceneCanvas_staleImage(canvas, outWidth, outHeight)
- *   - VkSceneCanvas_beginBackPass(canvas, cb, r, g, b, a)
- *   - VkSceneCanvas_endBackPass(canvas, cb)
- *   - VkSceneCanvas_needsRender(canvas, nowNs, minGapNs)
- *   - VkSceneCanvas_generation(canvas)
- *   - VkSceneCanvas_markSubmitted(canvas, nowNs)
- *   - VkSceneCanvas_flip(canvas)
- *   - VkSceneCanvas_shutdownModule(void)
+ * Public Constructors: (.h)
+ *   - (none — allocated via VkSceneCanvas_acquire)
+ *
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - VkSceneCanvas_initModule(instance, gpa, phys, device) : Init function pointers
+ *   - VkSceneCanvas_acquire(key, width, height)             : Get or create canvas
+ *   - VkSceneCanvas_flushRetired(void)                      : Free retired buffer pairs
+ *   - VkSceneCanvas_beginBackPass(canvas, cb, r, g, b, a)   : Begin back buffer render pass
+ *   - VkSceneCanvas_endBackPass(canvas, cb)                 : Close back buffer render pass
+ *   - VkSceneCanvas_markSubmitted(canvas, nowNs)            : Mark back pass submitted
+ *   - VkSceneCanvas_flip(canvas)                            : Swap back to front buffer
+ *   - VkSceneCanvas_shutdownModule(void)                    : Teardown module allocations
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - VkSceneCanvas_width(canvas)                           : Query canvas pixel width
+ *   - VkSceneCanvas_height(canvas)                          : Query canvas pixel height
+ *   - VkSceneCanvas_frontImage(canvas)                      : Get finished front image
+ *   - VkSceneCanvas_staleImage(canvas, outWidth, outHeight) : Get bridge stale image
+ *   - VkSceneCanvas_needsRender(canvas, nowNs, minGapNs)    : Test if canvas needs render
+ *   - VkSceneCanvas_generation(canvas)                      : Query buffer generation
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -217,6 +266,16 @@ static VkDevice s_device;
         name##_fn = s_gdpa                                                     \
             ? (PFN_vk##name)s_gdpa(s_device, "vk" #name)                       \
             : (PFN_vk##name)s_gpa(s_instance, "vk" #name);
+
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none — allocated via VkSceneCanvas_acquire)
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 bool VkSceneCanvas_initModule(VkInstance instance, PFN_vkGetInstanceProcAddr gpa,
                               VkPhysicalDevice phys, VkDevice device) {
@@ -559,20 +618,34 @@ VkSceneCanvas *VkSceneCanvas_acquire(uintptr_t key, uint32_t width, uint32_t hei
     return c;
 }
 
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 uint32_t VkSceneCanvas_width(const VkSceneCanvas *canvas) {
     return canvas ? (*canvas).width : 0;
 }
 
+;;GETTER
 uint32_t VkSceneCanvas_height(const VkSceneCanvas *canvas) {
     return canvas ? (*canvas).height : 0;
 }
 
+;;GETTER
 VkImage VkSceneCanvas_frontImage(const VkSceneCanvas *canvas) {
     if (!canvas || !(*canvas).hasFront)
         return VK_NULL_HANDLE;
     return (*canvas).image[(*canvas).front];
 }
 
+;;GETTER
 VkImage VkSceneCanvas_staleImage(const VkSceneCanvas *canvas,
                                  uint32_t *outWidth, uint32_t *outHeight) {
     if (outWidth)
@@ -588,6 +661,7 @@ VkImage VkSceneCanvas_staleImage(const VkSceneCanvas *canvas,
     return (*canvas).staleImage;
 }
 
+;;GETTER
 bool VkSceneCanvas_needsRender(const VkSceneCanvas *canvas, uint64_t nowNs, int64_t minGapNs) {
     if (!canvas)
         return false;
@@ -598,6 +672,7 @@ bool VkSceneCanvas_needsRender(const VkSceneCanvas *canvas, uint64_t nowNs, int6
     return nowNs - (*canvas).lastSubmitNs >= (uint64_t)minGapNs;
 }
 
+;;GETTER
 uint32_t VkSceneCanvas_generation(const VkSceneCanvas *canvas) {
     return canvas ? (*canvas).gen : 0;
 }

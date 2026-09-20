@@ -37,8 +37,7 @@ void *VkMac_loadLib(void);
 bool VkMac_createSurface(void *window, VkInstance instance,
                          PFN_vkGetInstanceProcAddr gpa, VkSurfaceKHR *outSurface);
 
-// Create a VkSurfaceKHR from ANY CAMetalLayer (per-child "pane of glass"
-// swapchain host — e.g. anchored Scene3D children under contentPanel).
+// Create a VkSurfaceKHR from ANY CAMetalLayer (the single seam canvas host).
 // The layer must already exist; its drawableSize is the surface extent.
 bool VkMac_createSurfaceForLayer(void *layer, VkInstance instance,
                                  PFN_vkGetInstanceProcAddr gpa, VkSurfaceKHR *outSurface);

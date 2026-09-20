@@ -7,7 +7,25 @@
 #include <vulkan/vulkan.h>
 #include <mach-o/dyld.h>
 #include "vk_guard.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Sdf_gpu
+ * ============================================================================
+ * Hardware compute jump-flood SDF baker generating signed distance field font atlases.
+ * Executes compute dispatches over shared storage buffers to generate uniform
+ * font glyph distance transforms matching STBTT layouts in compliance with the
+ * Unified Graphics Abstraction Law.
+ *
+ * Utilizes ping-pong storage buffers and JFA+1 sweeps to resolve occluded seeds
+ * on unified memory architectures without requiring expensive CPU SDF rasterization.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -19,27 +37,43 @@
  *
  * STRUCT FIELDS: none — procedural (module-level GPU pipeline state only).
  *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   loadSpvFile(path, outSize)                : Read SPIR-V binary from path
+ *   loadSpvAny(name, outSize)                 : Search multiple directories for shader
+ *   loadModule(name)                          : Compile SPIR-V into VkShaderModule
+ *   findMemoryType(bits, props)               : Query matching host-visible memory type
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Core Functions:
- *   - SdfGpu_initModule(instance, gpa, phys, device, queue, queueFamily)
- *   - SdfGpu_shutdown(void)
- *   - SdfGpu_available(void)
- *   - SdfGpu_bakePage(coverage, dim, outSdf)
- *     (the Ecosystem Vulkan Safety Nets Law net: bakePage guards the compute driver at entry)
- *   - SdfGpu_pageDim(void)
+ * Public Constructors: (.h)
+ *   - (none)
+ *
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - SdfGpu_initModule(inst, gpa, phys, dev, q, qFam) : Initialize compute pipeline
+ *   - SdfGpu_shutdown(void)                            : Release buffers and pipelines
+ *   - SdfGpu_bakePage(coverage, dim, outSdf)           : Dispatch compute SDF baking
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - SdfGpu_pageDim(void)                             : Fixed atlas page dimension
+ *   - SdfGpu_available(void)                           : Check if pipeline is ready
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
-
-
-// sdf_gpu.c — jump-flood SDF baker (see sdf_gpu.h).
-//
-// One descriptor set for both pipelines (all storage buffers — MoltenVK's
-// Metal argument-buffer path rejects the storage-image variant):
-//   b0: coverage words (RO, bytes packed 4-per-word)
-//   b1: sdf words (atomically OR'd by combine)
-//   b2/b3: seed buffers A/B (ping-pong via push constants)
-// Per page: 2 seed + 22 flood + 1 combine dispatches on the shared queue.
 
 #define SDF_DIM 2048
 #define SDF_GROUP 16
@@ -70,7 +104,26 @@ static VkFence s_fence = VK_NULL_HANDLE;
 #define G(fn) s_gpa(s_instance, "vk" #fn)
 #define D(fn) s_gdpa(s_device, "vk" #fn)
 
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 int SdfGpu_pageDim(void) { return SDF_DIM; }
+
+;;GETTER
 bool SdfGpu_available(void) { return s_ready; }
 
 // --- SPV lookup (compact copy of the vulkan.c search: ANTI_SPV_DIR first,
@@ -167,6 +220,10 @@ static VkShaderModule loadModule(const char *name) {
     free(code);
     return mod;
 }
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 bool SdfGpu_initModule(void *instance, void *gpa, void *phys, void *device,
                        void *queue, uint32_t queueFamily) {

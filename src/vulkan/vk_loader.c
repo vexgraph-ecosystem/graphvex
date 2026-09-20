@@ -9,74 +9,132 @@
 #include <string.h>
 #include <dlfcn.h>
 
+#include "vulkan/vk_loader.h"
+#include "vulkan/vk_context.h"
+#include "vulkan/vk.h"
+#include "vulkan/vk_mac.h"
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dlfcn.h>
+
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "annotation/incomplete.h"
 #include "struct/chunked_list.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: VkLoader
+ * ============================================================================
+ * Dynamic module hot-reload adapter over the Vulkan graphics subsystem.
+ * Coordinates dynamic library loading via dlopen, ABI contract verification,
+ * atomic trampoline table swapping, generational dylib retirement, and pipeline
+ * cache persistence across reload boundaries in compliance with the
+ * Unified Graphics Abstraction Law.
+ *
+ * Utilizes lock-free single-writer chunked list storage for exported symbol
+ * resolution, allowing background reload loops to swap active function pointers
+ * without introducing synchronization stalls in rendering threads.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- *  * MODULE: VkLoader (src/vulkan/vk_loader.c — migrated from hotcwap/hot/vk_loader.c; graphics owns its module loading. DORMANT, see ;;INCOMPLETE)
- *  * LEVEL: L4 — Self-Management (module hot-reload shim over graphvex Vulkan)
- *  * ============================================================================
- *  * vk_loader.c is the thin module hot-reload adapter. It does NOT create a
- *  * VkInstance or VkDevice — those are owned entirely by graphvex (vk_instance.c
- *  * via the Vk_* seam). vk_loader.c's job:
- *  *   1. Load a Vulkan .dylib module via dlopen
- *  *   2. Extract the module's manifest + trampoline table
- *  *   3. Verify ABI compatibility (type IDs match frozen contracts)
- *  *   4. Atomically swap function pointers via the trampoline table
- *  *   5. Retire old dylibs safely across reload generations
- *  *   6. Persist + restore pipeline cache (VkPipelineCache handle obtained
- *  *      from graphvex, not created locally)
+ * MODULE: VkLoader (src/vulkan/vk_loader.c — migrated from hotcwap/hot/vk_loader.c; graphics owns its module loading. DORMANT, see ;;INCOMPLETE)
+ * LEVEL: L4 — Self-Management (module hot-reload shim over graphvex Vulkan)
+ * ============================================================================
+ * vk_loader.c is the thin module hot-reload adapter. It does NOT create a
+ * VkInstance or VkDevice — those are owned entirely by graphvex (vk_instance.c
+ * via the Vk_* seam). vk_loader.c's job:
+ *   1. Load a Vulkan .dylib module via dlopen
+ *   2. Extract the module's manifest + trampoline table
+ *   3. Verify ABI compatibility (type IDs match frozen contracts)
+ *   4. Atomically swap function pointers via the trampoline table
+ *   5. Retire old dylibs safely across reload generations
+ *   6. Persist + restore pipeline cache (VkPipelineCache handle obtained
+ *      from graphvex, not created locally)
  *
- *  * All Vulkan handles flow from graphvex's Vk_* accessors:
- *  *   Vk_getInstance() / Vk_getGpa()  — for instance-level loader calls
- *  *   Vk_getDevice() / Vk_getGdpa()   — for device-level loader calls
- *  *   Vk_getQueue() / Vk_getQueueFamily()
+ * All Vulkan handles flow from graphvex's Vk_* accessors:
+ *   Vk_getInstance() / Vk_getGpa()  — for instance-level loader calls
+ *   Vk_getDevice() / Vk_getGdpa()   — for device-level loader calls
+ *   Vk_getQueue() / Vk_getQueueFamily()
  *
- *  * STRUCT FIELDS (local to this file):
- *  * ----------------------------------------------------------------------------
- *  *   Trampoline (one stable row per exported symbol, held in a ChunkedList):
- *  *     _Atomic(void*) ptr;                    // current generation target
- *  *     _Atomic(void*) fallback_ptr;           // prior generation (mid-swap cover)
- *  *     char name[64];                         // export symbol name
- *  *   The list replaces the old fixed 64-row array (the Dynamic Scalability &
- *  *   Anti-Hardcoding Law) and its count-then-check create path, which leaked
- *  *   the counter past the ceiling on overflow. Rows never move, so
- *  *   hot_vk_get_symbol stays a lock-free reader while registration runs on
- *  *   the loader thread (the ChunkedList single-writer contract): a reader may
- *  *   transiently miss a row whose name is still being written during a load
- *  *   and fails closed to nullptr.
- *  *
- *  *   VkRetiredHandle (one parked dylib):
- *  *     void *handle;                          // retired dylib (nullptr = free slot)
- *  *     uint32_t generation;                   // reload generation when retired
- *  *   Parking lot: VkRetiredHandle *s_vk_retired over [0, s_vk_retiredCap),
- *  *   cap starting at VK_RETIRED_INIT 16 and doubling via vkRetiredGrow()
- *  *   (the Dynamic Scalability & Anti-Hardcoding Law); index-safe, OOM
- *  *   falls back to oldest-entry eviction.
- *  *
- *  *   Module statics:
- *  *     void *s_module_handle;                // currently loaded dylib
- *  *     bool s_initialized;                   // module ready
- *  *     VkPipelineCache s_cache;              // pipeline cache (from graphvex)
- *  *     PFN_vkCreatePipelineCache s_createCache;  // resolved via gdpa
- *  *     PFN_vkDestroyPipelineCache s_destroyCache;
- *  *     PFN_vkGetPipelineCacheData s_getCacheData;
+ * STRUCT FIELDS (local to this file):
+ * ----------------------------------------------------------------------------
+ *   Trampoline (one stable row per exported symbol, held in a ChunkedList):
+ *     _Atomic(void*) ptr;                    // current generation target
+ *     _Atomic(void*) fallback_ptr;           // prior generation (mid-swap cover)
+ *     char name[64];                         // export symbol name
+ *   The list replaces the old fixed 64-row array (the Dynamic Scalability &
+ *   Anti-Hardcoding Law) and its count-then-check create path, which leaked
+ *   the counter past the ceiling on overflow. Rows never move, so
+ *   hot_vk_get_symbol stays a lock-free reader while registration runs on
+ *   the loader thread (the ChunkedList single-writer contract): a reader may
+ *   transiently miss a row whose name is still being written during a load
+ *   and fails closed to nullptr.
  *
- *  * FUNCTION REGISTRY:
- *  * ----------------------------------------------------------------------------
- *  * Core Functions:
- *  *   - hot_vk_init_loader(void)
- *  *   - hot_vk_load_module(path)
- *  *   - hot_vk_shutdown(void)
- *  *   - vk_retire_handle(handle)
- *  *   - vk_advance_generation(void)
- *  *
- *  * Getters:
- *  *   - hot_vk_get_symbol(name)
- *  * ============================================================================
+ *   VkRetiredHandle (one parked dylib):
+ *     void *handle;                          // retired dylib (nullptr = free slot)
+ *     uint32_t generation;                   // reload generation when retired
+ *   Parking lot: VkRetiredHandle *s_vk_retired over [0, s_vk_retiredCap),
+ *   cap starting at VK_RETIRED_INIT 16 and doubling via vkRetiredGrow()
+ *   (the Dynamic Scalability & Anti-Hardcoding Law); index-safe, OOM
+ *   falls back to oldest-entry eviction.
+ *
+ *   Module statics:
+ *     void *s_module_handle;                // currently loaded dylib
+ *     bool s_initialized;                   // module ready
+ *     VkPipelineCache s_cache;              // pipeline cache (from graphvex)
+ *     PFN_vkCreatePipelineCache s_createCache;  // resolved via gdpa
+ *     PFN_vkDestroyPipelineCache s_destroyCache;
+ *     PFN_vkGetPipelineCacheData s_getCacheData;
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   trampolineEnsure()                        : Initialize ChunkedList storage
+ *   trampolineRow(idx)                        : Slot accessor for trampoline index
+ *   trampoline_find(name)                     : Find existing symbol row
+ *   trampoline_create(name)                   : Allocate new symbol slot
+ *   vkRetiredGrow()                           : Expand dynamic retirement table
+ *   vk_retire_handle(handle)                  : Park retired library handle
+ *   vk_advance_generation()                   : Advance reload generation and reap
+ *   resolveCacheFns()                         : Resolve pipeline cache function pointers
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Public Constructors: (.h)
+ *   - (none — module initialization via hot_vk_init_loader)
+ *
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - hot_vk_init_loader(void)                : Initialize Vulkan module loader
+ *   - hot_vk_load_module(path)                : Load external Vulkan module
+ *   - hot_vk_shutdown(void)                   : Shutdown loader and release dylibs
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - hot_vk_get_symbol(name)                 : Lock-free lookup of trampoline symbol
+ *
+ * Private Getters: (.c static)
+ *   - (none)
+ * ============================================================================
  */
 
 ;;INCOMPLETE // Vk_getDevice/Gdpa/Instance/Phys/Queue/QueueFamily accessors predate the current Vk seam (undefined until rewired); the loader compiles into the archive but no caller may link it until then.
@@ -167,6 +225,23 @@ static int trampoline_create(const char *name) {
     return (int)(count - 1u);
 }
 
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none — module initialized via hot_vk_init_loader)
+
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 void *hot_vk_get_symbol(const char *name) {
     int idx = trampoline_find(name);
     Trampoline *row = trampolineRow(idx);
@@ -279,6 +354,10 @@ static bool resolveCacheFns(void) {
     }
     return s_createCache && s_destroyCache && s_getCacheData;
 }
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 // Initialize the Vulkan module loader shim.
 // Vk_init() must have been called first (by the caller) so the device exists.

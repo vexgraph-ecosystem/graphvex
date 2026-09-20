@@ -6,7 +6,24 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: SpvWatch
+ * ============================================================================
+ * Filesystem monitor and change detector for compiled SPIR-V shader binaries.
+ * Tracks timestamp and file size signatures across the resolution path hierarchy
+ * for core Vulkan pipelines in compliance with the Unified Graphics Abstraction Law.
+ *
+ * Provides non-blocking polling primitives enabling seamless shader hot reloading
+ * during runtime debugging sessions without disrupting the primary render loop.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -27,16 +44,39 @@
  *   bool have[SPV_WATCH_MAX_NAMES];              // true once baseline snapped
  *   char resolved[SPV_WATCH_MAX_NAMES][512];     // resolved path per shader
  *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   file_id(path)                             : Compute combined mtime and size hash
+ *   resolve_one(name, out, cap)               : Search directory precedence for shader
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - SpvWatch_init(void)
+ * Public Constructors: (.h)
+ *   - SpvWatch_init(void)                     : Allocate and baseline watcher
  *
- * Core Functions:
- *   - SpvWatch_free(w)
- *   - SpvWatch_snap(w)
- *   - SpvWatch_changed(w)
- *   - SpvWatch_changedName(w, out, outCap)
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - SpvWatch_free(w)                        : Free watcher memory
+ *   - SpvWatch_snap(w)                        : Snapshot file modification timestamps
+ *   - SpvWatch_changed(w)                     : Check if any watched file changed
+ *   - SpvWatch_changedName(w, out, outCap)    : Identify changed shader filename
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - (none)
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -101,6 +141,10 @@ static bool resolve_one(const char *name, char *out, size_t cap) {
     return false;
 }
 
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 SpvWatch *SpvWatch_init(void) {
     SpvWatch *w = (SpvWatch*) calloc(1, sizeof(SpvWatch));
     if (!w)
@@ -108,6 +152,10 @@ SpvWatch *SpvWatch_init(void) {
     SpvWatch_snap(w);
     return w;
 }
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 void SpvWatch_free(SpvWatch *w) {
     if (!w)
@@ -165,3 +213,15 @@ int SpvWatch_changedName(SpvWatch *w, char *out, size_t outCap) {
     }
     return -1;
 }
+
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)

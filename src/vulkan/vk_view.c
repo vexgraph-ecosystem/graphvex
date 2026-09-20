@@ -6,7 +6,26 @@
 #include "system/display_info.h"
 #include "system/display_monitor.h"
 #include "vk_guard.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: VkView
+ * ============================================================================
+ * Per-monitor compositor render cache backing multi-display presentation.
+ * Maintains native-resolution offscreen GPU images in desktop space that allow
+ * seamless window blits and tear-free presentation in compliance with the
+ * Unified Graphics Abstraction Law.
+ *
+ * Each monitor allocates a single-subpass clear-on-load render pass and
+ * device-local image matching the monitor active pixel mode, ensuring that
+ * retina scales composite 1:1 without resampling blur or geometry distortion.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -35,28 +54,51 @@
  *     VkFramebuffer fb;    // Framebuffer targeting the cache image
  *   }
  *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   destroyViewObjects(v)     : Teardown framebuffer, view, pass, image, memory
+ *   memoryTypeIndex(bits, prop) : Query suitable Vulkan memory index
+ *   buildCache(v)             : Allocate and initialize GPU cache objects
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Core Functions:
- *   - VkView_refreshAll(instance, gpa, phys, device)
- *   - VkView_count(void)
- *   - VkView_at(index)
- *     (the Ecosystem Vulkan Safety Nets Law net: beginPass guards the record seam at entry)
- *   - VkView_forPoint(x, y)
- *   - VkView_forMonitor(displayId)
- *   - VkView_renderPass(view)
- *   - VkView_image(view)
- *   - VkView_beginPass(view, cb, r, g, b, a)
- *   - VkView_endPass(view, cb)
- *   - VkView_shutdown(void)
+ * Public Constructors: (.h)
+ *   - (none — allocated via VkView_refreshAll)
  *
- * Getters:
- *   - VkView_getOriginX(view)
- *   - VkView_getOriginY(view)
- *   - VkView_getWidth(view)
- *   - VkView_getHeight(view)
- *   - VkView_getPointWidth(view)
- *   - VkView_getPointHeight(view)
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - VkView_refreshAll(instance, gpa, phys, device) : Rebuild monitor views
+ *   - VkView_at(index)                               : Query view by array index
+ *   - VkView_forPoint(x, y)                          : Find view containing point
+ *   - VkView_forMonitor(displayId)                   : Lookup view by display ID
+ *   - VkView_renderPass(view)                        : Query view's render pass
+ *   - VkView_image(view)                             : Query view's cache image
+ *   - VkView_beginPass(view, cb, r, g, b, a)         : Begin clearing cache pass
+ *   - VkView_endPass(view, cb)                       : End cache pass with barrier
+ *   - VkView_shutdown(void)                          : Teardown all view caches
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - VkView_count(void)                             : Number of active monitor views
+ *   - VkView_getOriginX(view)                        : Desktop origin X
+ *   - VkView_getOriginY(view)                        : Desktop origin Y
+ *   - VkView_getWidth(view)                          : Native pixel width
+ *   - VkView_getHeight(view)                         : Native pixel height
+ *   - VkView_getPointWidth(view)                     : Logical point width
+ *   - VkView_getPointHeight(view)                    : Logical point height
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -255,6 +297,16 @@ static bool buildCache(VkView *v) {
     return true;
 }
 
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none — allocated via VkView_refreshAll)
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 bool VkView_refreshAll(VkInstance instance, PFN_vkGetInstanceProcAddr gpa,
                        VkPhysicalDevice phys, VkDevice device) {
     if (!gpa || phys == VK_NULL_HANDLE || device == VK_NULL_HANDLE)
@@ -344,14 +396,27 @@ bool VkView_refreshAll(VkInstance instance, PFN_vkGetInstanceProcAddr gpa,
     return allBuilt && s_viewCount > 0;
 }
 
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 size_t VkView_count(void) {
     return s_viewCount;
 }
 
+;;GETTER
 VkView *VkView_at(size_t index) {
     return index < s_viewCount ? &s_views[index] : nullptr;
 }
 
+;;GETTER
 VkView *VkView_forPoint(float x, float y) {
     for (size_t i = 0; i < s_viewCount; i++) {
         VkView *v = &s_views[i];
@@ -363,6 +428,7 @@ VkView *VkView_forPoint(float x, float y) {
     return nullptr;
 }
 
+;;GETTER
 VkView *VkView_forMonitor(uint32_t displayId) {
     if (displayId == 0)
         return nullptr;
@@ -373,34 +439,42 @@ VkView *VkView_forMonitor(uint32_t displayId) {
     return nullptr;
 }
 
+;;GETTER
 float VkView_getOriginX(const VkView *view) {
     return view ? (*view).originX : 0.0f;
 }
 
+;;GETTER
 float VkView_getOriginY(const VkView *view) {
     return view ? (*view).originY : 0.0f;
 }
 
+;;GETTER
 int32_t VkView_getWidth(const VkView *view) {
     return view ? (*view).cacheW : 0;
 }
 
+;;GETTER
 int32_t VkView_getHeight(const VkView *view) {
     return view ? (*view).cacheH : 0;
 }
 
+;;GETTER
 int32_t VkView_getPointWidth(const VkView *view) {
     return view ? (*view).pointW : 0;
 }
 
+;;GETTER
 int32_t VkView_getPointHeight(const VkView *view) {
     return view ? (*view).pointH : 0;
 }
 
+;;GETTER
 VkRenderPass VkView_renderPass(const VkView *view) {
     return view ? (*view).pass : VK_NULL_HANDLE;
 }
 
+;;GETTER
 VkImage VkView_image(const VkView *view) {
     return view ? (*view).image : VK_NULL_HANDLE;
 }

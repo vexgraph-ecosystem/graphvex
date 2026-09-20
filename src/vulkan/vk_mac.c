@@ -10,7 +10,25 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include "time/nanotime.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Vulkan_mac
+ * ============================================================================
+ * macOS-specific Vulkan and MoltenVK platform integration module.
+ * Manages runtime dynamic loading of MoltenVK, surface creation over host
+ * CAMetalLayers, and IOSurface-compatible offscreen render passes in compliance
+ * with the Unified Graphics Abstraction Law.
+ *
+ * Provides thread-0 resize rendering trampolines and unified state accessors
+ * bridging platform window seams with cross-platform Vulkan pipeline pipelines.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -18,32 +36,54 @@
  * MODULE: Vulkan_mac (vulkan/vulkan_mac.c)
  * LEVEL: L4 — Self-Management (MoltenVK loader and surface setup)
  * ============================================================================
-  * macOS-specific Vulkan backend functions.
-  *
-  * STRUCT FIELDS: none — procedural/stateless (operates on vulkan.c chain state via Vk_get* accessors)
-  *
-  * FUNCTION REGISTRY:
- * ----------------------------------------------------------------------------
- * Core Functions:
- *   - VkMac_loadLib(void)
- *   - VkMac_createSurface(window, instance, gpa, outSurface)
- *   - VkMac_createSurfaceForLayer(layer, instance, gpa, outSurface)
- *   - VkMac_ensureIOSurfacePass(void)
- *   - VkMac_resizeRenderTrampoline(userdata)
+ * macOS-specific Vulkan backend functions.
  *
- * Getters:
- *   - Vk_getDevice(void)
- *   - Vk_getQueue(void)
- *   - Vk_getCmdBuffer(void)
- *   - Vk_getTriPipeline(void)
- *   - Vk_getTriLayout(void)
- *   - Vk_getAnimStartNanos(void)
- *   - Vk_getGdpa(void)
- *   - Vk_getInstance(void)
- *   - Vk_getGpa(void)
- *   - Vk_getPhys(void)
- *   - Vk_getQueueFamily(void)
- *   - VkMac_getIOSurfacePass(void)
+ * STRUCT FIELDS: none — procedural/stateless (operates on vulkan.c chain state via Vk_get* accessors)
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   (none)
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Public Constructors: (.h)
+ *   - (none)
+ *
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - VkMac_loadLib(void)                                   : Load MoltenVK or Vulkan dylib
+ *   - VkMac_createSurface(window, instance, gpa, outSurface): Create surface from window seam
+ *   - VkMac_createSurfaceForLayer(layer, inst, gpa, outSurf): Create surface from CAMetalLayer
+ *   - VkMac_ensureIOSurfacePass(void)                       : Build BGRA8 IOSurface render pass
+ *   - VkMac_resizeRenderTrampoline(userdata)                : Thread-0 resize presentation hook
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Vk_getDevice(void)                                    : Active Vulkan logical device
+ *   - Vk_getQueue(void)                                     : Active Vulkan graphics queue
+ *   - Vk_getCmdBuffer(void)                                 : Shared command buffer
+ *   - Vk_getTriPipeline(void)                               : Triangle render pipeline
+ *   - Vk_getTriLayout(void)                                 : Triangle pipeline layout
+ *   - Vk_getAnimStartNanos(void)                            : Animation clock base timestamp
+ *   - Vk_getGdpa(void)                                      : GetDeviceProcAddr function pointer
+ *   - Vk_getInstance(void)                                  : Active Vulkan instance
+ *   - Vk_getGpa(void)                                       : GetInstanceProcAddr function pointer
+ *   - Vk_getPhys(void)                                      : Active physical device
+ *   - Vk_getQueueFamily(void)                               : Active queue family index
+ *   - VkMac_getIOSurfacePass(void)                          : IOSurface render pass handle
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -70,19 +110,65 @@ extern PFN_vkGetInstanceProcAddr s_instanceGpa;
 extern VkPhysicalDevice s_instancePhys;
 extern uint32_t s_instanceQueueFamily;
 
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 VkDevice Vk_getDevice(void) { return s_instanceDevice; }
+
+;;GETTER
 VkQueue Vk_getQueue(void) { return s_instanceQueue; }
+
+;;GETTER
 VkCommandBuffer Vk_getCmdBuffer(void) { return s_instanceCmdBuffer; }
+
+;;GETTER
 VkPipeline Vk_getTriPipeline(void) { return s_instanceTriPipeline; }
+
+;;GETTER
 VkPipelineLayout Vk_getTriLayout(void) { return s_instanceTriLayout; }
+
+;;GETTER
 uint64_t Vk_getAnimStartNanos(void) { return s_instanceAnimStartNanos; }
+
+;;GETTER
 PFN_vkGetDeviceProcAddr Vk_getGdpa(void) { return s_instanceGdpa; }
+
+;;GETTER
 VkInstance Vk_getInstance(void) { return s_instanceInstance; }
+
+;;GETTER
 PFN_vkGetInstanceProcAddr Vk_getGpa(void) { return s_instanceGpa; }
+
+;;GETTER
 VkPhysicalDevice Vk_getPhys(void) { return s_instancePhys; }
+
+;;GETTER
 uint32_t Vk_getQueueFamily(void) { return s_instanceQueueFamily; }
 
 static VkRenderPass s_iosurfacePass = VK_NULL_HANDLE;
+
+;;GETTER
+VkRenderPass VkMac_getIOSurfacePass(void) {
+    return s_iosurfacePass;
+}
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 // Load the Vulkan loader library (MoltenVK on macOS, Khronos loader fallback).
 void *VkMac_loadLib(void) {
@@ -128,11 +214,13 @@ bool VkMac_createSurface(void *window, VkInstance instance,
     return VkMac_createSurfaceForLayer(metalLayer, instance, gpa, outSurface);
 }
 
-// Create a VkSurfaceKHR from ANY CAMetalLayer ("pane of glass" host).
+// Create a VkSurfaceKHR from ANY CAMetalLayer (the single seam canvas host).
 bool VkMac_createSurfaceForLayer(void *layer, VkInstance instance,
                                  PFN_vkGetInstanceProcAddr gpa, VkSurfaceKHR *outSurface) {
     if (!layer || !instance || !gpa || !outSurface)
         return false;
+    if (getenv("ANTI_RESIZE_TRACE") != nullptr)
+        fprintf(stderr, "seam:surface layer=%p\n", layer);
 
     PFN_vkCreateMetalSurfaceEXT CreateMetalSurfaceEXT_fn =
         (PFN_vkCreateMetalSurfaceEXT)gpa(instance, "vkCreateMetalSurfaceEXT");
@@ -187,14 +275,9 @@ bool VkMac_ensureIOSurfacePass(void) {
     return true;
 }
 
-VkRenderPass VkMac_getIOSurfacePass(void) {
-    return s_iosurfacePass;
-}
-
 // Resize render trampoline: attempts a synchronized present on thread 0 during OS resize.
 // The seam canvas always presents — it composites the retained board targets
-// (the window's primary on-screen layer); DIRECT pane chains present through
-// their own paths on demand.
+// (the window's only on-screen layer, the Single-Seam Canvas Law).
 void VkMac_resizeRenderTrampoline(void *userdata) {
     (void) userdata;
     Vk_clearPresent();

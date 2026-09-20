@@ -7,12 +7,12 @@
 
 // vulkan/vk_layer.h — retained offscreen render-target registry ("layers").
 //
-// COMPOSITED scenes (the Present-On-Demand Law): a scene renders into a
-// fixed pixel-size offscreen flight target on the present worker
+// Every scene is COMPOSITED (the Present-On-Demand Law): a scene renders into
+// a fixed pixel-size offscreen flight target on the present worker
 // (VkLayer_visit), then the canvas painter samples its last-published image
 // as a textured quad (VkLayer_composite) into the board pass at the scene's
-// anchor rect. One canvas total — no per-scene CAMetalLayer surfaces. DIRECT
-// scenes keep their own CAMetalLayer + VkPane swapchain instead.
+// anchor rect. One seam canvas total — no per-scene CAMetalLayer surfaces,
+// never a pane swapchain (the Single-Seam Canvas Law).
 //
 // structural invariant (the Present-On-Demand Law): composite != render — visit() invokes the
 // scene's render handler into its retained target; composite() only copies
@@ -38,7 +38,7 @@ bool VkLayer_unregister(int index);
 
 // Resize a layer flight target. No-op (returns true) when the size is
 // unchanged — the whole point: a fixed-size layer NEVER rebuilds on window
-// resize (the Pane-of-Glass Law). Rebuilds the offscreen targets only on true drift.
+// resize (the Single-Seam Canvas Law). Rebuilds the offscreen targets only on true drift.
 // Thread 0 only.
 bool VkLayer_resize(int index, int width, int height);
 
@@ -81,6 +81,13 @@ bool VkLayer_hasDemand(void);
 // logging.
 uint64_t VkLayer_presentCount(int index);
 uint64_t VkLayer_skipCount(int index);
+
+// Registry-wide publish generation: bumps on every layer publish (any
+// chain). Demand probes snapshot it and re-arm on delta, so a frame
+// published after the last composite still summons one more present —
+// the publish itself is demand (closes the empty-settle deadlock where
+// dirt was consumed before the composite sampled the fresh frame).
+uint64_t VkLayer_publishGeneration(void);
 
 // Per-layer repaint demand (slot-record bit, the Single Class Per File Law — no new class).
 // Setter takes (index, dirty): selector first, value last (the Dest-Last Law dest-last

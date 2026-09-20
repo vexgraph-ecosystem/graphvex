@@ -1,6 +1,9 @@
 #include "vulkan/vk_graphics.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 
 #include "vulkan/vk.h"
 
@@ -8,6 +11,22 @@
 // verbs defer to Vk_fillRect/Vk_draw* once the seam's frame renderer pass
 // is exposed to this row (the Phase-2 darling integration).
 // ;;INTENTION("same rationale, per the Two-Semicolon Annotation Style Law")
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: VkGraphics
+ * ============================================================================
+ * Live hardware Vulkan backend row fulfilling the unified Graphics seam.
+ * Adapts the Vulkan loader and swapchain presentation pipeline into the
+ * uniform Graphics vtable in compliance with the Unified Graphics Abstraction Law
+ * and the Strict 0xRRGGBBAA Color Law.
+ *
+ * Encodes all viewport clearing and blit operations strictly in 0xRRGGBBAA:
+ * channel 0 (red) extracts from bits 24..31, channel 1 (green) from bits 16..23,
+ * channel 2 (blue) from bits 8..15, and channel 3 (alpha) from bits 0..7.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -27,37 +46,57 @@
  * ----------------------------------------------------------------------------
  *   uint32_t width;        // newest native-px drawable extent; 0 until resize
  *   uint32_t height;       // newest native-px drawable extent
- *   uint32_t clearColor;   // staged 0xAARRGGBB for the next demand-present
+ *   uint32_t clearColor;   // staged 0xRRGGBBAA for the next demand-present
  *   bool clearPending;     // a clear staged since the last present
  *   bool frameOpen;        // begin() succeeded and end() has not run
- *
- * FUNCTION REGISTRY:
- * ----------------------------------------------------------------------------
- * Constructors:
- *   - VkGraphics_0()   : register the process-global singleton (idempotent)
- *
- * Core Functions:
- *   - VkGraphics_getRow() : the const row (NULL until registered)
- *   - VkGraphics_resize() : bind native-px drawable extent (cold path)
- *
- * Getters:
- *   - VkGraphics_getWidth / VkGraphics_getHeight
- *   - VkGraphics_getClearColor / VkGraphics_isClearPending
- *   - VkGraphics_isFrameOpen / VkGraphics_isReady
- *
- * Row implementation (static, behind the table; lifecycle mapping in
- * vk_graphics.h):
- *   - vkBegin    : Vk_ready() gating; opens the frame window
- *   - vkEnd      : closes the frame window (submit lives in the seam present)
- *   - vkPresent  : demand-present via Vk_clearPresent when a clear is staged
- *   - vkResize   : records the newest extent; false on zero/dead (cold)
- *   - vkClear    : stages 0xAARRGGBB into Vk_setClearColor
- *   - vkClip     : ;;DRAFT false (scissor arrives with the darling pass)
- *   - vk* verbs  : ;;DRAFT false (map to Vk_fillRect/Vk_draw* later)
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
  *   (none)
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Public Constructors: (.h)
+ *   - VkGraphics_0(void)                      : Register process-global singleton
+ *
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - VkGraphics_getRow(void)                 : Query const Graphics row table
+ *   - VkGraphics_resize(width, height)        : Bind native-px drawable extent
+ *
+ * Private Core Functions: (.c static)
+ *   - vkBegin(void)                           : Gate readiness and open frame
+ *   - vkEnd(void)                             : Close frame window
+ *   - vkPresent(void)                         : Demand-present clear to swapchain
+ *   - vkResize(width, height)                 : Record latest extent
+ *   - vkClear(color)                          : Stage 0xRRGGBBAA clear into seam
+ *   - vkClip(rect)                            : Update scissor clip (draft)
+ *   - vkFillRect(rect, brush)                 : Solid rectangle fill (draft)
+ *   - vkDrawRect(rect, stroke)                : Rectangle stroke (draft)
+ *   - vkFillCircle(cx, cy, radius, brush)     : Circle fill (draft)
+ *   - vkDrawCircle(cx, cy, radius, stroke)    : Circle stroke (draft)
+ *   - vkFillPath(shape, brush)                : Path fill (draft)
+ *   - vkDrawPath(shape, stroke)               : Path stroke (draft)
+ *   - vkDrawImage(image, dst)                 : Image draw (draft)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - VkGraphics_getWidth(void)               : Query drawable width
+ *   - VkGraphics_getHeight(void)              : Query drawable height
+ *   - VkGraphics_getClearColor(void)          : Query staged clear color
+ *   - VkGraphics_isClearPending(void)         : Check if clear is pending
+ *   - VkGraphics_isFrameOpen(void)            : Check if frame is open
+ *   - VkGraphics_isReady(void)                : Check readiness
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -113,10 +152,10 @@ static bool vkClear(uint32_t color) {
     vkGraphics.clearColor = color;
     vkGraphics.clearPending = true;
     Vk_setClearColor(
+        (float) ((color >> 24) & 0xFFu) / 255.0f,
         (float) ((color >> 16) & 0xFFu) / 255.0f,
         (float) ((color >> 8) & 0xFFu) / 255.0f,
-        (float) ((color >> 0) & 0xFFu) / 255.0f,
-        (float) ((color >> 24) & 0xFFu) / 255.0f
+        (float) (color & 0xFFu) / 255.0f
     );
     return true;
 }
@@ -182,7 +221,10 @@ static bool vkDrawImage(const Image *image, const Rectangle *dst) {
     return false;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 VkGraphics *VkGraphics_0(void) {
     if (registered == false) {
         static const Graphics row = {
@@ -198,7 +240,10 @@ VkGraphics *VkGraphics_0(void) {
     return &vkGraphics;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 const Graphics *VkGraphics_getRow(void) {
     if (registered == false)
         return nullptr;
@@ -215,27 +260,42 @@ bool VkGraphics_resize(uint32_t width, uint32_t height) {
     return true;
 }
 
-// GETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 uint32_t VkGraphics_getWidth(void) {
     return registered ? vkGraphics.width : 0u;
 }
 
+;;GETTER
 uint32_t VkGraphics_getHeight(void) {
     return registered ? vkGraphics.height : 0u;
 }
 
+;;GETTER
 uint32_t VkGraphics_getClearColor(void) {
     return registered ? vkGraphics.clearColor : 0u;
 }
 
+;;GETTER
 bool VkGraphics_isClearPending(void) {
     return registered && vkGraphics.clearPending;
 }
 
+;;GETTER
 bool VkGraphics_isFrameOpen(void) {
     return registered && vkGraphics.frameOpen;
 }
 
+;;GETTER
 bool VkGraphics_isReady(void) {
     return registered && Vk_ready() && !Vk_isDeviceLost();
 }
