@@ -98,5 +98,28 @@ void GraphicsLayer_transactionBegin(void) {
 
 void GraphicsLayer_transactionCommit(void) {
     [CATransaction commit];
+    [CATransaction flush];
+}
+
+// Diagnostic read-back (ANTI_RESIZE_TRACE): the layer's CURRENT drawableSize
+// at an arbitrary later moment — proves whether our per-step write survives
+// until the driver's surface-caps query, or whether something (AppKit's
+// resize beat, a view-owned layer, MoltenVK) rewrites it in between.
+// Zeroes for a non-Metal layer. Read-only; no side effects.
+void GraphicsLayer_drawableSizeOf(void *layer, int *outW, int *outH) {
+    if (outW != nullptr)
+        *outW = 0;
+    if (outH != nullptr)
+        *outH = 0;
+    if (!layer || !outW || !outH)
+        return;
+    @autoreleasepool {
+        id obj = (__bridge id) layer;
+        if ([obj isKindOfClass:[CAMetalLayer class]]) {
+            CGSize s = [(CAMetalLayer*) obj drawableSize];
+            *outW = (int) lround(s.width);
+            *outH = (int) lround(s.height);
+        }
+    }
 }
 

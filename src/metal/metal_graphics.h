@@ -31,7 +31,7 @@
 typedef struct MetalGraphics {
     uint32_t width;       // newest native-px drawable extent; always 0 (stub)
     uint32_t height;      // newest native-px drawable extent
-    uint32_t clearColor;  // staged 0xAARRGGBB; always 0 (stub)
+    uint32_t clearColor;  // staged 0xRRGGBBAA; always 0 (stub)
     bool clearPending;    // unused (stub)
     bool frameOpen;       // unused (stub)
 } MetalGraphics;

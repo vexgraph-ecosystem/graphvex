@@ -1,11 +1,30 @@
 #include "metal/metal_graphics.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 
 // ;;INCOMPLETE — Metal is the secondary backend: macOS renders Vulkan
 // through MoltenVK today, so this row only registers and selects. Every
 // verb and device call cold-returns false until the engine takes shape and
 // this pair becomes metal_graphics.m with CAMetalLayer wiring.
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: MetalGraphics
+ * ============================================================================
+ * Hardware-accelerated Metal backend row fulfilling the unified Graphics seam.
+ * Provides registration, lifecycle management, and drawing dispatch targets
+ * for Apple platforms in compliance with the Unified Graphics Abstraction Law
+ * and the Strict 0xRRGGBBAA Color Law.
+ *
+ * MetalGraphics mirrors the interface layout of VkGraphics, allowing seamless
+ * backend substitution under the Graphics vtable abstraction while preserving
+ * native pixel coordinate contracts and uniform packed color representations.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -25,25 +44,56 @@
  * ----------------------------------------------------------------------------
  *   uint32_t width;        // newest native-px drawable extent; 0 (stub)
  *   uint32_t height;       // newest native-px drawable extent
- *   uint32_t clearColor;   // staged 0xAARRGGBB; 0 (stub)
+ *   uint32_t clearColor;   // staged 0xRRGGBBAA; 0 (stub)
  *   bool clearPending;     // unused (stub)
  *   bool frameOpen;        // unused (stub)
  *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   (none)
+ *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - MetalGraphics_0() : register the process-global singleton (idempotent)
+ * Public Constructors: (.h)
+ *   - MetalGraphics_0(void)                   : Register process-global singleton
  *
- * Core Functions:
- *   - MetalGraphics_getRow() : the const row (NULL until registered)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Getters:
- *   - MetalGraphics_getWidth / getHeight / getClearColor
- *   - MetalGraphics_isClearPending / isFrameOpen / isReady
+ * Public Core Functions: (.h)
+ *   - MetalGraphics_getRow(void)              : Query const Graphics row table
  *
- * Row implementation (static, behind the table):
- *   - metalBegin/End/Present/Resize : false (;;INCOMPLETE)
- *   - metalClear/Clip + verbs       : false (;;INCOMPLETE)
+ * Private Core Functions: (.c static)
+ *   - metalBegin(void)                        : Begin rendering frame (stub)
+ *   - metalEnd(void)                          : End rendering frame (stub)
+ *   - metalPresent(void)                      : Present rendered frame (stub)
+ *   - metalResize(width, height)              : Resize drawable extent (stub)
+ *   - metalClear(color)                       : Clear viewport (stub)
+ *   - metalClip(rect)                         : Update scissor clip (stub)
+ *   - metalFillRect(rect, brush)              : Fill rectangle (stub)
+ *   - metalDrawRect(rect, stroke)             : Stroke rectangle (stub)
+ *   - metalFillCircle(cx, cy, radius, brush)  : Fill circle (stub)
+ *   - metalDrawCircle(cx, cy, radius, stroke) : Stroke circle (stub)
+ *   - metalFillPath(shape, brush)             : Fill path (stub)
+ *   - metalDrawPath(shape, stroke)            : Stroke path (stub)
+ *   - metalDrawImage(image, dst)              : Draw image (stub)
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - MetalGraphics_getWidth(void)            : Query drawable width
+ *   - MetalGraphics_getHeight(void)           : Query drawable height
+ *   - MetalGraphics_getClearColor(void)       : Query staged clear color
+ *   - MetalGraphics_isClearPending(void)      : Check if clear is pending
+ *   - MetalGraphics_isFrameOpen(void)         : Check if frame is currently open
+ *   - MetalGraphics_isReady(void)             : Check registration readiness
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -127,7 +177,10 @@ static bool metalDrawImage(const Image *image, const Rectangle *dst) {
     return false;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 MetalGraphics *MetalGraphics_0(void) {
     if (registered == false) {
         static const Graphics row = {
@@ -143,34 +196,52 @@ MetalGraphics *MetalGraphics_0(void) {
     return &metalGraphics;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 const Graphics *MetalGraphics_getRow(void) {
     if (registered == false)
         return nullptr;
     return &metalGraphicsRow;
 }
 
-// GETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 uint32_t MetalGraphics_getWidth(void) {
     return registered ? metalGraphics.width : 0u;
 }
 
+;;GETTER
 uint32_t MetalGraphics_getHeight(void) {
     return registered ? metalGraphics.height : 0u;
 }
 
+;;GETTER
 uint32_t MetalGraphics_getClearColor(void) {
     return registered ? metalGraphics.clearColor : 0u;
 }
 
+;;GETTER
 bool MetalGraphics_isClearPending(void) {
     return registered && metalGraphics.clearPending;
 }
 
+;;GETTER
 bool MetalGraphics_isFrameOpen(void) {
     return registered && metalGraphics.frameOpen;
 }
 
+;;GETTER
 bool MetalGraphics_isReady(void) {
     return registered;
 }

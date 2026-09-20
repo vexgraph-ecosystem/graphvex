@@ -1,6 +1,25 @@
 #include "graphics/graphics.h"
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Graphics
+ * ============================================================================
+ * Unified Graphics runtime backend dispatch seam decoupling client drawing calls
+ * from hardware rendering drivers. Encapsulates a static dispatch table populated
+ * by hardware drivers (VkGraphics, MetalGraphics, DirectGraphics) through a single
+ * row copy. Forwarder routines invoke corresponding driver functions, enforcing the
+ * Pixel Coordinate Contract where client code submits native window coordinates while
+ * normalized device coordinates are constrained strictly to vertex pipeline stages.
+ * Operates under the Strict 0xRRGGBBAA Color Law (bits 31..24 red, 23..16 green, 15..8 blue,
+ * 7..0 alpha) across all clear operations, ensuring identical cross-backend color presentation.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -19,12 +38,12 @@
  *
  * STRUCT FIELDS (Mirroring graphics/graphics.h):
  * ----------------------------------------------------------------------------
- *   uint32_t backendId;          // GRAPHICS_BACKEND_* self-reported by the row
- *   bool (*begin)(void);         // start recording a frame
- *   bool (*end)(void);           // flush/submit the frame
- *   bool (*present)(void);       // swap/present the frame
+ *   uint32_t backendId;                      // GRAPHICS_BACKEND_* self-reported by the row
+ *   bool (*begin)(void);                     // start recording a frame
+ *   bool (*end)(void);                       // flush/submit the frame
+ *   bool (*present)(void);                   // swap/present the frame
  *   bool (*resize)(uint32_t w, uint32_t h);  // native px, cold path
- *   bool (*clear)(uint32_t color);           // 0xAARRGGBB full-drawable clear
+ *   bool (*clear)(uint32_t color);           // 0xRRGGBBAA full-drawable clear
  *   bool (*clip)(const Rectangle *rect);     // scissor; NULL = reset
  *   bool (*fillRect)(const Rectangle *rect, const Brush *brush);
  *   bool (*drawRect)(const Rectangle *rect, const Stroke *stroke);
@@ -36,26 +55,42 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - (none — the context is file-static; selection replaces the row)
+ * Public Constructors: (.h)
+ *   - (none)
  *
- * Core Functions:
- *   - Graphics_setGraphics(backendId) : copy row into currentGraphics
- *   - Graphics_getGraphicsId()        : 0 = none selected
- *   - Graphics_getCurrent()           : active row (never null)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Forwarders (null-guarded; false while no backend is selected):
- *   - Graphics_begin / Graphics_end / Graphics_present
- *   - Graphics_resize(width, height)
- *   - Graphics_clear(color) / Graphics_clip(rect)
- *   - Graphics_fillRect / Graphics_drawRect
- *   - Graphics_fillCircle / Graphics_drawCircle
- *   - Graphics_fillPath / Graphics_drawPath
- *   - Graphics_drawImage(image, dst)
+ * Public Core Functions: (.h)
+ *   - Graphics_begin(void)                                 : Start recording frame
+ *   - Graphics_end(void)                                   : Flush/submit frame
+ *   - Graphics_present(void)                               : Swap/present frame
+ *   - Graphics_resize(width, height)                       : Resize surface
+ *   - Graphics_clear(color)                                : Clear surface (0xRRGGBBAA)
+ *   - Graphics_clip(rect)                                  : Scissor clip rectangle
+ *   - Graphics_fillRect(rect, brush)                       : Fill rectangle
+ *   - Graphics_drawRect(rect, stroke)                      : Draw rectangle outline
+ *   - Graphics_fillCircle(cx, cy, radius, brush)           : Fill circle
+ *   - Graphics_drawCircle(cx, cy, radius, stroke)          : Draw circle outline
+ *   - Graphics_fillPath(shape, brush)                      : Fill path
+ *   - Graphics_drawPath(shape, stroke)                     : Draw path outline
+ *   - Graphics_drawImage(image, dst)                       : Blit image
  *
- * PRIVATE HELPERS:
- * ----------------------------------------------------------------------------
- *   (none)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Graphics_setGraphics(backendId)                      : Copy row into currentGraphics
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Graphics_getGraphicsId(void)                         : Active backend ID (0 = none)
+ *   - Graphics_getCurrent(void)                            : Active row pointer
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -63,40 +98,16 @@
 // Graphics_setGraphics succeeds, so every forwarder cold-returns false.
 static Graphics currentGraphics;
 
-// CONSTRUCTORS
-// (none — see FUNCTION REGISTRY)
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
-// CORE FUNCTIONS
-bool Graphics_setGraphics(uint32_t backendId) {
-    const Graphics *row = nullptr;
-    switch (backendId) {
-        case GRAPHICS_BACKEND_DIRECT:
-            row = DirectGraphics_getRow();
-            break;
-        case GRAPHICS_BACKEND_VULKAN:
-            row = VkGraphics_getRow();
-            break;
-        case GRAPHICS_BACKEND_METAL:
-            row = MetalGraphics_getRow();
-            break;
-        default:
-            break;
-    }
-    if (row == nullptr)
-        return false;
-    currentGraphics = *row;
-    return true;
-}
+// (none — context is file-static)
 
-uint32_t Graphics_getGraphicsId(void) {
-    return currentGraphics.backendId;
-}
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
-const Graphics *Graphics_getCurrent(void) {
-    return &currentGraphics;
-}
-
-// FORWARDERS
 bool Graphics_begin(void) {
     return currentGraphics.begin ? currentGraphics.begin() : false;
 }
@@ -147,4 +158,44 @@ bool Graphics_drawPath(const Shape *shape, const Stroke *stroke) {
 
 bool Graphics_drawImage(const Image *image, const Rectangle *dst) {
     return currentGraphics.drawImage ? currentGraphics.drawImage(image, dst) : false;
+}
+
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
+bool Graphics_setGraphics(uint32_t backendId) {
+    const Graphics *row = nullptr;
+    switch (backendId) {
+        case GRAPHICS_BACKEND_DIRECT:
+            row = DirectGraphics_getRow();
+            break;
+        case GRAPHICS_BACKEND_VULKAN:
+            row = VkGraphics_getRow();
+            break;
+        case GRAPHICS_BACKEND_METAL:
+            row = MetalGraphics_getRow();
+            break;
+        default:
+            break;
+    }
+    if (row == nullptr)
+        return false;
+    currentGraphics = *row;
+    return true;
+}
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
+uint32_t Graphics_getGraphicsId(void) {
+    return currentGraphics.backendId;
+}
+
+;;GETTER
+const Graphics *Graphics_getCurrent(void) {
+    return &currentGraphics;
 }

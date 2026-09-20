@@ -2,7 +2,10 @@
 
 #include <float.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "buffer/buffer.h"
 #include "graphics/graphics.h"
 #include "lang/rect/rectangle.h"
@@ -10,6 +13,24 @@
 #include "paint/brush.h"
 #include "paint/stroke.h"
 #include "vector/shape.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: DirectGraphics
+ * ============================================================================
+ * Software rasterization backend row fulfilling the unified Graphics seam.
+ * Executes drawing primitives, clipping, and blits directly onto CPU host memory
+ * via an arena-backed RGBA8 pixel buffer in strict compliance with the
+ * Unified Graphics Abstraction Law and the Strict 0xRRGGBBAA Color Law.
+ *
+ * All color manipulation adheres monotonically to 32-bit packed 0xRRGGBBAA:
+ * channel 0 (red) extracts from bits 24..31, channel 1 (green) from bits 16..23,
+ * channel 2 (blue) from bits 8..15, and channel 3 (alpha) from bits 0..7.
+ * DirectGraphics serves as the software reference standard that all hardware-
+ * accelerated Vulkan and Metal backends must mirror.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -32,6 +53,8 @@
  * Dynamic Scalability & Anti-Hardcoding Law; ;;DRAFT — an arena slab with
  * exponential growth replaces the fixed scratch in a later commit).
  *
+ * Color encoding follows the Strict 0xRRGGBBAA Color Law across all operations.
+ *
  * STRUCT FIELDS (Mirroring direct/direct_graphics.h):
  * ----------------------------------------------------------------------------
  *   Buffer *framebuffer;  // RGBA8 native-px framebuffer (arena-backed); null until resize
@@ -41,34 +64,58 @@
  *   float clipX, clipY;   // scissor top-left, native px
  *   float clipW, clipH;   // scissor extent, native px
  *
- * FUNCTION REGISTRY:
- * ----------------------------------------------------------------------------
- * Constructors:
- *   - (none — singleton state is file-static and zero-initialized)
- *
- * Core Functions:
- *   - DirectGraphics_getRow()       : the const Graphics row (DIRECT)
- *   - DirectGraphics_resize(w, h)   : bind/rebind the drawable extent
- *
- * Getters:
- *   - DirectGraphics_getFramebuffer() : Buffer * (null until resize)
- *   - DirectGraphics_getWidth()       : uint32_t (0 until resize)
- *   - DirectGraphics_getHeight()      : uint32_t (0 until resize)
- *   - DirectGraphics_isReady()        : bool (framebuffer bound)
- *
- * Row entries (static, file-local):
- *   - begin/end/present : no-op true (the framebuffer IS the presentation)
- *   - resize(w, h)      : rebuild the arena-backed framebuffer
- *   - clear(color)      : full-drawable 0xAARRGGBB fill
- *   - clip(rect)        : set/reset the scissor
- *   - fillRect / drawRect / fillCircle / drawCircle / fillPath /
- *     drawPath / drawImage : CPU rasterizers (native pixels, clipped)
- *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
  *   FlatPath scratch — 4096-float interleaved x,y polyline (cubics
  *     subdivided 8 steps), count = points, closed flag. Bounded reject
  *     policy documented above.
+ *   brushRgba(brush, outRgba) — unpacks brush color and modulates alpha with opacity.
+ *   putPixel(x, y, rgba) — writes 4 channels into RGBA8 buffer.
+ *   fillBox(x0, y0, x1, y1, rgba) — fills rectangular pixel region.
+ *   flattenShape(shape, out) — flattens shape verbs into FlatPath polyline.
+ *   scanlineFill(fp, rgba) — even-odd scanline fill for polygon outline.
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Public Constructors: (.h)
+ *   - (none — singleton state is file-static and zero-initialized)
+ *
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - DirectGraphics_getRow(void)             : Query const Graphics row table
+ *   - DirectGraphics_resize(width, height)    : Bind/rebind drawable extent
+ *
+ * Private Core Functions: (.c static)
+ *   - implBegin(void)                         : Validate ready state for frame begin
+ *   - implEnd(void)                           : Complete frame rendering
+ *   - implPresent(void)                       : Present frame to target surface
+ *   - implResize(width, height)               : Allocate arena-backed framebuffer
+ *   - implClear(color)                        : Clear entire drawable with 0xRRGGBBAA
+ *   - implClip(rect)                          : Update or disable scissor clipping
+ *   - implFillRect(rect, brush)               : Fill rectangle with solid brush
+ *   - implDrawRect(rect, stroke)              : Stroke rectangle perimeter
+ *   - implFillCircle(cx, cy, radius, brush)   : Fill raster circle
+ *   - implDrawCircle(cx, cy, radius, stroke)  : Stroke circle boundary
+ *   - implFillPath(shape, brush)              : Fill arbitrary vector shape
+ *   - implDrawPath(shape, stroke)             : Stroke vector shape segments
+ *   - implDrawImage(image, dst)               : Bilinear blit image into dst rectangle
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - DirectGraphics_getFramebuffer(void)     : Buffer * (null until resize)
+ *   - DirectGraphics_getWidth(void)           : uint32_t (0 until resize)
+ *   - DirectGraphics_getHeight(void)          : uint32_t (0 until resize)
+ *   - DirectGraphics_isReady(void)            : bool (framebuffer bound)
+ *
+ * Private Getters: (.c static)
+ *   - ready(void)                             : Test if framebuffer is bound
  * ============================================================================
  */
 
@@ -91,20 +138,22 @@ static bool ready(void) {
     return directGraphics.framebuffer != nullptr;
 }
 
-static bool brushArgb(const Brush *brush, uint32_t *outArgb) {
-    if (!brush || !outArgb)
+static bool brushRgba(const Brush *brush, uint32_t *outRgba) {
+    if (!brush || !outRgba)
         return false;
     float op = (*brush).opacity;
     if (op < 0.0f)
         op = 0.0f;
     if (op > 1.0f)
         op = 1.0f;
-    uint32_t a = (uint32_t) ((float) (((*brush).color >> 24) & 0xFFu) * op + 0.5f);
-    *outArgb = (a << 24) | ((*brush).color & 0x00FFFFFFu);
+    uint32_t a = (uint32_t) ((float) ((*brush).color & 0xFFu) * op + 0.5f);
+    if (a > 0xFFu)
+        a = 0xFFu;
+    *outRgba = ((*brush).color & 0xFFFFFF00u) | (a & 0xFFu);
     return true;
 }
 
-static void putPixel(int32_t x, int32_t y, uint32_t argb) {
+static void putPixel(int32_t x, int32_t y, uint32_t rgba) {
     if (!ready())
         return;
     if (x < 0 || y < 0)
@@ -122,13 +171,13 @@ static void putPixel(int32_t x, int32_t y, uint32_t argb) {
             return;
     }
     Buffer *fb = directGraphics.framebuffer;
-    Buffer_setPixel(fb, (size_t) x, (size_t) y, 0u, (uint64_t) ((argb >> 16) & 0xFFu));
-    Buffer_setPixel(fb, (size_t) x, (size_t) y, 1u, (uint64_t) ((argb >> 8) & 0xFFu));
-    Buffer_setPixel(fb, (size_t) x, (size_t) y, 2u, (uint64_t) (argb & 0xFFu));
-    Buffer_setPixel(fb, (size_t) x, (size_t) y, 3u, (uint64_t) ((argb >> 24) & 0xFFu));
+    Buffer_setPixel(fb, (size_t) x, (size_t) y, 0u, (uint64_t) ((rgba >> 24) & 0xFFu));
+    Buffer_setPixel(fb, (size_t) x, (size_t) y, 1u, (uint64_t) ((rgba >> 16) & 0xFFu));
+    Buffer_setPixel(fb, (size_t) x, (size_t) y, 2u, (uint64_t) ((rgba >> 8) & 0xFFu));
+    Buffer_setPixel(fb, (size_t) x, (size_t) y, 3u, (uint64_t) (rgba & 0xFFu));
 }
 
-static void fillBox(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t argb) {
+static void fillBox(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t rgba) {
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     int32_t dw = (int32_t) directGraphics.width;
@@ -139,7 +188,7 @@ static void fillBox(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t arg
         return;
     for (int32_t y = y0; y < y1; y++)
         for (int32_t x = x0; x < x1; x++)
-            putPixel(x, y, argb);
+            putPixel(x, y, rgba);
 }
 
 // Flatten the shape into a polyline (cubics subdivided DIRECT_CUBIC_STEPS).
@@ -209,7 +258,7 @@ static bool flattenShape(const Shape *shape, FlatPath *out) {
 }
 
 // Even-odd scanline fill over the flattened polyline.
-static void scanlineFill(const FlatPath *fp, uint32_t argb) {
+static void scanlineFill(const FlatPath *fp, uint32_t rgba) {
     double minY = DBL_MAX;
     double maxY = -DBL_MAX;
     uint32_t n = (*fp).count;
@@ -265,7 +314,7 @@ static void scanlineFill(const FlatPath *fp, uint32_t argb) {
             if (xb <= xa)
                 continue;
             for (int32_t px = xa; px < xb; px++)
-                putPixel(px, py, argb);
+                putPixel(px, py, rgba);
         }
     }
 }
@@ -325,18 +374,18 @@ static bool implClip(const Rectangle *rect) {
 static bool implFillRect(const Rectangle *rect, const Brush *brush) {
     if (!rect || !ready())
         return false;
-    uint32_t argb;
-    if (!brushArgb(brush, &argb))
+    uint32_t rgba;
+    if (!brushRgba(brush, &rgba))
         return false;
     fillBox((int32_t) (*rect).x, (int32_t) (*rect).y,
-            (int32_t) ((*rect).x + (*rect).width), (int32_t) ((*rect).y + (*rect).height), argb);
+            (int32_t) ((*rect).x + (*rect).width), (int32_t) ((*rect).y + (*rect).height), rgba);
     return true;
 }
 
 static bool implDrawRect(const Rectangle *rect, const Stroke *stroke) {
     if (!rect || !stroke || !ready())
         return false;
-    uint32_t argb = (*stroke).color;
+    uint32_t rgba = (*stroke).color;
     float wf = (*stroke).width;
     if (wf < 1.0f)
         wf = 1.0f;
@@ -345,10 +394,10 @@ static bool implDrawRect(const Rectangle *rect, const Stroke *stroke) {
     int32_t y0 = (int32_t) (*rect).y;
     int32_t x1 = (int32_t) ((*rect).x + (*rect).width);
     int32_t y1 = (int32_t) ((*rect).y + (*rect).height);
-    fillBox(x0, y0, x1, y0 + sw, argb);
-    fillBox(x0, y1 - sw, x1, y1, argb);
-    fillBox(x0, y0 + sw, x0 + sw, y1 - sw, argb);
-    fillBox(x1 - sw, y0 + sw, x1, y1 - sw, argb);
+    fillBox(x0, y0, x1, y0 + sw, rgba);
+    fillBox(x0, y1 - sw, x1, y1, rgba);
+    fillBox(x0, y0 + sw, x0 + sw, y1 - sw, rgba);
+    fillBox(x1 - sw, y0 + sw, x1, y1 - sw, rgba);
     return true;
 }
 
@@ -357,8 +406,8 @@ static bool implFillCircle(float cx, float cy, float radius, const Brush *brush)
         return false;
     if (radius <= 0.0f)
         return false;
-    uint32_t argb;
-    if (!brushArgb(brush, &argb))
+    uint32_t rgba;
+    if (!brushRgba(brush, &rgba))
         return false;
     double r = (double) radius;
     double r2 = r * r;
@@ -371,7 +420,7 @@ static bool implFillCircle(float cx, float cy, float radius, const Brush *brush)
             double dx = (double) px + 0.5 - (double) cx;
             double dy = (double) py + 0.5 - (double) cy;
             if (dx * dx + dy * dy <= r2)
-                putPixel(px, py, argb);
+                putPixel(px, py, rgba);
         }
     }
     return true;
@@ -382,7 +431,7 @@ static bool implDrawCircle(float cx, float cy, float radius, const Stroke *strok
         return false;
     if (radius <= 0.0f)
         return false;
-    uint32_t argb = (*stroke).color;
+    uint32_t rgba = (*stroke).color;
     float wf = (*stroke).width;
     if (wf < 1.0f)
         wf = 1.0f;
@@ -404,7 +453,7 @@ static bool implDrawCircle(float cx, float cy, float radius, const Stroke *strok
             double dy = (double) py + 0.5 - (double) cy;
             double d2 = dx * dx + dy * dy;
             if (d2 >= rIn2 && d2 <= rOut2)
-                putPixel(px, py, argb);
+                putPixel(px, py, rgba);
         }
     }
     return true;
@@ -413,20 +462,20 @@ static bool implDrawCircle(float cx, float cy, float radius, const Stroke *strok
 static bool implFillPath(const Shape *shape, const Brush *brush) {
     if (!shape || !ready())
         return false;
-    uint32_t argb;
-    if (!brushArgb(brush, &argb))
+    uint32_t rgba;
+    if (!brushRgba(brush, &rgba))
         return false;
     FlatPath fp;
     if (!flattenShape(shape, &fp))
         return false;
-    scanlineFill(&fp, argb);
+    scanlineFill(&fp, rgba);
     return true;
 }
 
 static bool implDrawPath(const Shape *shape, const Stroke *stroke) {
     if (!shape || !stroke || !ready())
         return false;
-    uint32_t argb = (*stroke).color;
+    uint32_t rgba = (*stroke).color;
     float wf = (*stroke).width;
     if (wf < 1.0f)
         wf = 1.0f;
@@ -470,7 +519,7 @@ static bool implDrawPath(const Shape *shape, const Stroke *stroke) {
                 double pyo = qy - t * dy;
                 double d2 = pxo * pxo + pyo * pyo;
                 if (d2 <= halfW * halfW)
-                    putPixel(px, py, argb);
+                    putPixel(px, py, rgba);
             }
         }
     }
@@ -516,16 +565,16 @@ static bool implDrawImage(const Image *image, const Rectangle *dst) {
             if (sx >= (int32_t) srcW) sx = (int32_t) srcW - 1;
             if (sy >= (int32_t) srcH) sy = (int32_t) srcH - 1;
             size_t si = ((size_t) sy * srcW + (size_t) sx) * 4u;
-            uint32_t argb;
+            uint32_t pixelRgba;
             if (rgba) {
-                argb = ((uint32_t) rgba[si + 3u] << 24) |
-                       ((uint32_t) rgba[si] << 16) |
-                       ((uint32_t) rgba[si + 1u] << 8) |
-                       (uint32_t) rgba[si + 2u];
+                pixelRgba = ((uint32_t) rgba[si] << 24) |
+                            ((uint32_t) rgba[si + 1u] << 16) |
+                            ((uint32_t) rgba[si + 2u] << 8) |
+                            (uint32_t) rgba[si + 3u];
             } else {
-                argb = 0xFF404040u;  // no-shadow placeholder: dark gray
+                pixelRgba = 0x404040FFu;  // no-shadow placeholder: dark gray, opaque
             }
-            putPixel(px, py, argb);
+            putPixel(px, py, pixelRgba);
         }
     }
     return true;
@@ -550,7 +599,16 @@ static const Graphics directRow = {
     .drawImage = implDrawImage,
 };
 
-// CORE FUNCTIONS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none — DirectGraphics is a process-global static singleton)
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 const Graphics *DirectGraphics_getRow(void) {
     return &directRow;
 }
@@ -559,19 +617,32 @@ bool DirectGraphics_resize(uint32_t width, uint32_t height) {
     return implResize(width, height);
 }
 
-// GETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+// (none)
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 Buffer *DirectGraphics_getFramebuffer(void) {
     return directGraphics.framebuffer;
 }
 
+;;GETTER
 uint32_t DirectGraphics_getWidth(void) {
     return directGraphics.width;
 }
 
+;;GETTER
 uint32_t DirectGraphics_getHeight(void) {
     return directGraphics.height;
 }
 
+;;GETTER
 bool DirectGraphics_isReady(void) {
     return ready();
 }
