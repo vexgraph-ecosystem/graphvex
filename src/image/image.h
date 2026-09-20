@@ -13,18 +13,18 @@
 // concepts. No Vulkan includes here: pixels live in an owned CPU shadow
 // until a backend claims the handle.
 //
-// BYTE ORDER: alpha-first ARGB8 (byte 0 = ALPHA, 1 = RED, 2 = GREEN,
-// 3 = BLUE), mirroring the 0xAARRGGBB stored word per the Strict Color Law.
+// BYTE ORDER: RGBA8 (byte 0 = RED, 1 = GREEN, 2 = BLUE, 3 = ALPHA), the
+// monotonic memory layout of the Strict 0xRRGGBBAA Color Law.
 // The software row (raster_graphics) consumes bytes verbatim: byte 0 feeds
-// channel 0 (alpha).
+// channel 0 (red).
 
 typedef struct Image {
     uint32_t width;   // pixels across (>= 1)
     uint32_t height;  // pixels down (>= 1)
-    uint32_t format;  // backend-agnostic pixel format code (0 = ARGB8 stub default)
+    uint32_t format;  // backend-agnostic pixel format code (0 = RGBA8 stub default)
     uint32_t usage;   // backend-agnostic usage flags (0 = none)
     uint64_t typeId;  // block-header type id (TYPE_IMAGE_SINGLETON)
-    uint8_t *rgba;    // OWNED CPU shadow, width*height*4 bytes alpha-first ARGB8 (null = no backing); freed by Image_free, never borrowed
+    uint8_t *rgba;    // OWNED CPU shadow, width*height*4 bytes RGBA8 (byte0=red..byte3=alpha per the Strict 0xRRGGBBAA Color Law; null = no backing); freed by Image_free, never borrowed
 } Image;
 
 // Empty 1x1 placeholder (format 0, usage 0, zeroed pixel)
@@ -39,7 +39,7 @@ Image *Image_4(uint32_t w, uint32_t h, uint32_t format, uint32_t usage);
 // Release the owned shadow then the struct (null-safe no-op)
 void Image_free(Image *img);
 
-// Copy w*h*4 alpha-first ARGB8 bytes into dest (dest-last); grows/clears on dim change
+// Copy w*h*4 RGBA8 bytes into dest (dest-last); grows/clears on dim change
 bool Image_upload(const uint8_t *rgba, uint32_t w, uint32_t h, Image *dest);
 
 // Symmetric mutators (width/height realloc the shadow, cleared to zero)
