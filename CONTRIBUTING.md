@@ -37,13 +37,14 @@ This boilerplate is **not** an accident, nor is it a misunderstanding of idiomat
 
 ---
 
-## 3. Supreme Living Document: `preferences.md`
+## 3. Supreme Living Document: `preferences.md` & Repo-Local Preferences
 
 All architectural rules and style invariants are governed by the central constitution:
 
 - **[preferences.md](https://github.com/vexgraph-dev/vexspoke/blob/main/preferences.md)** (tracked in `vexspoke`, accessible locally at `../../preferences.md`)
+- **[graphvex-preferences.md](graphvex-preferences.md)** (repo-local mirror binding graphvex)
 
-Whenever preferences or conventions evolve, `preferences.md` is updated and committed locally in the same cycle (Zero Drift Law).
+Whenever preferences or conventions evolve, `preferences.md` and `graphvex-preferences.md` are updated and committed locally in the same cycle (the Living Preferences Law / Zero Drift).
 
 ---
 
@@ -51,7 +52,7 @@ Whenever preferences or conventions evolve, `preferences.md` is updated and comm
 
 | Invariant | Specification |
 | :--- | :--- |
-| **Zero Steady-State Allocation** | GPU command pools, descriptor sets, and staging buffers are pre-allocated during init; zero runtime `malloc` during render loops. |
-| **Dest Last Parameter Order (Rule 9)** | Vector/matrix math and raster operations always place destination buffers last: `Mat4_multiply(left, right, dest)`. |
-| **Bounded Queue & Fence Waits (Rule 27)** | Vulkan queue and fence waits must specify bounded timeouts (e.g. 100ms) with graceful frame-drop fallbacks; never wait `UINT64_MAX` on worker joins. |
-| **Teardown Reverse Order (Rule 26)** | Destroy pipelines, render passes, framebuffers, and swapchain images top-down before destroying device or instances. `Memory_freeAll` runs strictly last. |
+| **Zero Steady-State Allocation** | GPU command pools, descriptor sets, and staging buffers are pre-allocated during init; zero runtime `malloc` during render loops (per the Data-Oriented Storage Law). |
+| **Dest Last Parameter Order** | Vector/matrix math and raster operations always place destination buffers last: `Mat4_multiply(left, right, dest)` (per the Dest-Last Law). |
+| **Bounded Queue & Fence Waits** | Vulkan queue and fence waits must specify bounded timeouts (e.g. 100ms) with graceful frame-drop fallbacks; never wait `UINT64_MAX` on worker joins (per the Bounded Wait Law). |
+| **Teardown Reverse Order** | Destroy pipelines, render passes, framebuffers, and swapchain images top-down before destroying device or instances. `Memory_freeAll` runs strictly last (per the Teardown Order Law). |
