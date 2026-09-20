@@ -4,7 +4,28 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Swapchain
+ * ============================================================================
+ * Backend-agnostic presentation swapchain coordinating double- or triple-buffered
+ * surface image presentation to native display surfaces (such as NSWindow or
+ * CAMetalLayer) across CPU shadows and GPU raster backends.
+ *
+ * Maintains a pool of 1 to 4 owned Image instances that cycle deterministically
+ * through acquire and present phases under strict vsync governance. Surface
+ * resizing reallocates image storage safely across the frame pool without tearing
+ * or invalidating active presentation handles. Struct allocations are serviced
+ * through the vexspoke typed memory arena (TYPE_SWAPCHAIN_SINGLETON) when
+ * available, with an automatic calloc fallback for standalone targets.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -12,65 +33,72 @@
  * CLASS: Swapchain (image/swapchain.c)
  * LEVEL: L4 — Self-Management (display surface lifecycle and presentation)
  * ============================================================================
- * Backend-agnostic swapchain managing a pool of 1 to 4 CPU shadow framebuffer
- * images for presentation to a native display surface (NSWindow, CAMetalLayer,
- * etc.). Supports double/triple buffering, bounded acquire/present cadences,
- * and dynamic surface resize. The struct rides the vexspoke arena via
- * Memory_alloc(TYPE_SWAPCHAIN_SINGLETON) with a calloc fallback for standalone
- * builds. Framebuffer images are owned Image instances.
+ * SUMMARY:
+ *   Backend-agnostic swapchain managing a pool of 1 to 4 CPU shadow framebuffer
+ *   images for presentation to a native display surface (NSWindow, CAMetalLayer,
+ *   etc.). Supports double and triple buffering, bounded acquire/present cadences,
+ *   and dynamic surface resize.
  *
  * STRUCT FIELDS (Mirroring image/swapchain.h):
  * ----------------------------------------------------------------------------
- *   Swapchain {
- *     void *nativeHandle;    // borrowed native handle (NSWindow, CAMetalLayer, etc.)
- *     uint32_t width;        // swapchain surface width in pixels
- *     uint32_t height;       // swapchain surface height in pixels
- *     uint32_t imageCount;   // buffer count (1 to 4)
- *     uint32_t currentIndex; // current acquired/active image index
- *     uint64_t typeId;       // block-header type id (TYPE_SWAPCHAIN_SINGLETON)
- *     bool vsync;            // vertical sync enabled flag
- *     Image *images[4];      // owned CPU shadow framebuffer images
- *   }
+ *   void *nativeHandle;    // borrowed native handle (NSWindow, CAMetalLayer, etc.)
+ *   uint32_t width;        // swapchain surface width in pixels
+ *   uint32_t height;       // swapchain surface height in pixels
+ *   uint32_t imageCount;   // buffer count (1 to 4)
+ *   uint32_t currentIndex; // current acquired/active image index
+ *   uint64_t typeId;       // block-header type id (TYPE_SWAPCHAIN_SINGLETON)
+ *   bool vsync;            // vertical sync enabled flag
+ *   Image *images[4];      // owned CPU shadow framebuffer images
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Swapchain()                                   : Swapchain_0()
- *   - Swapchain(nativeHandle)                       : Swapchain_1(nativeHandle)
- *   - Swapchain(handle, count)                      : Swapchain_2(handle, count)
- *   - Swapchain(nativeHandle, w, h)                 : Swapchain_3(nativeHandle, w, h)
- *   - Swapchain(nativeHandle, w, h, count)          : Swapchain_4(nativeHandle, w, h, count)
+ * Public Constructors: (.h)
+ *   - Swapchain_0(void)                                  : Default swapchain (1x1, double-buffered)
+ *   - Swapchain_1(nativeHandle)                          : Swapchain bound to native handle
+ *   - Swapchain_2(nativeHandle, count)                   : Swapchain with custom image buffer count
+ *   - Swapchain_3(nativeHandle, w, h)                    : Swapchain with initial surface dimensions
+ *   - Swapchain_4(nativeHandle, w, h, count)             : Fully specified swapchain instance
  *
- * Core Functions:
- *   - Swapchain_free(self)
- *   - Swapchain_acquire(self)
- *   - Swapchain_present(self)
- *   - Swapchain_resize(self, w, h)
- *   - Swapchain_currentImage(self)
- *   - Swapchain_getImage(self, index)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Swapchain_setWidth(self, width)
- *   - Swapchain_setHeight(self, height)
- *   - Swapchain_setImageCount(self, count)
- *   - Swapchain_setCurrentIndex(self, index)
- *   - Swapchain_setVsync(self, vsync)
- *   - Swapchain_setNativeHandle(self, nativeHandle)
+ * Public Core Functions: (.h)
+ *   - Swapchain_free(self)                               : Release swapchain and owned frame images
+ *   - Swapchain_acquire(self)                            : Acquire next available buffer index
+ *   - Swapchain_present(self)                            : Advance swapchain buffer cycle
+ *   - Swapchain_resize(self, w, h)                       : Resize all owned surface framebuffers
+ *   - Swapchain_currentImage(self)                       : Query currently acquired image pointer
+ *   - Swapchain_getImage(self, index)                    : Access framebuffer image by index
  *
- * Getters:
- *   - Swapchain_getWidth(self)
- *   - Swapchain_getHeight(self)
- *   - Swapchain_getImageCount(self)
- *   - Swapchain_getCurrentIndex(self)
- *   - Swapchain_isVsync(self)
- *   - Swapchain_getNativeHandle(self)
- *   - Swapchain_getTypeId(self)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Swapchain_setWidth(self, width)                    : Mutate surface width
+ *   - Swapchain_setHeight(self, height)                  : Mutate surface height
+ *   - Swapchain_setImageCount(self, count)               : Mutate swapchain image buffer count
+ *   - Swapchain_setCurrentIndex(self, index)             : Mutate active image index
+ *   - Swapchain_setVsync(self, vsync)                    : Enable or disable vertical synchronization
+ *   - Swapchain_setNativeHandle(self, nativeHandle)      : Assign underlying window or layer handle
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Swapchain_getWidth(self)                           : Query surface width in pixels
+ *   - Swapchain_getHeight(self)                          : Query surface height in pixels
+ *   - Swapchain_getImageCount(self)                      : Query allocated buffer count
+ *   - Swapchain_getCurrentIndex(self)                    : Query active image index
+ *   - Swapchain_isVsync(self)                            : Query vertical sync flag
+ *   - Swapchain_getNativeHandle(self)                    : Query native window/layer handle
+ *   - Swapchain_getTypeId(self)                          : Query type identity stamp
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// image/swapchain.c — Backend-agnostic presentation swapchain implementation.
-
-// CONSTRUCTORS
+// CONSTRUCTORS (PUBLIC & PRIVATE)
 
 Swapchain *Swapchain_0(void) {
     return Swapchain_4(nullptr, 1, 1, 2);
@@ -119,7 +147,7 @@ Swapchain *Swapchain_4(void *nativeHandle, uint32_t w, uint32_t h, uint32_t coun
     return self;
 }
 
-// CORE FUNCTIONS
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
 
 void Swapchain_free(Swapchain *self) {
     if (!self)
@@ -190,8 +218,9 @@ Image *Swapchain_getImage(const Swapchain *self, uint32_t index) {
     return (*self).images[index];
 }
 
-// SETTERS
+// SETTERS (PUBLIC & PRIVATE)
 
+;;SETTER
 void Swapchain_setWidth(Swapchain *self, uint32_t width) {
     if (!self)
         return;
@@ -201,6 +230,7 @@ void Swapchain_setWidth(Swapchain *self, uint32_t width) {
         (*self).width = width;
 }
 
+;;SETTER
 void Swapchain_setHeight(Swapchain *self, uint32_t height) {
     if (!self)
         return;
@@ -210,6 +240,7 @@ void Swapchain_setHeight(Swapchain *self, uint32_t height) {
         (*self).height = height;
 }
 
+;;SETTER
 void Swapchain_setImageCount(Swapchain *self, uint32_t count) {
     if (!self)
         return;
@@ -239,6 +270,7 @@ void Swapchain_setImageCount(Swapchain *self, uint32_t count) {
         (*self).currentIndex = 0;
 }
 
+;;SETTER
 void Swapchain_setCurrentIndex(Swapchain *self, uint32_t index) {
     if (!self)
         return;
@@ -246,44 +278,53 @@ void Swapchain_setCurrentIndex(Swapchain *self, uint32_t index) {
         (*self).currentIndex = index;
 }
 
+;;SETTER
 void Swapchain_setVsync(Swapchain *self, bool vsync) {
     if (!self)
         return;
     (*self).vsync = vsync;
 }
 
+;;SETTER
 void Swapchain_setNativeHandle(Swapchain *self, void *nativeHandle) {
     if (!self)
         return;
     (*self).nativeHandle = nativeHandle;
 }
 
-// GETTERS
+// GETTERS (PUBLIC & PRIVATE)
 
+;;GETTER
 uint32_t Swapchain_getWidth(const Swapchain *self) {
     return self ? (*self).width : 0;
 }
 
+;;GETTER
 uint32_t Swapchain_getHeight(const Swapchain *self) {
     return self ? (*self).height : 0;
 }
 
+;;GETTER
 uint32_t Swapchain_getImageCount(const Swapchain *self) {
     return self ? (*self).imageCount : 0;
 }
 
+;;GETTER
 uint32_t Swapchain_getCurrentIndex(const Swapchain *self) {
     return self ? (*self).currentIndex : 0;
 }
 
+;;GETTER
 bool Swapchain_isVsync(const Swapchain *self) {
     return self ? (*self).vsync : false;
 }
 
+;;GETTER
 void *Swapchain_getNativeHandle(const Swapchain *self) {
     return self ? (*self).nativeHandle : nullptr;
 }
 
+;;GETTER
 uint64_t Swapchain_getTypeId(const Swapchain *self) {
     return self ? (*self).typeId : 0;
 }

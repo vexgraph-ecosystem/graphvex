@@ -6,7 +6,30 @@
 #include "image/image.h"
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: BindlessHeap
+ * ============================================================================
+ * Centralized stable descriptor index registry for dynamically binding graphics
+ * Image handles without pipeline state switches or individual descriptor sets.
+ * Maps 32-bit stable non-zero integer handles to Image pointers across GPU draw
+ * and paint dispatches.
+ *
+ * Slot 0 is strictly reserved as an internal 1x1 opaque white dummy fallback
+ * Image owned directly by the heap, ensuring invalid or unmapped handles resolve
+ * safely to valid visual data rather than crashing hardware shaders. Struct
+ * allocations are governed by the vexspoke typed memory arena
+ * (TYPE_BINDLESS_HEAP_SINGLETON) with fallback to calloc for standalone targets.
+ * Registered image pointers are borrowed references whose life cycle remains
+ * managed by their original creators.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -14,54 +37,55 @@
  * CLASS: BindlessHeap (image/bindless_heap.c)
  * LEVEL: L2 — Behavior (stable handle registry behavior API, CPU stub)
  * ============================================================================
- * Stable uint32 handle registry for Images: handles are stable indices
- * into an owned slot array (null = free/bad). Slot 0 is reserved for the
- * dummy white 1x1 image so bad handles resolve to 0/NULL, never to a
- * real entry. The struct rides the vexspoke arena via
- * Memory_alloc(TYPE_BINDLESS_HEAP_SINGLETON) with a calloc fallback for
- * standalone builds; the slot array is always calloc-owned system memory.
- * Registered Images are borrowed (only slot 0 dummy is owned and freed
- * by BindlessHeap_free). No Vulkan/Metal/DirectX includes: pure CPU stub.
+ * SUMMARY:
+ *   Stable uint32 handle registry for Images where handles are indices into
+ *   an owned dynamic slot array. Slot 0 is reserved for an owned dummy white
+ *   1x1 image so invalid or zero handles never trigger null pointer dereferences.
+ *   Registered Images are borrowed references.
  *
  * STRUCT FIELDS (Mirroring image/bindless_heap.h):
  * ----------------------------------------------------------------------------
- *   BindlessHeap {
- *     uint32_t count; // live entries including slot 0 dummy
- *     uint32_t capacity; // allocated slots length
- *     uint64_t typeId; // block-header type id (TYPE_BINDLESS_HEAP_SINGLETON)
- *     Image **slots; // OWNED slot array, slots[0] = dummy white 1x1, null = free/bad; Images borrowed except slot 0
- *   }
+ *   uint32_t count;    // live entries including slot 0 dummy
+ *   uint32_t capacity; // allocated slots length
+ *   uint64_t typeId;   // block-header type id (TYPE_BINDLESS_HEAP_SINGLETON)
+ *   Image **slots;     // OWNED slot array, slots[0] = dummy white 1x1, null = free/bad; Images borrowed except slot 0
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - BindlessHeap()                 : BindlessHeap_0()
+ * Public Constructors: (.h)
+ *   - BindlessHeap_0(void)                               : Empty heap with slot 0 dummy white 1x1
  *
- * Core Functions:
- *   - BindlessHeap_register(heap, img)
- *   - BindlessHeap_lookup(heap, handle)
- *   - BindlessHeap_free(heap)
- *
- * Setters:
+ * Private Constructors: (.c static)
  *   - (none)
  *
- * Getters:
- *   - BindlessHeap_getCount(heap)
- *   - BindlessHeap_getCapacity(heap)
+ * Public Core Functions: (.h)
+ *   - BindlessHeap_register(heap, img)                   : Register image and return stable handle index
+ *   - BindlessHeap_lookup(heap, handle)                  : Resolve stable handle to borrowed Image pointer
+ *   - BindlessHeap_free(heap)                            : Release slot array, dummy image, and heap memory
+ *
+ * Private Core Functions: (.c static)
+ *   - bindlessHeapFreeStorage(heap)                      : Release arena or heap struct block
+ *
+ * Public Setters: (.h)
+ *   - (none)
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - BindlessHeap_getCount(heap)                        : Query live slot count including dummy
+ *   - BindlessHeap_getCapacity(heap)                     : Query allocated slot array capacity
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// image/bindless_heap.c — Stable uint32 handle registry implementation (CPU stub).
+// CONSTRUCTORS (PUBLIC & PRIVATE)
 
-static void bindlessHeapFreeStorage(BindlessHeap *heap) {
-    if (Memory_length(heap) != 0)
-        Memory_free(heap);
-    else
-        free(heap);
-}
+static void bindlessHeapFreeStorage(BindlessHeap *heap);
 
-// CONSTRUCTORS
-BindlessHeap *BindlessHeap_0() {
+BindlessHeap *BindlessHeap_0(void) {
     BindlessHeap *heap = Memory_alloc(TYPE_BINDLESS_HEAP_SINGLETON, sizeof(BindlessHeap));
     if (!heap)
         heap = (BindlessHeap*) calloc(1, sizeof(BindlessHeap));
@@ -94,7 +118,15 @@ BindlessHeap *BindlessHeap_0() {
     return heap;
 }
 
-// CORE FUNCTIONS
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+
+static void bindlessHeapFreeStorage(BindlessHeap *heap) {
+    if (Memory_length(heap) != 0)
+        Memory_free(heap);
+    else
+        free(heap);
+}
+
 uint32_t BindlessHeap_register(BindlessHeap *heap, Image *img) {
     if (!heap)
         return 0;
@@ -152,11 +184,18 @@ void BindlessHeap_free(BindlessHeap *heap) {
     bindlessHeapFreeStorage(heap);
 }
 
-// GETTERS
+// SETTERS (PUBLIC & PRIVATE)
+
+// (none)
+
+// GETTERS (PUBLIC & PRIVATE)
+
+;;GETTER
 uint32_t BindlessHeap_getCount(const BindlessHeap *heap) {
     return heap ? (*heap).count : 0;
 }
 
+;;GETTER
 uint32_t BindlessHeap_getCapacity(const BindlessHeap *heap) {
     return heap ? (*heap).capacity : 0;
 }
