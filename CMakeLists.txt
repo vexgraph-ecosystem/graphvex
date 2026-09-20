@@ -79,7 +79,7 @@ add_library(graphvex STATIC
     src/paint/raster_brush.c
     src/draw/drawable.c
     src/scene/pipeline.c
-    src/scene/pass.c
+    src/scene/render_pass.c
     src/scene/scene.c
     src/mesh/mesh.c
     src/mesh/meshlet.c
