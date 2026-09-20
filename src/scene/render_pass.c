@@ -1,76 +1,110 @@
-#include "scene/pass.h"
+#include "scene/render_pass.h"
 
 #include <stdlib.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "nio/mem.h"
 #include "oop/type.h"
 #include "sync/command_buffer.h"
 
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: RenderPass
+ * ============================================================================
+ * Render pass instance describing an offscreen or presentation frame execution scope
+ * within the GraphVex unified rendering pipeline. Encapsulates color attachments, depth
+ * clearing parameters, viewport dimensions, and an optional borrowed destination Image target.
+ * The clear color is strictly defined and manipulated in monotonic 0xRRGGBBAA channel ordering
+ * (bits 31..24 red, 23..16 green, 15..8 blue, 7..0 alpha) in strict compliance with the
+ * Strict 0xRRGGBBAA Color Law and the Unified Graphics Abstraction Law. Instances are
+ * allocated with memory tag TYPE_RENDER_PASS_SINGLETON and manage borrowed image references
+ * without claiming destruction ownership over targets.
+ * ============================================================================
+ */
+
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: Pass (scene/pass.c)
+ * CLASS: RenderPass (scene/render_pass.c)
  * LEVEL: L2 — Behavior (render pass instance lifecycle and CPU stubs)
  * ============================================================================
  * One render pass instance (shadowmap, scene, UI). Encapsulates pass
  * configuration, clear values, dimensions, and borrowed target Image.
+ * Clear colors conform strictly to monotonic 0xRRGGBBAA channel ordering.
  *
- * STRUCT FIELDS (Mirroring scene/pass.h):
+ * STRUCT FIELDS (Mirroring scene/render_pass.h):
  * ----------------------------------------------------------------------------
- *   Pass {
+ *   RenderPass {
  *     uint32_t passType;      // render pass category or type code
  *     uint32_t width;         // pass render width in pixels
  *     uint32_t height;        // pass render height in pixels
- *     uint32_t clearColor;    // packed clear color (0xAARRGGBB)
+ *     uint32_t clearColor;    // packed clear color (0xRRGGBBAA)
  *     float clearDepth;       // depth attachment clear value
  *     bool clearOnLoad;       // true if attachments are cleared on load
- *     uint64_t typeId;        // block-header type id (TYPE_PASS_SINGLETON)
- *     Image *target;          // borrowed target Image (never freed by Pass)
+ *     uint64_t typeId;        // block-header type id (TYPE_RENDER_PASS_SINGLETON)
+ *     Image *target;          // borrowed target Image (never freed by RenderPass)
  *   }
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Pass()                               : Pass_0()
- *   - Pass(passType, width, height)        : Pass_3(passType, width, height)
+ * Public Constructors: (.h)
+ *   - RenderPass_0(void)                         : Allocate default render pass instance
+ *   - RenderPass_3(passType, width, height)      : Allocate sized render pass with type
  *
- * Core Functions:
- *   - Pass_free(self)
- *   - Pass_begin(self, cb)
- *   - Pass_end(self, cb)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Pass_setPassType(self, passType)
- *   - Pass_setWidth(self, width)
- *   - Pass_setHeight(self, height)
- *   - Pass_setClearColor(self, clearColor)
- *   - Pass_setClearDepth(self, clearDepth)
- *   - Pass_setClearOnLoad(self, clearOnLoad)
- *   - Pass_setTarget(self, target)
+ * Public Core Functions: (.h)
+ *   - RenderPass_free(self)                      : Release render pass heap storage
+ *   - RenderPass_begin(self, cb)                 : Begin render pass recording
+ *   - RenderPass_end(self, cb)                   : End render pass recording
  *
- * Getters:
- *   - Pass_getPassType(self)
- *   - Pass_getWidth(self)
- *   - Pass_getHeight(self)
- *   - Pass_getClearColor(self)
- *   - Pass_getClearDepth(self)
- *   - Pass_isClearOnLoad(self)
- *   - Pass_getTarget(self)
- *   - Pass_getTypeId(self)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - RenderPass_setPassType(self, passType)     : Set render pass type identifier
+ *   - RenderPass_setWidth(self, width)           : Set render pass width
+ *   - RenderPass_setHeight(self, height)         : Set render pass height
+ *   - RenderPass_setClearColor(self, clearColor) : Set clear color (0xRRGGBBAA)
+ *   - RenderPass_setClearDepth(self, clearDepth) : Set clear depth float
+ *   - RenderPass_setClearOnLoad(self, on)        : Set clear on load flag
+ *   - RenderPass_setTarget(self, target)         : Set borrowed target Image
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - RenderPass_getPassType(self)               : Query render pass type identifier
+ *   - RenderPass_getWidth(self)                  : Query render pass pixel width
+ *   - RenderPass_getHeight(self)                 : Query render pass pixel height
+ *   - RenderPass_getClearColor(self)             : Query clear color (0xRRGGBBAA)
+ *   - RenderPass_getClearDepth(self)             : Query clear depth float
+ *   - RenderPass_isClearOnLoad(self)             : Query clear on load flag
+ *   - RenderPass_getTarget(self)                 : Query borrowed target Image
+ *   - RenderPass_getTypeId(self)                 : Query block type ID
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
-Pass *Pass_0(void) {
-    return Pass_3(0, 0, 0);
+RenderPass *RenderPass_0(void) {
+    return RenderPass_3(0, 0, 0);
 }
 
-Pass *Pass_3(uint32_t passType, uint32_t width, uint32_t height) {
-    Pass *self = (Pass*) Memory_alloc(TYPE_PASS_SINGLETON, sizeof(Pass));
+RenderPass *RenderPass_3(uint32_t passType, uint32_t width, uint32_t height) {
+    RenderPass *self = (RenderPass*) Memory_alloc(TYPE_RENDER_PASS_SINGLETON, sizeof(RenderPass));
     if (!self)
-        self = (Pass*) calloc(1, sizeof(Pass));
+        self = (RenderPass*) calloc(1, sizeof(RenderPass));
     if (!self)
         return nullptr;
     (*self).passType = passType;
@@ -79,14 +113,16 @@ Pass *Pass_3(uint32_t passType, uint32_t width, uint32_t height) {
     (*self).clearColor = 0;
     (*self).clearDepth = 1.0f;
     (*self).clearOnLoad = true;
-    (*self).typeId = TYPE_PASS_SINGLETON;
+    (*self).typeId = TYPE_RENDER_PASS_SINGLETON;
     (*self).target = nullptr;
     return self;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
-void Pass_free(Pass *self) {
+void RenderPass_free(RenderPass *self) {
     if (!self)
         return;
     if (Memory_length(self) != 0)
@@ -95,94 +131,113 @@ void Pass_free(Pass *self) {
         free(self);
 }
 
-void Pass_begin(Pass *self, struct CommandBuffer *cb) {
+void RenderPass_begin(RenderPass *self, struct CommandBuffer *cb) {
     if (!self || !cb)
         return;
     (void)self;
     (void)cb;
 }
 
-void Pass_end(Pass *self, struct CommandBuffer *cb) {
+void RenderPass_end(RenderPass *self, struct CommandBuffer *cb) {
     if (!self || !cb)
         return;
     (void)self;
     (void)cb;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
-void Pass_setPassType(Pass *self, uint32_t passType) {
+;;SETTER
+void RenderPass_setPassType(RenderPass *self, uint32_t passType) {
     if (!self)
         return;
     (*self).passType = passType;
 }
 
-void Pass_setWidth(Pass *self, uint32_t width) {
+;;SETTER
+void RenderPass_setWidth(RenderPass *self, uint32_t width) {
     if (!self)
         return;
     (*self).width = width;
 }
 
-void Pass_setHeight(Pass *self, uint32_t height) {
+;;SETTER
+void RenderPass_setHeight(RenderPass *self, uint32_t height) {
     if (!self)
         return;
     (*self).height = height;
 }
 
-void Pass_setClearColor(Pass *self, uint32_t clearColor) {
+;;SETTER
+void RenderPass_setClearColor(RenderPass *self, uint32_t clearColor) {
     if (!self)
         return;
     (*self).clearColor = clearColor;
 }
 
-void Pass_setClearDepth(Pass *self, float clearDepth) {
+;;SETTER
+void RenderPass_setClearDepth(RenderPass *self, float clearDepth) {
     if (!self)
         return;
     (*self).clearDepth = clearDepth;
 }
 
-void Pass_setClearOnLoad(Pass *self, bool clearOnLoad) {
+;;SETTER
+void RenderPass_setClearOnLoad(RenderPass *self, bool clearOnLoad) {
     if (!self)
         return;
     (*self).clearOnLoad = clearOnLoad;
 }
 
-void Pass_setTarget(Pass *self, Image *target) {
+;;SETTER
+void RenderPass_setTarget(RenderPass *self, Image *target) {
     if (!self)
         return;
     (*self).target = target;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
-uint32_t Pass_getPassType(const Pass *self) {
+;;GETTER
+uint32_t RenderPass_getPassType(const RenderPass *self) {
     return self ? (*self).passType : 0;
 }
 
-uint32_t Pass_getWidth(const Pass *self) {
+;;GETTER
+uint32_t RenderPass_getWidth(const RenderPass *self) {
     return self ? (*self).width : 0;
 }
 
-uint32_t Pass_getHeight(const Pass *self) {
+;;GETTER
+uint32_t RenderPass_getHeight(const RenderPass *self) {
     return self ? (*self).height : 0;
 }
 
-uint32_t Pass_getClearColor(const Pass *self) {
+;;GETTER
+uint32_t RenderPass_getClearColor(const RenderPass *self) {
     return self ? (*self).clearColor : 0;
 }
 
-float Pass_getClearDepth(const Pass *self) {
+;;GETTER
+float RenderPass_getClearDepth(const RenderPass *self) {
     return self ? (*self).clearDepth : 0.0f;
 }
 
-bool Pass_isClearOnLoad(const Pass *self) {
+;;GETTER
+bool RenderPass_isClearOnLoad(const RenderPass *self) {
     return self ? (*self).clearOnLoad : false;
 }
 
-Image *Pass_getTarget(const Pass *self) {
+;;GETTER
+Image *RenderPass_getTarget(const RenderPass *self) {
     return self ? (*self).target : nullptr;
 }
 
-uint64_t Pass_getTypeId(const Pass *self) {
+;;GETTER
+uint64_t RenderPass_getTypeId(const RenderPass *self) {
     return self ? (*self).typeId : 0;
 }
