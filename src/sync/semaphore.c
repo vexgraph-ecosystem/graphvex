@@ -2,7 +2,25 @@
 
 #include <stdlib.h>
 
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Semaphore
+ * ============================================================================
+ * Timeline synchronization handle coordinating execution between asynchronous GPU
+ * queue submissions. Tracks monotonic timeline counter values, providing non-blocking
+ * pipeline barriers and dependency progression.
+ *
+ * Adheres to the Unified Graphics Abstraction Law and the Bounded Wait Law: CPU threads
+ * never block indefinitely on timeline semaphores, using wait queries to probe
+ * monotonic progression without stalling host frame loops.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -10,40 +28,54 @@
  * CLASS: Semaphore (sync/semaphore.c)
  * LEVEL: L2 — Behavior (GPU-GPU ordering lifecycle stubs)
  * ============================================================================
- * GPU-GPU ordering handle. One submission signals a timeline value and a
- * later submission waits for it; the CPU never blocks here — wait only
- * probes the counter (the Bounded Wait Law: no unbounded waits). CPU-side stubs only:
- * signal/wait track the value flag and touch no Vulkan/Metal/Direct
- * backend.
+ * SUMMARY:
+ *   GPU-GPU ordering handle. One submission signals a timeline value and a
+ *   later submission waits for it; the CPU never blocks here — wait only
+ *   probes the counter (the Bounded Wait Law: no unbounded waits). CPU-side stubs only:
+ *   signal/wait track the value flag and touch no Vulkan/Metal/Direct
+ *   backend.
  *
  * STRUCT FIELDS (Mirroring sync/semaphore.h):
  * ----------------------------------------------------------------------------
- *   Semaphore {
- *     uint64_t value; // timeline counter (monotonic: signal only raises)
- *     uint64_t typeId; // reserved stub type stamp (0 until registered)
- *   }
+ *   uint64_t value;  // timeline counter (monotonic: signal only raises)
+ *   uint64_t typeId; // reserved stub type stamp (0 until registered)
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   (none)
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Semaphore()                    : Semaphore_0()
+ * Public Constructors: (.h)
+ *   - Semaphore_0(void)                       : Zero-initialized semaphore handle
  *
- * Core Functions:
- *   - Semaphore_free(self)
- *   - Semaphore_signal(self, value)
- *   - Semaphore_wait(self, value)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Semaphore_setValue(self, value)
+ * Public Core Functions: (.h)
+ *   - Semaphore_free(self)                    : Release semaphore handle memory
+ *   - Semaphore_signal(self, value)           : Advance timeline counter value
+ *   - Semaphore_wait(self, value)             : Probe timeline counter progression
  *
- * Getters:
- *   - Semaphore_getValue(self)
- *   - Semaphore_getTypeId(self)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Semaphore_setValue(self, value)         : Directly set timeline counter
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Semaphore_getValue(self)                : Query current timeline value
+ *   - Semaphore_getTypeId(self)               : Query type identity stamp
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-
-// CONSTRUCTORS
+// CONSTRUCTORS (PUBLIC & PRIVATE)
 
 Semaphore *Semaphore_0(void) {
     Semaphore *self = (Semaphore*) calloc(1, sizeof(Semaphore));
@@ -54,7 +86,7 @@ Semaphore *Semaphore_0(void) {
     return self;
 }
 
-// CORE FUNCTIONS
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
 
 void Semaphore_free(Semaphore *self) {
     if (!self)
@@ -75,22 +107,25 @@ bool Semaphore_wait(Semaphore *self, uint64_t value) {
     return (*self).value >= value;
 }
 
-// SETTERS
+// SETTERS (PUBLIC & PRIVATE)
 
+;;SETTER
 void Semaphore_setValue(Semaphore *self, uint64_t value) {
     if (!self)
         return;
     (*self).value = value;
 }
 
-// GETTERS
+// GETTERS (PUBLIC & PRIVATE)
 
+;;GETTER
 uint64_t Semaphore_getValue(const Semaphore *self) {
     if (!self)
         return 0;
     return (*self).value;
 }
 
+;;GETTER
 uint64_t Semaphore_getTypeId(const Semaphore *self) {
     if (!self)
         return 0;
