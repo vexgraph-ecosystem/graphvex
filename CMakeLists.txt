@@ -39,6 +39,7 @@ if(NOT TARGET graphvex)
 add_library(graphvex STATIC
     src/graphvex/version.c
     src/graphvex/graphics_loop.c
+    src/graphvex/exception/graphics_exception.c
     src/buffer/buffer.c
     src/buffer/color_buffer.c
     src/buffer/depth_buffer.c
