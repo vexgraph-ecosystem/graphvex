@@ -19,11 +19,11 @@
  * Live hardware Vulkan backend row fulfilling the unified Graphics seam.
  * Adapts the Vulkan loader and swapchain presentation pipeline into the
  * uniform Graphics vtable in compliance with the Unified Graphics Abstraction Law
- * and the Strict 0xAARRGGBB Color Law.
+ * and the Strict 0xRRGGBBAA Color Law.
  *
- * Encodes all viewport clearing and blit operations strictly in 0xAARRGGBB:
- * channel 0 (alpha) extracts from bits 24..31, channel 1 (red) from bits 16..23,
- * channel 2 (green) from bits 8..15, and channel 3 (blue) from bits 0..7.
+ * Encodes all viewport clearing and blit operations strictly in 0xRRGGBBAA:
+ * channel 0 (red) extracts from bits 24..31, channel 1 (green) from bits 16..23,
+ * channel 2 (blue) from bits 8..15, and channel 3 (alpha) from bits 0..7.
  * Drawable verbs record into the live command buffer bound by
  * VkGraphics_bindFrame inside the host's frame-renderer pass (the seam's
  * Vk_clearPresent invokes that callback INSIDE the swapchain render pass, so
@@ -49,7 +49,7 @@
  * ----------------------------------------------------------------------------
  *   uint32_t width;        // newest native-px drawable extent; 0 until resize
  *   uint32_t height;       // newest native-px drawable extent
- *   uint32_t clearColor;   // staged 0xAARRGGBB for the next demand-present
+ *   uint32_t clearColor;   // staged 0xRRGGBBAA for the next demand-present
  *   bool clearPending;     // a clear staged since the last present
  *   bool frameOpen;        // begin() succeeded and end() has not run
  *   void *boundCmdBuffer;  // live seam command buffer (VkGraphics_bindFrame)
@@ -78,7 +78,7 @@
  *   - vkEnd(void)                             : Close frame window, release bound buffer
  *   - vkPresent(void)                         : Demand-present clear to swapchain
  *   - vkResize(width, height)                 : Record latest extent
- *   - vkClear(color)                          : Stage 0xAARRGGBB clear into seam
+ *   - vkClear(color)                          : Stage 0xRRGGBBAA clear into seam
  *   - vkClip(rect)                            : Update scissor clip (draft)
  *   - vkFillRect(rect, brush)                 : Solid rectangle fill (LIVE — Vk_fillRect)
  *   - vkDrawRect(rect, stroke)                : Rectangle stroke (LIVE — Vk_fillRect bars)
@@ -159,13 +159,13 @@ static bool vkClear(uint32_t color) {
         return false;
     vkGraphics.clearColor = color;
     vkGraphics.clearPending = true;
-    // 0xAARRGGBB (alpha high byte): swap the old RRGGBBAA assignment whose
-    // alpha byte landed in the red channel (the Strict 0xAARRGGBB Color Law).
+    // 0xRRGGBBAA law decode (the Strict 0xRRGGBBAA Color Law): red = bits
+    // 24..31, green = bits 16..23, blue = bits 8..15, alpha = bits 0..7.
     Vk_setClearColor(
+        (float) ((color >> 24) & 0xFFu) / 255.0f,
         (float) ((color >> 16) & 0xFFu) / 255.0f,
         (float) ((color >> 8) & 0xFFu) / 255.0f,
-        (float) (color & 0xFFu) / 255.0f,
-        (float) ((color >> 24) & 0xFFu) / 255.0f
+        (float) (color & 0xFFu) / 255.0f
     );
     return true;
 }
@@ -191,22 +191,22 @@ static bool vkFillRect(const Rectangle *rect, const Brush *brush) {
         return false;
     if ((*rect).width <= 0.0f || (*rect).height <= 0.0f)
         return false;
-    // 0xAARRGGBB alpha-top decode (the Strict 0xAARRGGBB Color Law):
-    // red = bits 16..23, green = bits 8..15, blue = bits 0..7; alpha =
-    // bits 24..31 modulated by brush opacity (clamped 0..1).
+    // 0xRRGGBBAA law decode (the Strict 0xRRGGBBAA Color Law): red = bits
+    // 24..31, green = bits 16..23, blue = bits 8..15; alpha = bits 0..7
+    // modulated by brush opacity (clamped 0..1).
     float op = (*brush).opacity;
     if (op < 0.0f)
         op = 0.0f;
     if (op > 1.0f)
         op = 1.0f;
     uint32_t color = (*brush).color;
-    float a = (float) (((color >> 24) & 0xFFu) * op) / 255.0f;
+    float a = (float) ((color & 0xFFu) * op) / 255.0f;
     Vk_fillRect(vkGraphics.boundCmdBuffer,
                 (float) vkGraphics.boundW, (float) vkGraphics.boundH,
                 (*rect).x, (*rect).y, (*rect).width, (*rect).height,
+                (float) ((color >> 24) & 0xFFu) / 255.0f,
                 (float) ((color >> 16) & 0xFFu) / 255.0f,
                 (float) ((color >> 8) & 0xFFu) / 255.0f,
-                (float) (color & 0xFFu) / 255.0f,
                 a);
     return true;
 }
@@ -234,10 +234,10 @@ static bool vkDrawRect(const Rectangle *rect, const Stroke *stroke) {
     float x1 = (*rect).x + (*rect).width;
     float y1 = (*rect).y + (*rect).height;
     uint32_t color = (*stroke).color;
-    float r = (float) ((color >> 16) & 0xFFu) / 255.0f;
-    float g = (float) ((color >> 8) & 0xFFu) / 255.0f;
-    float b = (float) (color & 0xFFu) / 255.0f;
-    float a = (float) ((color >> 24) & 0xFFu) / 255.0f;
+    float r = (float) ((color >> 24) & 0xFFu) / 255.0f;
+    float g = (float) ((color >> 16) & 0xFFu) / 255.0f;
+    float b = (float) ((color >> 8) & 0xFFu) / 255.0f;
+    float a = (float) (color & 0xFFu) / 255.0f;
     Vk_fillRect(vkGraphics.boundCmdBuffer,
                 (float) vkGraphics.boundW, (float) vkGraphics.boundH,
                 x0, y0, x1 - x0, th, r, g, b, a);

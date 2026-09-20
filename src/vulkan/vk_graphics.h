@@ -24,7 +24,7 @@
 // Frame lifecycle mapping (the seam's Vk_clearPresent is atomic
 // acquire->clear->present; the row splits that into table verbs):
 //   begin    Vk_ready() gating; opens the frame window
-//   clear    stages 0xAARRGGBB into Vk_setClearColor; ready device only
+//   clear    stages 0xRRGGBBAA into Vk_setClearColor; ready device only
 //   present  demand-present: runs Vk_clearPresent once when a clear was
 //            staged since the last present, else rests (the Present-On-
 //            Demand Law — clean content is never re-presented)
@@ -48,7 +48,7 @@
 typedef struct VkGraphics {
     uint32_t width;       // newest native-px drawable extent; 0 until resize
     uint32_t height;      // newest native-px drawable extent
-    uint32_t clearColor;  // staged 0xAARRGGBB for the next demand-present
+    uint32_t clearColor;  // staged 0xRRGGBBAA for the next demand-present
     bool clearPending;    // a clear staged since the last present
     bool frameOpen;       // begin() succeeded and end() has not run
     void *boundCmdBuffer; // live seam command buffer (VkGraphics_bindFrame); null until bound
