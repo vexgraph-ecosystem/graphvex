@@ -12,7 +12,7 @@
  * ============================================================================
  * Unified Graphics runtime backend dispatch seam decoupling client drawing calls
  * from hardware rendering drivers. Encapsulates a static dispatch table populated
- * by hardware drivers (VkGraphics, MetalGraphics, DirectGraphics) through a single
+ * by hardware drivers (VkGraphics, MetalGraphics, RasterGraphics) through a single
  * row copy. Forwarder routines invoke corresponding driver functions, enforcing the
  * Pixel Coordinate Contract where client code submits native window coordinates while
  * normalized device coordinates are constrained strictly to vertex pipeline stages.
@@ -29,7 +29,7 @@
  * ============================================================================
  * The unified Graphics seam: one function-pointer table is the whole
  * backend contract. A backend class (VkGraphics, MetalGraphics,
- * DirectGraphics) exports one const row; Graphics_setGraphics copies it
+ * RasterGraphics) exports one const row; Graphics_setGraphics copies it
  * into the file-static `currentGraphics` context; every Graphics_*
  * forwarder calls through that context. Renderer switching is one line
  * (the Pixel Coordinate Contract: native pixels out, NDC only inside
@@ -168,8 +168,8 @@ bool Graphics_drawImage(const Image *image, const Rectangle *dst) {
 bool Graphics_setGraphics(uint32_t backendId) {
     const Graphics *row = nullptr;
     switch (backendId) {
-        case GRAPHICS_BACKEND_DIRECT:
-            row = DirectGraphics_getRow();
+        case GRAPHICS_BACKEND_RASTER:
+            row = RasterGraphics_getRow();
             break;
         case GRAPHICS_BACKEND_VULKAN:
             row = VkGraphics_getRow();

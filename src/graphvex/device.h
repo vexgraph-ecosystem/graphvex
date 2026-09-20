@@ -9,7 +9,7 @@
 // Goal: darling's UI tree and hotcwap's window stop spelling Vk* types.
 // The UNIFIED SEAM is graphics/graphics.h: one Graphics table of drawable
 // verbs with one const row per backend (VkGraphics, MetalGraphics,
-// DirectGraphics) selected via Graphics_setGraphics. Backend ids live
+// RasterGraphics) selected via Graphics_setGraphics. Backend ids live
 // THERE (GRAPHICS_BACKEND_*), never re-declared in this file.
 //
 // Split note (the Single Class Per File Law): this sketch holds 3 types in one header to keep

@@ -19,7 +19,7 @@
 //
 // One Graphics struct carries the WHOLE backend contract as a function
 // pointer table: frame lifecycle, clear/clip state, and every drawable
-// verb. Backends (VkGraphics, MetalGraphics, DirectGraphics) are their
+// verb. Backends (VkGraphics, MetalGraphics, RasterGraphics) are their
 // own classes; each exports ONE const row via *_getRow(). A single
 // selection call stamps a row into graphics.c's `currentGraphics`
 // context, and the Graphics_* forwarders below call through it — so
@@ -27,7 +27,7 @@
 // specifics (the Pixel Coordinate Contract: every verb takes native
 // hardware pixels; -1..1 NDC exists only inside vertex shaders).
 //
-//   Graphics_setGraphics(GRAPHICS_BACKEND_DIRECT);
+//   Graphics_setGraphics(GRAPHICS_BACKEND_RASTER);
 //   Graphics_resize(winWpx, winHpx);
 //   Graphics_fillRect(rect, brush);   // -> (*currentGraphics).fillRect(rect, brush)
 //
@@ -45,7 +45,7 @@
 // and all backends reference these, never re-declare them.
 #define GRAPHICS_BACKEND_VULKAN 1u
 #define GRAPHICS_BACKEND_METAL  2u
-#define GRAPHICS_BACKEND_DIRECT 3u
+#define GRAPHICS_BACKEND_RASTER 3u
 
 typedef struct Graphics {
     uint32_t backendId;       // GRAPHICS_BACKEND_* (self-reported by the row)
@@ -67,9 +67,9 @@ typedef struct Graphics {
     bool (*drawImage)(const Image *image, const Rectangle *dst); // dst comes last
 } Graphics;
 
-// Backend rows (one class pair per backend; DirectGraphics + VkGraphics
+// Backend rows (one class pair per backend; RasterGraphics + VkGraphics
 // are live, MetalGraphics stub follows).
-const Graphics *DirectGraphics_getRow(void);
+const Graphics *RasterGraphics_getRow(void);
 const Graphics *VkGraphics_getRow(void);
 const Graphics *MetalGraphics_getRow(void);
 

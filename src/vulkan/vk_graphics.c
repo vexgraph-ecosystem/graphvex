@@ -43,7 +43,7 @@
  * table into the Vulkan loader seam — MoltenVK on macOS, direct
  * swapchains on Windows, one contract. The row carries no self pointer:
  * its implementations read the file-local VkGraphics singleton, matching
- * DirectGraphics.
+ * RasterGraphics.
  *
  * STRUCT FIELDS (Mirroring vulkan/vk_graphics.h — exactly this file's class):
  * ----------------------------------------------------------------------------
@@ -108,7 +108,7 @@
  */
 
 // The file-local process-global behind the row (zero steady-state
-// allocation, matching DirectGraphics).
+// allocation, matching RasterGraphics).
 static VkGraphics vkGraphics;
 static Graphics vkGraphicsRow;
 static bool registered;
@@ -212,9 +212,9 @@ static bool vkFillRect(const Rectangle *rect, const Brush *brush) {
 }
 
 static bool vkDrawRect(const Rectangle *rect, const Stroke *stroke) {
-    // LIVE: the same 4-bar model DirectGraphics implDrawRect uses — top,
+    // LIVE: the same 4-bar model RasterGraphics implDrawRect uses — top,
     // bottom, left, right bands recorded through Vk_fillRect. Hairline
-    // (width < 1) draws a 1px band, matching the Direct row.
+    // (width < 1) draws a 1px band, matching the Raster row.
     if (registered == false || Vk_isDeviceLost())
         return false;
     if (Vk_ready() == false)

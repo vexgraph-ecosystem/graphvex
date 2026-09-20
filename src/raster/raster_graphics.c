@@ -1,4 +1,4 @@
-#include "direct/direct_graphics.h"
+#include "raster/raster_graphics.h"
 
 #include <float.h>
 
@@ -17,7 +17,7 @@
 ;;DEFINITION
 /**
  * ============================================================================
- * DEFINITION: DirectGraphics
+ * DEFINITION: RasterGraphics
  * ============================================================================
  * Software rasterization backend row fulfilling the unified Graphics seam.
  * Executes drawing primitives, clipping, and blits directly onto CPU host memory
@@ -27,7 +27,7 @@
  * All color manipulation adheres monotonically to 32-bit packed 0xAARRGGBB:
  * channel 0 (alpha) extracts from bits 24..31, channel 1 (red) from bits 16..23,
  * channel 2 (green) from bits 8..15, and channel 3 (blue) from bits 0..7.
- * DirectGraphics serves as the software reference standard that all hardware-
+ * RasterGraphics serves as the software reference standard that all hardware-
  * accelerated Vulkan and Metal backends must mirror.
  * ============================================================================
  */
@@ -35,10 +35,10 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: DirectGraphics (direct/direct_graphics.c — defined in direct/direct_graphics.h)
+ * CLASS: RasterGraphics (raster/raster_graphics.c — defined in raster/raster_graphics.h)
  * LEVEL: L2 — Behavior (CPU software rasterizer)
  * ============================================================================
- * DirectGraphics is the software row of the unified Graphics seam: every
+ * RasterGraphics is the software row of the unified Graphics seam: every
  * verb rasterizes into an owned RGBA8 buffer (the DGraphics backend).
  * It is the reference implementation — the pixel output the GPU rows must
  * match — and the headless test surface (no GPU, CI-friendly). The
@@ -55,7 +55,7 @@
  *
  * Color encoding follows the Strict 0xAARRGGBB Color Law across all operations.
  *
- * STRUCT FIELDS (Mirroring direct/direct_graphics.h):
+ * STRUCT FIELDS (Mirroring raster/raster_graphics.h):
  * ----------------------------------------------------------------------------
  *   Buffer *framebuffer;  // RGBA8 native-px framebuffer (arena-backed); null until resize
  *   uint32_t width;       // drawable extent, native px; 0 until resize
@@ -84,8 +84,8 @@
  *   - (none)
  *
  * Public Core Functions: (.h)
- *   - DirectGraphics_getRow(void)             : Query const Graphics row table
- *   - DirectGraphics_resize(width, height)    : Bind/rebind drawable extent
+ *   - RasterGraphics_getRow(void)             : Query const Graphics row table
+ *   - RasterGraphics_resize(width, height)    : Bind/rebind drawable extent
  *
  * Private Core Functions: (.c static)
  *   - implBegin(void)                         : Validate ready state for frame begin
@@ -103,31 +103,31 @@
  *   - implDrawImage(image, dst)               : Bilinear blit image into dst rectangle
  *
  * Public Setters: (.h)
- *   - (none)
+ *   - RasterGraphics_setFramebuffer(fb, w, h) : SWAP the raster target to a caller-owned 4-channel buffer (retained-bake sub-pass; no alloc/free; clip untouched)
  *
  * Private Setters: (.c static)
  *   - (none)
  *
  * Public Getters: (.h)
- *   - DirectGraphics_getFramebuffer(void)     : Buffer * (null until resize)
- *   - DirectGraphics_getWidth(void)           : uint32_t (0 until resize)
- *   - DirectGraphics_getHeight(void)          : uint32_t (0 until resize)
- *   - DirectGraphics_isReady(void)            : bool (framebuffer bound)
+ *   - RasterGraphics_getFramebuffer(void)     : Buffer * (null until resize)
+ *   - RasterGraphics_getWidth(void)           : uint32_t (0 until resize)
+ *   - RasterGraphics_getHeight(void)          : uint32_t (0 until resize)
+ *   - RasterGraphics_isReady(void)            : bool (framebuffer bound)
  *
  * Private Getters: (.c static)
  *   - ready(void)                             : Test if framebuffer is bound
  * ============================================================================
  */
 
-#define DIRECT_FLAT_FLOATS 4096u
-#define DIRECT_CUBIC_STEPS 8u
+#define RASTER_FLAT_FLOATS 4096u
+#define RASTER_CUBIC_STEPS 8u
 
 // The file-local singleton: zero-initialized — framebuffer NULL, so
-// every verb cold-returns false until DirectGraphics_resize succeeds.
-static DirectGraphics directGraphics;
+// every verb cold-returns false until RasterGraphics_resize succeeds.
+static RasterGraphics rasterGraphics;
 
 typedef struct FlatPath {
-    float pts[DIRECT_FLAT_FLOATS];  // interleaved x,y
+    float pts[RASTER_FLAT_FLOATS];  // interleaved x,y
     uint32_t count;                 // number of points (pairs)
     bool closed;
 } FlatPath;
@@ -135,7 +135,7 @@ typedef struct FlatPath {
 // --- private helpers -------------------------------------------------------
 
 static bool ready(void) {
-    return directGraphics.framebuffer != nullptr;
+    return rasterGraphics.framebuffer != nullptr;
 }
 
 static bool brushRgba(const Brush *brush, uint32_t *outRgba) {
@@ -160,19 +160,19 @@ static void putPixel(int32_t x, int32_t y, uint32_t rgba) {
         return;
     if (x < 0 || y < 0)
         return;
-    if (x >= (int32_t) directGraphics.width || y >= (int32_t) directGraphics.height)
+    if (x >= (int32_t) rasterGraphics.width || y >= (int32_t) rasterGraphics.height)
         return;
-    if (directGraphics.clipEnabled) {
+    if (rasterGraphics.clipEnabled) {
         float fx = (float) x;
         float fy = (float) y;
-        if (fx < directGraphics.clipX || fy < directGraphics.clipY)
+        if (fx < rasterGraphics.clipX || fy < rasterGraphics.clipY)
             return;
-        if (fx >= directGraphics.clipX + directGraphics.clipW)
+        if (fx >= rasterGraphics.clipX + rasterGraphics.clipW)
             return;
-        if (fy >= directGraphics.clipY + directGraphics.clipH)
+        if (fy >= rasterGraphics.clipY + rasterGraphics.clipH)
             return;
     }
-    Buffer *fb = directGraphics.framebuffer;
+    Buffer *fb = rasterGraphics.framebuffer;
     Buffer_setPixel(fb, (size_t) x, (size_t) y, 0u, (uint64_t) ((rgba >> 24) & 0xFFu));
     Buffer_setPixel(fb, (size_t) x, (size_t) y, 1u, (uint64_t) ((rgba >> 16) & 0xFFu));
     Buffer_setPixel(fb, (size_t) x, (size_t) y, 2u, (uint64_t) ((rgba >> 8) & 0xFFu));
@@ -182,8 +182,8 @@ static void putPixel(int32_t x, int32_t y, uint32_t rgba) {
 static void fillBox(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t rgba) {
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
-    int32_t dw = (int32_t) directGraphics.width;
-    int32_t dh = (int32_t) directGraphics.height;
+    int32_t dw = (int32_t) rasterGraphics.width;
+    int32_t dh = (int32_t) rasterGraphics.height;
     if (x1 > dw) x1 = dw;
     if (y1 > dh) y1 = dh;
     if (x1 <= x0 || y1 <= y0)
@@ -193,7 +193,7 @@ static void fillBox(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t rgb
             putPixel(x, y, rgba);
 }
 
-// Flatten the shape into a polyline (cubics subdivided DIRECT_CUBIC_STEPS).
+// Flatten the shape into a polyline (cubics subdivided RASTER_CUBIC_STEPS).
 // Returns false on empty or oversized paths (reject policy in overview).
 static bool flattenShape(const Shape *shape, FlatPath *out) {
     if (!shape || !out)
@@ -211,7 +211,7 @@ static bool flattenShape(const Shape *shape, FlatPath *out) {
             curX = (double) (*shape).points[pointIdx * 2u];
             curY = (double) (*shape).points[pointIdx * 2u + 1u];
             pointIdx++;
-            if ((*out).count + 1u > DIRECT_FLAT_FLOATS / 2u)
+            if ((*out).count + 1u > RASTER_FLAT_FLOATS / 2u)
                 return false;
             (*out).pts[(*out).count * 2u] = (float) curX;
             (*out).pts[(*out).count * 2u + 1u] = (float) curY;
@@ -220,7 +220,7 @@ static bool flattenShape(const Shape *shape, FlatPath *out) {
             double x = (double) (*shape).points[pointIdx * 2u];
             double y = (double) (*shape).points[pointIdx * 2u + 1u];
             pointIdx++;
-            if ((*out).count + 1u > DIRECT_FLAT_FLOATS / 2u)
+            if ((*out).count + 1u > RASTER_FLAT_FLOATS / 2u)
                 return false;
             (*out).pts[(*out).count * 2u] = (float) x;
             (*out).pts[(*out).count * 2u + 1u] = (float) y;
@@ -235,14 +235,14 @@ static bool flattenShape(const Shape *shape, FlatPath *out) {
             double x3 = (double) (*shape).points[pointIdx * 2u + 4u];
             double y3 = (double) (*shape).points[pointIdx * 2u + 5u];
             pointIdx += 3u;
-            for (uint32_t s = 1u; s <= DIRECT_CUBIC_STEPS; s++) {
-                double t = (double) s / (double) DIRECT_CUBIC_STEPS;
+            for (uint32_t s = 1u; s <= RASTER_CUBIC_STEPS; s++) {
+                double t = (double) s / (double) RASTER_CUBIC_STEPS;
                 double mt = 1.0 - t;
                 double mt2 = mt * mt;
                 double t2 = t * t;
                 double x = mt2 * mt * curX + 3.0 * mt2 * t * c1x + 3.0 * mt * t2 * c2x + t2 * t * x3;
                 double y = mt2 * mt * curY + 3.0 * mt2 * t * c1y + 3.0 * mt * t2 * c2y + t2 * t * y3;
-                if ((*out).count + 1u > DIRECT_FLAT_FLOATS / 2u)
+                if ((*out).count + 1u > RASTER_FLAT_FLOATS / 2u)
                     return false;
                 (*out).pts[(*out).count * 2u] = (float) x;
                 (*out).pts[(*out).count * 2u + 1u] = (float) y;
@@ -271,13 +271,13 @@ static void scanlineFill(const FlatPath *fp, uint32_t rgba) {
     }
     int32_t yMin = (int32_t) minY;
     int32_t yMax = (int32_t) (maxY + 1.0);
-    if (yMax < 0 || yMin >= (int32_t) directGraphics.height)
+    if (yMax < 0 || yMin >= (int32_t) rasterGraphics.height)
         return;
     if (yMin < 0) yMin = 0;
-    int32_t dh = (int32_t) directGraphics.height;
+    int32_t dh = (int32_t) rasterGraphics.height;
     if (yMax > dh)
         yMax = dh;
-    int32_t xs[DIRECT_FLAT_FLOATS];
+    int32_t xs[RASTER_FLAT_FLOATS];
     for (int32_t py = yMin; py < yMax; py++) {
         double fy = (double) py + 0.5;
         uint32_t cross = 0u;
@@ -295,7 +295,7 @@ static void scanlineFill(const FlatPath *fp, uint32_t rgba) {
             double t = (fy - y0) / (y1 - y0);
             double x = x0 + t * (x1 - x0);
             int32_t xi = (int32_t) x;
-            if (cross + 1u <= DIRECT_FLAT_FLOATS) {
+            if (cross + 1u <= RASTER_FLAT_FLOATS) {
                 xs[cross] = xi;
                 cross++;
             }
@@ -338,38 +338,53 @@ static bool implPresent(void) {
 static bool implResize(uint32_t width, uint32_t height) {
     if (width == 0u || height == 0u)
         return false;
-    Buffer *fb = Buffer_4(ID_DIRECT_GRAPHICS, width, height, 4u);
+    Buffer *fb = Buffer_4(ID_RASTER_GRAPHICS, width, height, 4u);
     if (!fb)
         return false;
-    Buffer *old = directGraphics.framebuffer;
+    Buffer *old = rasterGraphics.framebuffer;
     if (old)
         Buffer_free(old);
-    directGraphics.framebuffer = fb;
-    directGraphics.width = width;
-    directGraphics.height = height;
-    directGraphics.clipEnabled = false;
+    rasterGraphics.framebuffer = fb;
+    rasterGraphics.width = width;
+    rasterGraphics.height = height;
+    rasterGraphics.clipEnabled = false;
+    return true;
+}
+
+bool RasterGraphics_setFramebuffer(Buffer *fb, uint32_t width, uint32_t height) {
+    if (fb == nullptr)
+        return false;
+    if (width == 0u || height == 0u)
+        return false;
+    if (Buffer_width(fb) != (size_t) width || Buffer_height(fb) != (size_t) height)
+        return false; // the row bounds-checks against width/height — the buffer must match
+    if (Buffer_channels(fb) != 4u)
+        return false; // the row's channel contract: ch0=A, ch1=R, ch2=G, ch3=B
+    rasterGraphics.framebuffer = fb;
+    rasterGraphics.width = width;
+    rasterGraphics.height = height;
     return true;
 }
 
 static bool implClear(uint32_t color) {
     if (!ready())
         return false;
-    fillBox(0, 0, (int32_t) directGraphics.width, (int32_t) directGraphics.height, color);
+    fillBox(0, 0, (int32_t) rasterGraphics.width, (int32_t) rasterGraphics.height, color);
     return true;
 }
 
 static bool implClip(const Rectangle *rect) {
-    if (!directGraphics.framebuffer)
+    if (!rasterGraphics.framebuffer)
         return false;
     if (rect == nullptr) {
-        directGraphics.clipEnabled = false;
+        rasterGraphics.clipEnabled = false;
         return true;
     }
-    directGraphics.clipEnabled = true;
-    directGraphics.clipX = (*rect).x;
-    directGraphics.clipY = (*rect).y;
-    directGraphics.clipW = (*rect).width;
-    directGraphics.clipH = (*rect).height;
+    rasterGraphics.clipEnabled = true;
+    rasterGraphics.clipX = (*rect).x;
+    rasterGraphics.clipY = (*rect).y;
+    rasterGraphics.clipW = (*rect).width;
+    rasterGraphics.clipH = (*rect).height;
     return true;
 }
 
@@ -548,16 +563,16 @@ static bool implDrawImage(const Image *image, const Rectangle *dst) {
         for (int32_t px = x0; px < x1; px++) {
             if (px < 0 || py < 0)
                 continue;
-            if (px >= (int32_t) directGraphics.width || py >= (int32_t) directGraphics.height)
+            if (px >= (int32_t) rasterGraphics.width || py >= (int32_t) rasterGraphics.height)
                 continue;
-            if (directGraphics.clipEnabled) {
+            if (rasterGraphics.clipEnabled) {
                 float fx = (float) px;
                 float fy = (float) py;
-                if (fx < directGraphics.clipX || fy < directGraphics.clipY)
+                if (fx < rasterGraphics.clipX || fy < rasterGraphics.clipY)
                     continue;
-                if (fx >= directGraphics.clipX + directGraphics.clipW)
+                if (fx >= rasterGraphics.clipX + rasterGraphics.clipW)
                     continue;
-                if (fy >= directGraphics.clipY + directGraphics.clipH)
+                if (fy >= rasterGraphics.clipY + rasterGraphics.clipH)
                     continue;
             }
             int32_t sx = (int32_t) (((float) (px - x0) + 0.5f) * (float) srcW / dw);
@@ -584,8 +599,8 @@ static bool implDrawImage(const Image *image, const Rectangle *dst) {
 
 // --- the row ---------------------------------------------------------------
 
-static const Graphics directRow = {
-    .backendId = GRAPHICS_BACKEND_DIRECT,
+static const Graphics rasterRow = {
+    .backendId = GRAPHICS_BACKEND_RASTER,
     .begin = implBegin,
     .end = implEnd,
     .present = implPresent,
@@ -605,17 +620,17 @@ static const Graphics directRow = {
 // CONSTRUCTORS (PUBLIC & PRIVATE)
 // ============================================================================
 
-// (none — DirectGraphics is a process-global static singleton)
+// (none — RasterGraphics is a process-global static singleton)
 
 // ============================================================================
 // CORE FUNCTIONS (PUBLIC & PRIVATE)
 // ============================================================================
 
-const Graphics *DirectGraphics_getRow(void) {
-    return &directRow;
+const Graphics *RasterGraphics_getRow(void) {
+    return &rasterRow;
 }
 
-bool DirectGraphics_resize(uint32_t width, uint32_t height) {
+bool RasterGraphics_resize(uint32_t width, uint32_t height) {
     return implResize(width, height);
 }
 
@@ -630,21 +645,21 @@ bool DirectGraphics_resize(uint32_t width, uint32_t height) {
 // ============================================================================
 
 ;;GETTER
-Buffer *DirectGraphics_getFramebuffer(void) {
-    return directGraphics.framebuffer;
+Buffer *RasterGraphics_getFramebuffer(void) {
+    return rasterGraphics.framebuffer;
 }
 
 ;;GETTER
-uint32_t DirectGraphics_getWidth(void) {
-    return directGraphics.width;
+uint32_t RasterGraphics_getWidth(void) {
+    return rasterGraphics.width;
 }
 
 ;;GETTER
-uint32_t DirectGraphics_getHeight(void) {
-    return directGraphics.height;
+uint32_t RasterGraphics_getHeight(void) {
+    return rasterGraphics.height;
 }
 
 ;;GETTER
-bool DirectGraphics_isReady(void) {
+bool RasterGraphics_isReady(void) {
     return ready();
 }

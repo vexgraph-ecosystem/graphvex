@@ -15,7 +15,7 @@
 //
 // BYTE ORDER: alpha-first ARGB8 (byte 0 = ALPHA, 1 = RED, 2 = GREEN,
 // 3 = BLUE), mirroring the 0xAARRGGBB stored word per the Strict Color Law.
-// The software row (direct_graphics) consumes bytes verbatim: byte 0 feeds
+// The software row (raster_graphics) consumes bytes verbatim: byte 0 feeds
 // channel 0 (alpha).
 
 typedef struct Image {
