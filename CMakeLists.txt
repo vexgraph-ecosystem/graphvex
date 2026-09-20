@@ -38,7 +38,7 @@ endif()
 if(NOT TARGET graphvex)
 add_library(graphvex STATIC
     src/graphvex/version.c
-    src/graphvex/gfx_loop.c
+    src/graphvex/graphics_loop.c
     src/buffer/buffer.c
     src/buffer/color_buffer.c
     src/buffer/depth_buffer.c
@@ -166,13 +166,13 @@ if(EXISTS "${GRAPHVEX_TEST_DIR}/texture_retire_test.c" AND NOT TARGET texture_re
     target_link_libraries(texture_retire_test PRIVATE graphvex)
 endif()
 
-# GfxLoop demand-driven scheduler and 2-VkImage bridge test
-if(EXISTS "${GRAPHVEX_TEST_DIR}/gfx_loop_test.c" AND NOT TARGET gfx_loop_test)
-    add_executable(gfx_loop_test
-        ${GRAPHVEX_TEST_DIR}/gfx_loop_test.c
+# GraphicsLoop demand-driven scheduler, per-window presentation, and 2-VkImage bridge test
+if(EXISTS "${GRAPHVEX_TEST_DIR}/graphics_loop_test.c" AND NOT TARGET graphics_loop_test)
+    add_executable(graphics_loop_test
+        ${GRAPHVEX_TEST_DIR}/graphics_loop_test.c
     )
-    target_link_libraries(gfx_loop_test PRIVATE graphvex)
-    target_compile_options(gfx_loop_test PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(graphics_loop_test PRIVATE graphvex)
+    target_compile_options(graphics_loop_test PRIVATE -Wall -Wextra -Werror)
 endif()
 
 # Unified Graphics seam: setGraphics/forwarder cold matrix + DirectGraphics
