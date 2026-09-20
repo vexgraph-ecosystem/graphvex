@@ -6,7 +6,26 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Meshlet
+ * ============================================================================
+ * 128-triangle cluster geometry slice representing a sub-mesh segment of a parent Mesh.
+ * Operates as a lightweight borrowed view that neither owns nor frees the underlying
+ * mesh vertex or index buffers.
+ *
+ * Encapsulates cluster-local bounding boxes and surface normal cones for early GPU
+ * frustum and backface cluster culling. Packs 64-bit aligned cluster headers and
+ * localized 8-bit index arrays into discrete GPU payload dispatches in compliance
+ * with the Unified Graphics Abstraction Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -43,33 +62,45 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Meshlet()                              : Meshlet_0()
- *   - Meshlet(mesh, meshletIndex)            : Meshlet_2(mesh, meshletIndex)
+ * Public Constructors: (.h)
+ *   - Meshlet_0(void)                               : Allocate empty cluster slice
+ *   - Meshlet_2(mesh, meshletIndex)                 : Slice cluster from parent Mesh
  *
- * Core Functions:
- *   - Meshlet_free(self)
- *   - Meshlet_build(mesh, meshletIndex, dest)
- *   - Meshlet_pack(self, outBytes, maxBytes)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Meshlet_setMesh(self, mesh)
- *   - Meshlet_setVertexOffset(self, offset)
- *   - Meshlet_setVertexCount(self, count)
- *   - Meshlet_setTriangleOffset(self, offset)
- *   - Meshlet_setTriangleCount(self, count)
- *   - Meshlet_setBounds(self, bounds6)
- *   - Meshlet_setCone(self, cone4)
+ * Public Core Functions: (.h)
+ *   - Meshlet_free(self)                            : Release cluster slice container
+ *   - Meshlet_build(mesh, meshletIndex, dest)       : Build cluster bounds and cone
+ *   - Meshlet_pack(self, outBytes, maxBytes)        : Pack GPU cluster payload bytes
  *
- * Getters:
- *   - Meshlet_getMesh(self)
- *   - Meshlet_getVertexOffset(self)
- *   - Meshlet_getVertexCount(self)
- *   - Meshlet_getTriangleOffset(self)
- *   - Meshlet_getTriangleCount(self)
- *   - Meshlet_getTypeId(self)
- *   - Meshlet_getBounds(self, outBounds6)
- *   - Meshlet_getCone(self, outCone4)
+ * Private Core Functions: (.c static)
+ *   - meshletInitDefaults(self)                     : Zero-initialize struct state
+ *
+ * Public Setters: (.h)
+ *   - Meshlet_setMesh(self, mesh)                   : Set parent borrowed mesh
+ *   - Meshlet_setVertexOffset(self, offset)         : Set cluster base vertex index
+ *   - Meshlet_setVertexCount(self, count)           : Set cluster vertex span
+ *   - Meshlet_setTriangleOffset(self, offset)       : Set cluster triangle start
+ *   - Meshlet_setTriangleCount(self, count)         : Set cluster triangle count
+ *   - Meshlet_setBounds(self, bounds6)              : Set cluster bounding box
+ *   - Meshlet_setCone(self, cone4)                  : Set cluster normal cone
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Meshlet_getMesh(self)                         : Query borrowed parent mesh
+ *   - Meshlet_getVertexOffset(self)                 : Query cluster base vertex
+ *   - Meshlet_getVertexCount(self)                  : Query cluster vertex count
+ *   - Meshlet_getTriangleOffset(self)               : Query cluster triangle start
+ *   - Meshlet_getTriangleCount(self)                : Query cluster triangle count
+ *   - Meshlet_getTypeId(self)                       : Query block type ID
+ *   - Meshlet_getBounds(self, outBounds6)           : Query cluster bounding box
+ *   - Meshlet_getCone(self, outCone4)               : Query cluster normal cone
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -97,7 +128,10 @@ static void meshletInitDefaults(Meshlet *self) {
     (*self).typeId = TYPE_MESHLET_SINGLETON;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 
 Meshlet *Meshlet_0(void) {
     Meshlet *self = (Meshlet*) Memory_alloc(TYPE_MESHLET_SINGLETON, sizeof(Meshlet));
@@ -121,7 +155,9 @@ Meshlet *Meshlet_2(const Mesh *mesh, uint32_t meshletIndex) {
     return self;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 void Meshlet_free(Meshlet *self) {
     if (!self)
@@ -343,38 +379,46 @@ uint32_t Meshlet_pack(const Meshlet *self, uint8_t *outBytes, size_t maxBytes) {
     return (uint32_t) totalBytes;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;SETTER
 void Meshlet_setMesh(Meshlet *self, const Mesh *mesh) {
     if (!self)
         return;
     (*self).mesh = mesh;
 }
 
+;;SETTER
 void Meshlet_setVertexOffset(Meshlet *self, uint32_t offset) {
     if (!self)
         return;
     (*self).vertexOffset = offset;
 }
 
+;;SETTER
 void Meshlet_setVertexCount(Meshlet *self, uint32_t count) {
     if (!self)
         return;
     (*self).vertexCount = count;
 }
 
+;;SETTER
 void Meshlet_setTriangleOffset(Meshlet *self, uint32_t offset) {
     if (!self)
         return;
     (*self).triangleOffset = offset;
 }
 
+;;SETTER
 void Meshlet_setTriangleCount(Meshlet *self, uint32_t count) {
     if (!self)
         return;
     (*self).triangleCount = count;
 }
 
+;;SETTER
 void Meshlet_setBounds(Meshlet *self, const float *bounds6) {
     if (!self || !bounds6)
         return;
@@ -382,6 +426,7 @@ void Meshlet_setBounds(Meshlet *self, const float *bounds6) {
         (*self).bounds[i] = bounds6[i];
 }
 
+;;SETTER
 void Meshlet_setCone(Meshlet *self, const float *cone4) {
     if (!self || !cone4)
         return;
@@ -389,32 +434,41 @@ void Meshlet_setCone(Meshlet *self, const float *cone4) {
         (*self).cone[i] = cone4[i];
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;GETTER
 const Mesh *Meshlet_getMesh(const Meshlet *self) {
     return self ? (*self).mesh : nullptr;
 }
 
+;;GETTER
 uint32_t Meshlet_getVertexOffset(const Meshlet *self) {
     return self ? (*self).vertexOffset : 0u;
 }
 
+;;GETTER
 uint32_t Meshlet_getVertexCount(const Meshlet *self) {
     return self ? (*self).vertexCount : 0u;
 }
 
+;;GETTER
 uint32_t Meshlet_getTriangleOffset(const Meshlet *self) {
     return self ? (*self).triangleOffset : 0u;
 }
 
+;;GETTER
 uint32_t Meshlet_getTriangleCount(const Meshlet *self) {
     return self ? (*self).triangleCount : 0u;
 }
 
+;;GETTER
 uint64_t Meshlet_getTypeId(const Meshlet *self) {
     return self ? (*self).typeId : 0;
 }
 
+;;GETTER
 void Meshlet_getBounds(const Meshlet *self, float *outBounds6) {
     if (!outBounds6)
         return;
@@ -427,6 +481,7 @@ void Meshlet_getBounds(const Meshlet *self, float *outBounds6) {
         outBounds6[i] = (*self).bounds[i];
 }
 
+;;GETTER
 void Meshlet_getCone(const Meshlet *self, float *outCone4) {
     if (!outCone4)
         return;

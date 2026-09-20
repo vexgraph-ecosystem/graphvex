@@ -7,8 +7,26 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "io/vfs.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Mesh
+ * ============================================================================
+ * 3D polygonal mesh container managing contiguous off-heap vertex attribute and index arrays.
+ * Encodes 8-float interleaved vertex records (position, normal, UV texture coordinates)
+ * and 32-bit triangle index buffers.
+ *
+ * Implements high-performance Wavefront OBJ stream parsing with deduplication,
+ * memory-based geometry synthesis, and automated axis-aligned bounding box recomputation
+ * in compliance with the Unified Graphics Abstraction Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -45,28 +63,42 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Mesh()                                 : Mesh_0()
- *   - Mesh(vertexCount, indexCount)          : Mesh_2(vertexCount, indexCount)
+ * Public Constructors: (.h)
+ *   - Mesh_0(void)                           : Allocate empty mesh instance
+ *   - Mesh_2(vertexCount, indexCount)        : Allocate sized mesh instance
  *
- * Core Functions:
- *   - Mesh_free(self)
- *   - Mesh_fromObj(path, dest)
- *   - Mesh_fromMemory(objData, len, dest)
- *   - Mesh_recomputeBounds(self)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Mesh_setVertices(self, verts, count)
- *   - Mesh_setIndices(self, indices, count)
- *   - Mesh_setBounds(self, bounds6)
+ * Public Core Functions: (.h)
+ *   - Mesh_free(self)                        : Release mesh vertex/index heap storage
+ *   - Mesh_fromObj(path, dest)               : Load OBJ geometry from VFS file
+ *   - Mesh_fromMemory(objData, len, dest)    : Parse OBJ geometry from memory buffer
+ *   - Mesh_recomputeBounds(self)             : Recalculate axis-aligned bounding box
  *
- * Getters:
- *   - Mesh_getVertexCount(self)
- *   - Mesh_getIndexCount(self)
- *   - Mesh_getVertices(self)
- *   - Mesh_getIndices(self)
- *   - Mesh_getTypeId(self)
- *   - Mesh_getBounds(self, outBounds6)
+ * Private Core Functions: (.c static)
+ *   - meshFreeBlob(blob)                     : Free heap or typed memory blob
+ *   - hashVertex(v, vt, vn)                  : Fast multiplicative vertex hash
+ *   - parseFaceLine(...)                     : Parse OBJ face polygon indices
+ *
+ * Public Setters: (.h)
+ *   - Mesh_setVertices(self, verts, count)   : Replace vertex attribute buffer
+ *   - Mesh_setIndices(self, indices, count)  : Replace index element buffer
+ *   - Mesh_setBounds(self, bounds6)          : Set explicit axis-aligned bounds
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Mesh_getVertexCount(self)              : Query total 8-float vertex count
+ *   - Mesh_getIndexCount(self)               : Query total triangle index count
+ *   - Mesh_getVertices(self)                 : Query immutable vertex attribute pointer
+ *   - Mesh_getIndices(self)                  : Query immutable index element pointer
+ *   - Mesh_getTypeId(self)                   : Query block type identifier
+ *   - Mesh_getBounds(self, outBounds6)       : Retrieve 6-float bounding box extents
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -117,26 +149,27 @@ static size_t countFaceTokens(const char *p, const char *end) {
     return count;
 }
 
-static size_t parseFaceLine(const char *p, const char *end, ObjFaceCorner *corners, size_t maxCorners) {
+static size_t parseFaceLine(const char *line, const char *end, ObjFaceCorner *corners, size_t maxCorners) {
+    const char *p = line;
     size_t count = 0;
-    while (p < end && *p != '\n' && *p != '\r') {
+    while (p < end && count < maxCorners) {
         while (p < end && (*p == ' ' || *p == '\t'))
             p++;
-        if (p >= end || *p == '\n' || *p == '\r' || *p == '#')
+        if (p >= end || *p == '\n' || *p == '\r')
             break;
-        if (count < maxCorners) {
-            char *endptr = nullptr;
-            int32_t v = (int32_t) strtol(p, &endptr, 10);
-            p = endptr;
+        char *endptr = nullptr;
+        int32_t v = (int32_t) strtol(p, &endptr, 10);
+        if (endptr != p) {
             int32_t vt = 0;
             int32_t vn = 0;
-            if (*p == '/') {
+            p = endptr;
+            if (p < end && *p == '/') {
                 p++;
-                if (*p != '/') {
+                if (p < end && *p != '/') {
                     vt = (int32_t) strtol(p, &endptr, 10);
                     p = endptr;
                 }
-                if (*p == '/') {
+                if (p < end && *p == '/') {
                     p++;
                     vn = (int32_t) strtol(p, &endptr, 10);
                     p = endptr;
@@ -154,7 +187,9 @@ static size_t parseFaceLine(const char *p, const char *end, ObjFaceCorner *corne
     return count;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
 Mesh *Mesh_0(void) {
     return Mesh_2(0, 0);
@@ -198,7 +233,9 @@ Mesh *Mesh_2(size_t vertexCount, size_t indexCount) {
     return self;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 void Mesh_free(Mesh *self) {
     if (!self)
@@ -648,8 +685,11 @@ void Mesh_recomputeBounds(Mesh *self) {
     (*self).bounds[5] = maxZ;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;SETTER
 void Mesh_setVertices(Mesh *self, const float *verts, size_t count) {
     if (!self)
         return;
@@ -672,6 +712,7 @@ void Mesh_setVertices(Mesh *self, const float *verts, size_t count) {
     }
 }
 
+;;SETTER
 void Mesh_setIndices(Mesh *self, const uint32_t *indices, size_t count) {
     if (!self)
         return;
@@ -693,6 +734,7 @@ void Mesh_setIndices(Mesh *self, const uint32_t *indices, size_t count) {
     }
 }
 
+;;SETTER
 void Mesh_setBounds(Mesh *self, const float *bounds6) {
     if (!self || !bounds6)
         return;
@@ -700,28 +742,36 @@ void Mesh_setBounds(Mesh *self, const float *bounds6) {
         (*self).bounds[i] = bounds6[i];
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;GETTER
 size_t Mesh_getVertexCount(const Mesh *self) {
     return self ? (*self).vertexCount : 0;
 }
 
+;;GETTER
 size_t Mesh_getIndexCount(const Mesh *self) {
     return self ? (*self).indexCount : 0;
 }
 
+;;GETTER
 const float *Mesh_getVertices(const Mesh *self) {
     return self ? (*self).vertices : nullptr;
 }
 
+;;GETTER
 const uint32_t *Mesh_getIndices(const Mesh *self) {
     return self ? (*self).indices : nullptr;
 }
 
+;;GETTER
 uint64_t Mesh_getTypeId(const Mesh *self) {
     return self ? (*self).typeId : 0;
 }
 
+;;GETTER
 void Mesh_getBounds(const Mesh *self, float *outBounds6) {
     if (!outBounds6)
         return;
