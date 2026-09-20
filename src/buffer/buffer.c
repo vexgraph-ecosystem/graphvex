@@ -5,7 +5,25 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Buffer
+ * ============================================================================
+ * Core off-heap 2D multi-channel raster buffer memory management engine.
+ * Wraps contiguous 64-bit element arrays tagged with block-header type metadata
+ * across width, height, and channel dimensions.
+ *
+ * Provides safe dynamic memory reallocation, sub-region blitting, memory copying,
+ * and bilinear interpolation sampling for 2D graphics rasterization, texture staging,
+ * and multi-pass composition in compliance with the Unified Graphics Abstraction Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -30,37 +48,50 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Buffer_4(classId, width, height, channels)
+ * Public Constructors: (.h)
+ *   - Buffer_4(classId, width, height, channels) : Allocate multi-channel buffer
  *
- * Core Functions:
- *   - Buffer_expand(buf, newWidth, newHeight)
- *   - Buffer_free(buf)
- *   - Buffer_width(buf)
- *   - Buffer_height(buf)
- *   - Buffer_channels(buf)
- *   - Buffer_length(buf)
- *   - Buffer_type(buf)
- *   - Buffer_classId(buf)
- *   - Buffer_data(buf)
- *   - Buffer_constData(buf)
- *   - Buffer_clear(buf, clearValue)
- *   - Buffer_copy(src, dst)
- *   - Buffer_blit(src, dst, srcX, srcY, dstX, dstY, width, height)
- *   - Buffer_sample(buf, u, v, channel)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Buffer_set(buf, index, value)
- *   - Buffer_setPixel(buf, x, y, channel, value)
+ * Public Core Functions: (.h)
+ *   - Buffer_expand(buf, newWidth, newHeight)    : Expand buffer preserving content
+ *   - Buffer_free(buf)                           : Release buffer heap memory
+ *   - Buffer_clear(buf, clearValue)              : Fill buffer with value
+ *   - Buffer_copy(src, dst)                      : Direct buffer memory copy
+ *   - Buffer_blit(src, dst, ...)                 : Sub-region blit transfer
+ *   - Buffer_sample(buf, u, v, channel)          : Bilinear channel sampling
  *
- * Getters:
- *   - Buffer_get(buf, index)
- *   - Buffer_getPixel(buf, x, y, channel)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Buffer_set(buf, index, value)              : Linear index value assignment
+ *   - Buffer_setPixel(buf, x, y, channel, value) : 2D coordinate value assignment
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Buffer_width(buf)                          : Query raster pixel width
+ *   - Buffer_height(buf)                         : Query raster pixel height
+ *   - Buffer_channels(buf)                       : Query raster channel count
+ *   - Buffer_length(buf)                         : Query total element count
+ *   - Buffer_type(buf)                           : Query type ID descriptor
+ *   - Buffer_classId(buf)                        : Query class identifier
+ *   - Buffer_data(buf)                           : Query mutable element array pointer
+ *   - Buffer_constData(buf)                      : Query immutable element array pointer
+ *   - Buffer_get(buf, index)                     : Query linear index element value
+ *   - Buffer_getPixel(buf, x, y, channel)        : Query 2D coordinate channel value
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-
-// buffer.c — Core 2D multi-channel raster buffer implementation.
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
 Buffer *Buffer_4(uint32_t classId, size_t width, size_t height, size_t channels) {
     if (width == 0 || height == 0 || channels == 0)
@@ -84,6 +115,10 @@ Buffer *Buffer_4(uint32_t classId, size_t width, size_t height, size_t channels)
     memset((*buf).data, 0, length * sizeof(uint64_t));
     return buf;
 }
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 Buffer *Buffer_expand(Buffer *buf, size_t newWidth, size_t newHeight) {
     if (!buf) return nullptr;
@@ -111,64 +146,6 @@ Buffer *Buffer_expand(Buffer *buf, size_t newWidth, size_t newHeight) {
 void Buffer_free(Buffer *buf) {
     if (!buf) return;
     Memory_free(buf);
-}
-
-size_t Buffer_width(const Buffer *buf) {
-    return buf ? (*buf).width : 0;
-}
-
-size_t Buffer_height(const Buffer *buf) {
-    return buf ? (*buf).height : 0;
-}
-
-size_t Buffer_channels(const Buffer *buf) {
-    return buf ? (*buf).channels : 0;
-}
-
-size_t Buffer_length(const Buffer *buf) {
-    return buf ? (*buf).length : 0;
-}
-
-uint64_t Buffer_type(const Buffer *buf) {
-    return buf ? (*buf).typeId : 0;
-}
-
-uint32_t Buffer_classId(const Buffer *buf) {
-    return buf ? Type_class((*buf).typeId) : 0;
-}
-
-uint64_t *Buffer_data(Buffer *buf) {
-    return buf ? (*buf).data : nullptr;
-}
-
-const uint64_t *Buffer_constData(const Buffer *buf) {
-    return buf ? (*buf).data : nullptr;
-}
-
-uint64_t Buffer_get(const Buffer *buf, size_t index) {
-    if (!buf || index >= (*buf).length)
-        return 0;
-    return (*buf).data[index];
-}
-
-void Buffer_set(Buffer *buf, size_t index, uint64_t value) {
-    if (!buf || index >= (*buf).length)
-        return;
-    (*buf).data[index] = value;
-}
-
-uint64_t Buffer_getPixel(const Buffer *buf, size_t x, size_t y, size_t channel) {
-    if (!buf || x >= (*buf).width || y >= (*buf).height || channel >= (*buf).channels)
-        return 0;
-    size_t idx = (y * (*buf).width + x) * (*buf).channels + channel;
-    return (*buf).data[idx];
-}
-
-void Buffer_setPixel(Buffer *buf, size_t x, size_t y, size_t channel, uint64_t value) {
-    if (!buf || x >= (*buf).width || y >= (*buf).height || channel >= (*buf).channels)
-        return;
-    size_t idx = (y * (*buf).width + x) * (*buf).channels + channel;
-    (*buf).data[idx] = value;
 }
 
 void Buffer_clear(Buffer *buf, uint64_t clearValue) {
@@ -239,4 +216,82 @@ float Buffer_sample(const Buffer *buf, float u, float v, size_t channel) {
     float top = v00 + tx * (v10 - v00);
     float bot = v01 + tx * (v11 - v01);
     return top + ty * (bot - top);
+}
+
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
+void Buffer_set(Buffer *buf, size_t index, uint64_t value) {
+    if (!buf || index >= (*buf).length)
+        return;
+    (*buf).data[index] = value;
+}
+
+;;SETTER
+void Buffer_setPixel(Buffer *buf, size_t x, size_t y, size_t channel, uint64_t value) {
+    if (!buf || x >= (*buf).width || y >= (*buf).height || channel >= (*buf).channels)
+        return;
+    size_t idx = (y * (*buf).width + x) * (*buf).channels + channel;
+    (*buf).data[idx] = value;
+}
+
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
+size_t Buffer_width(const Buffer *buf) {
+    return buf ? (*buf).width : 0;
+}
+
+;;GETTER
+size_t Buffer_height(const Buffer *buf) {
+    return buf ? (*buf).height : 0;
+}
+
+;;GETTER
+size_t Buffer_channels(const Buffer *buf) {
+    return buf ? (*buf).channels : 0;
+}
+
+;;GETTER
+size_t Buffer_length(const Buffer *buf) {
+    return buf ? (*buf).length : 0;
+}
+
+;;GETTER
+uint64_t Buffer_type(const Buffer *buf) {
+    return buf ? (*buf).typeId : 0;
+}
+
+;;GETTER
+uint32_t Buffer_classId(const Buffer *buf) {
+    return buf ? Type_class((*buf).typeId) : 0;
+}
+
+;;GETTER
+uint64_t *Buffer_data(Buffer *buf) {
+    return buf ? (*buf).data : nullptr;
+}
+
+;;GETTER
+const uint64_t *Buffer_constData(const Buffer *buf) {
+    return buf ? (*buf).data : nullptr;
+}
+
+;;GETTER
+uint64_t Buffer_get(const Buffer *buf, size_t index) {
+    if (!buf || index >= (*buf).length)
+        return 0;
+    return (*buf).data[index];
+}
+
+;;GETTER
+uint64_t Buffer_getPixel(const Buffer *buf, size_t x, size_t y, size_t channel) {
+    if (!buf || x >= (*buf).width || y >= (*buf).height || channel >= (*buf).channels)
+        return 0;
+    size_t idx = (y * (*buf).width + x) * (*buf).channels + channel;
+    return (*buf).data[idx];
 }

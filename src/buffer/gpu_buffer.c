@@ -4,7 +4,24 @@
 
 #include "nio/mem.h"
 #include "graphvex/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: GpuBuffer
+ * ============================================================================
+ * Device-visible storage, uniform, vertex, and index buffer abstraction with
+ * an integrated host-side CPU shadow buffer.
+ *
+ * Maintains a coherent byte mirror of the underlying GPU memory range, permitting
+ * headless testing, staging, and upload or download validation without requiring
+ * an active graphics device context in compliance with the Unified Graphics Abstraction Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -29,28 +46,41 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - GpuBuffer()                : GpuBuffer_0()
- *   - GpuBuffer(size, usage)     : GpuBuffer_2(size, usage)
+ * Public Constructors: (.h)
+ *   - GpuBuffer_0(void)                  : Allocate empty buffer instance
+ *   - GpuBuffer_2(size, usage)           : Allocate sized buffer with role usage
  *
- * Core Functions:
- *   - GpuBuffer_free(self)
- *   - GpuBuffer_upload(data, n, dest)
- *   - GpuBuffer_download(self, data, n)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - GpuBuffer_setSize(self, size)
- *   - GpuBuffer_setUsage(self, usage)
+ * Public Core Functions: (.h)
+ *   - GpuBuffer_free(self)               : Release buffer and shadow memory
+ *   - GpuBuffer_upload(data, n, dest)    : Upload data into shadow mirror
+ *   - GpuBuffer_download(self, data, n)  : Download data from shadow mirror
  *
- * Getters:
- *   - GpuBuffer_getSize(self)
- *   - GpuBuffer_getUsage(self)
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - GpuBuffer_setSize(self, size)      : Mutate buffer capacity and shadow size
+ *   - GpuBuffer_setUsage(self, usage)    : Mutate buffer usage flags
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - GpuBuffer_getSize(self)            : Query buffer byte size
+ *   - GpuBuffer_getUsage(self)           : Query buffer usage flags
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// gpu_buffer.c — device buffer with CPU-shadow stub implementation.
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
-// CONSTRUCTORS
 GpuBuffer *GpuBuffer_0(void) {
     GpuBuffer *self = (GpuBuffer*) Memory_alloc(TYPE_GPU_BUFFER_SINGLETON, sizeof(GpuBuffer));
     if (!self)
@@ -83,7 +113,10 @@ GpuBuffer *GpuBuffer_2(size_t size, uint32_t usage) {
     return self;
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 void GpuBuffer_free(GpuBuffer *self) {
     if (!self)
         return;
@@ -125,7 +158,11 @@ bool GpuBuffer_download(const GpuBuffer *self, uint8_t *data, size_t n) {
     return true;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
 void GpuBuffer_setSize(GpuBuffer *self, size_t size) {
     if (!self)
         return;
@@ -159,17 +196,23 @@ void GpuBuffer_setSize(GpuBuffer *self, size_t size) {
     (*self).size = size;
 }
 
+;;SETTER
 void GpuBuffer_setUsage(GpuBuffer *self, uint32_t usage) {
     if (!self)
         return;
     (*self).usage = usage;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 size_t GpuBuffer_getSize(const GpuBuffer *self) {
     return self ? (*self).size : 0;
 }
 
+;;GETTER
 uint32_t GpuBuffer_getUsage(const GpuBuffer *self) {
     return self ? (*self).usage : 0;
 }
