@@ -21,7 +21,7 @@ typedef struct VectorBrush {
     // --- VectorBrush core (owner fields: base first for upcast) ---
     Brush base;            // embed-first base (color + opacity + typeId)
     // --- Stops part (heap-grown stop table) ---
-    uint32_t *colors;      // packed stop colors (0xAARRGGBB)
+    uint32_t *colors;      // packed stop colors (0xRRGGBBAA)
     float *offsets;        // stop positions [0..1] parallel to colors
     uint32_t stopCount;    // live stops in [0..stopCap]
     uint32_t stopCap;      // allocated stop slots (doubles on demand)
@@ -29,7 +29,7 @@ typedef struct VectorBrush {
     float transform[6];    // 2D affine [a b c d tx ty], identity default
 } VectorBrush;
 
-// Default brush (black to white stops, identity transform, opaque base)
+// Default brush (black 0x000000FF to white 0xFFFFFFFF stops, identity transform, opaque base)
 VectorBrush *VectorBrush_0(void);
 
 // Two-stop gradient (offsets 0 and 1, identity transform, opaque base)

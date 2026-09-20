@@ -24,11 +24,11 @@ typedef struct Stroke {
     float dash;       // dash segment length in pixels (0 = solid)
     uint32_t cap;     // line cap (STROKE_CAP_* )
     uint32_t join;    // line join (STROKE_JOIN_* )
-    uint32_t color;   // packed color (0xAARRGGBB)
+    uint32_t color;   // packed color (0xRRGGBBAA)
     uint64_t typeId;  // block-header type id (TYPE_STROKE_SINGLETON)
 } Stroke;
 
-// Default stroke (width 1, solid, butt cap, miter join, opaque black)
+// Default stroke (width 1, solid, butt cap, miter join, opaque black 0x000000FF)
 Stroke *Stroke_0(void);
 
 // Width + color stroke (solid, butt cap, miter join)
