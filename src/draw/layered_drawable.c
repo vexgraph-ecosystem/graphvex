@@ -5,7 +5,25 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: LayeredDrawable
+ * ============================================================================
+ * Multi-layer raster board managing an ordered dynamic array of Drawable layer rows.
+ * Provides per-layer opacity, Porter-Duff blend modes, visibility masking, and active
+ * layer targeting with full geometric resizing and dirty flag propagation.
+ *
+ * Implements data-oriented row reallocation and sub-part field segregation for safe
+ * layer composition without arbitrary ceiling limits in compliance with the Unified
+ * Graphics Abstraction Law and the Dynamic Scalability & Anti-Hardcoding Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -41,41 +59,53 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - LayeredDrawable()              : LayeredDrawable_0()
- *   - LayeredDrawable(w, h)          : LayeredDrawable_2(w, h)
- *   - LayeredDrawable(w, h, layers)  : LayeredDrawable_3(w, h, layers)
+ * Public Constructors: (.h)
+ *   - LayeredDrawable_0(void)                         : Default 1x1 1-layer board
+ *   - LayeredDrawable_2(w, h)                         : Sized 1-layer board
+ *   - LayeredDrawable_3(w, h, initialLayers)          : Sized N-layer board
  *
- * Core Functions:
- *   - LayeredDrawable_free(self)
- *   - LayeredDrawable_addLayer(self)
- *   - LayeredDrawable_removeLayer(self, index)
- *   - LayeredDrawable_composite(self, dest)
- *   - LayeredDrawable_activeLayer(self)
- *   - LayeredDrawable_layerGet(self, index)
- *   - LayeredDrawable_layerSetOpacity(self, index, opacity)
- *   - LayeredDrawable_layerGetOpacity(self, index)
- *   - LayeredDrawable_layerSetBlend(self, index, blendMode)
- *   - LayeredDrawable_layerGetBlend(self, index)
- *   - LayeredDrawable_layerSetVisible(self, index, visible)
- *   - LayeredDrawable_layerIsVisible(self, index)
+ * Private Constructors: (.c static)
+ *   - layeredDrawableCreate(w, h, initialLayers)      : Allocate and initialize board
  *
- * Setters:
- *   - LayeredDrawable_setActiveIndex(self, activeIndex)
- *   - LayeredDrawable_setVisibleMask(self, visibleMask)
- *   - LayeredDrawable_setWidth(self, width)
- *   - LayeredDrawable_setHeight(self, height)
- *   - LayeredDrawable_setSize(self, w, h)
- *   - LayeredDrawable_setDirty(self, dirty)
+ * Public Core Functions: (.h)
+ *   - LayeredDrawable_free(self)                      : Release board and layer rows
+ *   - LayeredDrawable_addLayer(self)                  : Append new layer row
+ *   - LayeredDrawable_removeLayer(self, index)        : Remove layer row by index
+ *   - LayeredDrawable_composite(self, dest)           : Composite layers into target
+ *   - LayeredDrawable_activeLayer(self)               : Pointer to active target layer
+ *   - LayeredDrawable_layerGet(self, index)           : Pointer to layer at index
+ *   - LayeredDrawable_layerSetOpacity(self, idx, op)  : Set layer opacity [0..1]
+ *   - LayeredDrawable_layerGetOpacity(self, idx)      : Query layer opacity
+ *   - LayeredDrawable_layerSetBlend(self, idx, mode)  : Set layer blend mode
+ *   - LayeredDrawable_layerGetBlend(self, idx)        : Query layer blend mode
+ *   - LayeredDrawable_layerSetVisible(self, idx, vis) : Set layer visibility
+ *   - LayeredDrawable_layerIsVisible(self, idx)       : Query layer visibility
  *
- * Getters:
- *   - LayeredDrawable_getActiveIndex(self)
- *   - LayeredDrawable_getVisibleMask(self)
- *   - LayeredDrawable_getLayerCount(self)
- *   - LayeredDrawable_isDirty(self)
- *   - LayeredDrawable_getWidth(self)
- *   - LayeredDrawable_getHeight(self)
- *   - LayeredDrawable_getTypeId(self)
+ * Private Core Functions: (.c static)
+ *   - layeredDrawableFreeStorage(self)                : Deallocate heap memory
+ *
+ * Public Setters: (.h)
+ *   - LayeredDrawable_setActiveIndex(self, idx)       : Set active target layer index
+ *   - LayeredDrawable_setVisibleMask(self, mask)      : Set 32-bit visibility bitmask
+ *   - LayeredDrawable_setWidth(self, width)           : Set board width
+ *   - LayeredDrawable_setHeight(self, height)         : Set board height
+ *   - LayeredDrawable_setSize(self, w, h)             : Set board dimensions
+ *   - LayeredDrawable_setDirty(self, dirty)           : Set board dirty flag
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - LayeredDrawable_getActiveIndex(self)            : Query active target layer index
+ *   - LayeredDrawable_getVisibleMask(self)            : Query 32-bit visibility bitmask
+ *   - LayeredDrawable_getLayerCount(self)             : Query total layer row count
+ *   - LayeredDrawable_isDirty(self)                   : Query board dirty flag
+ *   - LayeredDrawable_getWidth(self)                  : Query board pixel width
+ *   - LayeredDrawable_getHeight(self)                 : Query board pixel height
+ *   - LayeredDrawable_getTypeId(self)                 : Query block type ID
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -100,45 +130,42 @@ static LayeredDrawable *layeredDrawableCreate(uint32_t w, uint32_t h, size_t ini
     if (!self)
         return nullptr;
 
-    size_t cap = 4;
-    while (cap < initialLayers)
-        cap *= 2;
-
-    LayeredRow *rows = (LayeredRow*) calloc(cap, sizeof(LayeredRow));
+    LayeredRow *rows = (LayeredRow*) calloc(initialLayers, sizeof(LayeredRow));
     if (!rows) {
         layeredDrawableFreeStorage(self);
         return nullptr;
     }
 
-    size_t built = 0;
-    for (; built < initialLayers; built++) {
+    for (size_t i = 0; i < initialLayers; i++) {
         Drawable *d = Drawable_2(w, h);
         if (!d) {
-            for (size_t j = 0; j < built; j++)
+            for (size_t j = 0; j < i; j++)
                 Drawable_free(rows[j].drawable);
             free(rows);
             layeredDrawableFreeStorage(self);
             return nullptr;
         }
-        rows[built].drawable = d;
-        rows[built].opacity = 1.0f;
-        rows[built].blendMode = LAYER_BLEND_NORMAL;
-        rows[built].visible = true;
+        rows[i].drawable = d;
+        rows[i].opacity = 1.0f;
+        rows[i].blendMode = LAYER_BLEND_NORMAL;
+        rows[i].visible = true;
     }
 
     (*self).layers = rows;
     (*self).layerCount = initialLayers;
-    (*self).layerCapacity = cap;
+    (*self).layerCapacity = initialLayers;
     (*self).activeIndex = 0;
     (*self).width = w;
     (*self).height = h;
     (*self).typeId = TYPE_LAYERED_DRAWABLE_SINGLETON;
     (*self).dirty = false;
-
     return self;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 LayeredDrawable *LayeredDrawable_0() {
     return layeredDrawableCreate(1, 1, 1);
 }
@@ -151,7 +178,10 @@ LayeredDrawable *LayeredDrawable_3(uint32_t w, uint32_t h, size_t initialLayers)
     return layeredDrawableCreate(w, h, initialLayers);
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 void LayeredDrawable_free(LayeredDrawable *self) {
     if (!self)
         return;
@@ -284,7 +314,11 @@ bool LayeredDrawable_layerIsVisible(const LayeredDrawable *self, uint32_t index)
     return (*self).layers[index].visible;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
 void LayeredDrawable_setActiveIndex(LayeredDrawable *self, uint32_t activeIndex) {
     if (!self)
         return;
@@ -292,6 +326,7 @@ void LayeredDrawable_setActiveIndex(LayeredDrawable *self, uint32_t activeIndex)
         (*self).activeIndex = activeIndex;
 }
 
+;;SETTER
 void LayeredDrawable_setVisibleMask(LayeredDrawable *self, uint32_t visibleMask) {
     if (!self)
         return;
@@ -303,6 +338,7 @@ void LayeredDrawable_setVisibleMask(LayeredDrawable *self, uint32_t visibleMask)
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredDrawable_setWidth(LayeredDrawable *self, uint32_t width) {
     if (!self)
         return;
@@ -310,6 +346,7 @@ void LayeredDrawable_setWidth(LayeredDrawable *self, uint32_t width) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredDrawable_setHeight(LayeredDrawable *self, uint32_t height) {
     if (!self)
         return;
@@ -317,6 +354,7 @@ void LayeredDrawable_setHeight(LayeredDrawable *self, uint32_t height) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredDrawable_setSize(LayeredDrawable *self, uint32_t w, uint32_t h) {
     if (!self)
         return;
@@ -325,17 +363,23 @@ void LayeredDrawable_setSize(LayeredDrawable *self, uint32_t w, uint32_t h) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredDrawable_setDirty(LayeredDrawable *self, bool dirty) {
     if (!self)
         return;
     (*self).dirty = dirty;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 uint32_t LayeredDrawable_getActiveIndex(const LayeredDrawable *self) {
     return self ? (*self).activeIndex : 0;
 }
 
+;;GETTER
 uint32_t LayeredDrawable_getVisibleMask(const LayeredDrawable *self) {
     if (!self)
         return 0;
@@ -349,22 +393,27 @@ uint32_t LayeredDrawable_getVisibleMask(const LayeredDrawable *self) {
     return mask;
 }
 
+;;GETTER
 size_t LayeredDrawable_getLayerCount(const LayeredDrawable *self) {
     return self ? (*self).layerCount : 0;
 }
 
+;;GETTER
 bool LayeredDrawable_isDirty(const LayeredDrawable *self) {
     return self ? (*self).dirty : false;
 }
 
+;;GETTER
 uint32_t LayeredDrawable_getWidth(const LayeredDrawable *self) {
     return self ? (*self).width : 0;
 }
 
+;;GETTER
 uint32_t LayeredDrawable_getHeight(const LayeredDrawable *self) {
     return self ? (*self).height : 0;
 }
 
+;;GETTER
 uint64_t LayeredDrawable_getTypeId(const LayeredDrawable *self) {
     return self ? (*self).typeId : 0;
 }

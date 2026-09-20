@@ -4,7 +4,25 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Drawable
+ * ============================================================================
+ * Single-layer raster drawing board abstraction owning a backing Image.
+ * Acts as the immediate 2D primitive rendering target for brush fills, stroke outlines,
+ * path sweeps, and surface color clears.
+ *
+ * Implements fine-grained dirty state tracking and automatic backing image lifecycle
+ * management in compliance with the Unified Graphics Abstraction Law and the
+ * Strict 0xRRGGBBAA Color Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -26,33 +44,43 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Drawable()       : Drawable_0()
- *   - Drawable(w, h)   : Drawable_2(w, h)
+ * Public Constructors: (.h)
+ *   - Drawable_0(void)                                      : Allocate default 1x1 drawable
+ *   - Drawable_2(w, h)                                      : Allocate sized drawable
  *
- * Core Functions:
- *   - Drawable_fillRect(self, x, y, w, h, brush)
- *   - Drawable_drawRect(self, x, y, w, h, stroke)
- *   - Drawable_fillCircle(self, cx, cy, r, brush)
- *   - Drawable_drawCircle(self, cx, cy, r, stroke)
- *   - Drawable_fillPath(self, shape, brush)
- *   - Drawable_drawPath(self, shape, stroke)
- *   - Drawable_clear(self, color)
- *   - Drawable_free(self)
+ * Private Constructors: (.c static)
+ *   - drawableCreate(w, h)                                  : Allocate and initialize drawable
  *
- * Setters:
- *   - Drawable_setImage(self, img)
- *   - Drawable_setDirty(self, dirty)
+ * Public Core Functions: (.h)
+ *   - Drawable_fillRect(self, x, y, w, h, brush)           : Draw filled rectangle
+ *   - Drawable_drawRect(self, x, y, w, h, stroke)          : Draw stroked rectangle
+ *   - Drawable_fillCircle(self, cx, cy, r, brush)          : Draw filled circle
+ *   - Drawable_drawCircle(self, cx, cy, r, stroke)         : Draw stroked circle
+ *   - Drawable_fillPath(self, shape, brush)                : Draw filled vector path
+ *   - Drawable_drawPath(self, shape, stroke)               : Draw stroked vector path
+ *   - Drawable_clear(self, color)                          : Clear raster to 0xRRGGBBAA color
+ *   - Drawable_free(self)                                  : Release board and owned image
  *
- * Getters:
- *   - Drawable_getImage(self)
- *   - Drawable_isDirty(self)
- *   - Drawable_getWidth(self)
- *   - Drawable_getHeight(self)
+ * Private Core Functions: (.c static)
+ *   - drawableFreeStorage(self)                             : Deallocate heap memory
+ *
+ * Public Setters: (.h)
+ *   - Drawable_setImage(self, img)                         : Replace owned backing image
+ *   - Drawable_setDirty(self, dirty)                       : Set board dirty flag
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Drawable_getImage(self)                              : Query owned backing image
+ *   - Drawable_isDirty(self)                               : Query dirty status flag
+ *   - Drawable_getWidth(self)                              : Query raster pixel width
+ *   - Drawable_getHeight(self)                             : Query raster pixel height
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
-
-// draw/drawable.c — Single-layer raster board implementation (CPU stub).
 
 static void drawableFreeStorage(Drawable *self) {
     if (Memory_length(self) != 0)
@@ -80,7 +108,10 @@ static Drawable *drawableCreate(uint32_t w, uint32_t h) {
     return self;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 Drawable *Drawable_0(void) {
     return drawableCreate(1, 1);
 }
@@ -89,7 +120,10 @@ Drawable *Drawable_2(uint32_t w, uint32_t h) {
     return drawableCreate(w, h);
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 void Drawable_fillRect(Drawable *self, float x, float y, float w, float h, const Brush *brush) {
     if (!self)
         return;
@@ -163,7 +197,11 @@ void Drawable_free(Drawable *self) {
     drawableFreeStorage(self);
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
 void Drawable_setImage(Drawable *self, Image *img) {
     if (!self)
         return;
@@ -174,27 +212,35 @@ void Drawable_setImage(Drawable *self, Image *img) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void Drawable_setDirty(Drawable *self, bool dirty) {
     if (!self)
         return;
     (*self).dirty = dirty;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 Image *Drawable_getImage(const Drawable *self) {
     return self ? (*self).owned : nullptr;
 }
 
+;;GETTER
 bool Drawable_isDirty(const Drawable *self) {
     return self ? (*self).dirty : false;
 }
 
+;;GETTER
 uint32_t Drawable_getWidth(const Drawable *self) {
     if (!self)
         return 0;
     return Image_getWidth((*self).owned);
 }
 
+;;GETTER
 uint32_t Drawable_getHeight(const Drawable *self) {
     if (!self)
         return 0;

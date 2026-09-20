@@ -5,7 +5,25 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: VectorDrawable
+ * ============================================================================
+ * Resolution-independent infinite-canvas vector drawing board maintaining an
+ * ordered stream of vector rendering commands.
+ *
+ * Records geometric paths, shapes, radial circles, and styled strokes into a dynamically
+ * scalable command buffer with integrated camera pan and zoom affine transforms.
+ * Renders into any target raster board with hardware-independent precision in compliance
+ * with the Unified Graphics Abstraction Law and the Dynamic Scalability & Anti-Hardcoding Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -51,41 +69,54 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - VectorDrawable()                         : VectorDrawable_0()
- *   - VectorDrawable(w, h)                     : VectorDrawable_2(w, h)
+ * Public Constructors: (.h)
+ *   - VectorDrawable_0(void)                         : Allocate default 1x1 vector canvas
+ *   - VectorDrawable_2(w, h)                         : Allocate sized vector canvas
  *
- * Core Functions:
- *   - VectorDrawable_free(self)
- *   - VectorDrawable_fillRect(self, x, y, w, h, brush)
- *   - VectorDrawable_drawRect(self, x, y, w, h, stroke)
- *   - VectorDrawable_fillCircle(self, cx, cy, r, brush)
- *   - VectorDrawable_drawCircle(self, cx, cy, r, stroke)
- *   - VectorDrawable_fillPath(self, shape, brush)
- *   - VectorDrawable_drawPath(self, shape, stroke)
- *   - VectorDrawable_clear(self)
- *   - VectorDrawable_render(self, dest)
+ * Private Constructors: (.c static)
+ *   - vectorDrawableCreate(w, h)                     : Allocate and initialize canvas
  *
- * Setters:
- *   - VectorDrawable_setPan(self, panX, panY)
- *   - VectorDrawable_setPanX(self, panX)
- *   - VectorDrawable_setPanY(self, panY)
- *   - VectorDrawable_setZoom(self, zoom)
- *   - VectorDrawable_setSize(self, w, h)
- *   - VectorDrawable_setWidth(self, width)
- *   - VectorDrawable_setHeight(self, height)
- *   - VectorDrawable_setDirty(self, dirty)
+ * Public Core Functions: (.h)
+ *   - VectorDrawable_free(self)                      : Release canvas and command array
+ *   - VectorDrawable_fillRect(self, x, y, w, h, b)   : Record filled rectangle
+ *   - VectorDrawable_drawRect(self, x, y, w, h, s)   : Record stroked rectangle
+ *   - VectorDrawable_fillCircle(self, cx, cy, r, b)  : Record filled circle
+ *   - VectorDrawable_drawCircle(self, cx, cy, r, s)  : Record stroked circle
+ *   - VectorDrawable_fillPath(self, shape, brush)    : Record filled vector shape
+ *   - VectorDrawable_drawPath(self, shape, stroke)   : Record stroked vector shape
+ *   - VectorDrawable_clear(self)                     : Clear recorded command array
+ *   - VectorDrawable_render(self, dest)              : Render commands to raster board
  *
- * Getters:
- *   - VectorDrawable_getPan(self, outPanX, outPanY)
- *   - VectorDrawable_getPanX(self)
- *   - VectorDrawable_getPanY(self)
- *   - VectorDrawable_getZoom(self)
- *   - VectorDrawable_getWidth(self)
- *   - VectorDrawable_getHeight(self)
- *   - VectorDrawable_isDirty(self)
- *   - VectorDrawable_getCommandCount(self)
- *   - VectorDrawable_getTypeId(self)
+ * Private Core Functions: (.c static)
+ *   - vectorDrawableFreeStorage(self)                : Deallocate heap memory
+ *   - vectorDrawableAddCommand(self, kind)           : Append command opcode slot
+ *
+ * Public Setters: (.h)
+ *   - VectorDrawable_setPan(self, panX, panY)        : Set 2D camera pan offsets
+ *   - VectorDrawable_setPanX(self, panX)             : Set camera pan X offset
+ *   - VectorDrawable_setPanY(self, panY)             : Set camera pan Y offset
+ *   - VectorDrawable_setZoom(self, zoom)             : Set camera zoom scaling
+ *   - VectorDrawable_setSize(self, w, h)             : Set canvas dimensions
+ *   - VectorDrawable_setWidth(self, width)           : Set canvas width
+ *   - VectorDrawable_setHeight(self, height)         : Set canvas height
+ *   - VectorDrawable_setDirty(self, dirty)           : Set canvas dirty flag
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - VectorDrawable_getPan(self, outX, outY)        : Retrieve 2D camera pan offsets
+ *   - VectorDrawable_getPanX(self)                   : Query camera pan X offset
+ *   - VectorDrawable_getPanY(self)                   : Query camera pan Y offset
+ *   - VectorDrawable_getZoom(self)                   : Query camera zoom scaling
+ *   - VectorDrawable_getWidth(self)                  : Query canvas pixel width
+ *   - VectorDrawable_getHeight(self)                 : Query canvas pixel height
+ *   - VectorDrawable_isDirty(self)                   : Query canvas dirty flag
+ *   - VectorDrawable_getCommandCount(self)           : Query recorded command count
+ *   - VectorDrawable_getTypeId(self)                 : Query block type ID
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -146,7 +177,10 @@ static VectorCommand *vectorDrawableAddCommand(VectorDrawable *self, uint32_t ki
     return cmd;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 VectorDrawable *VectorDrawable_0(void) {
     return vectorDrawableCreate(1, 1);
 }
@@ -154,6 +188,7 @@ VectorDrawable *VectorDrawable_0(void) {
 VectorDrawable *VectorDrawable_2(uint32_t w, uint32_t h) {
     return vectorDrawableCreate(w, h);
 }
+
 
 // CORE FUNCTIONS
 void VectorDrawable_free(VectorDrawable *self) {
@@ -262,7 +297,11 @@ void VectorDrawable_render(VectorDrawable *self, Drawable *dest) {
     Drawable_setDirty(dest, true);
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
 void VectorDrawable_setPan(VectorDrawable *self, float panX, float panY) {
     if (!self)
         return;
@@ -271,6 +310,7 @@ void VectorDrawable_setPan(VectorDrawable *self, float panX, float panY) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void VectorDrawable_setPanX(VectorDrawable *self, float panX) {
     if (!self)
         return;
@@ -278,6 +318,7 @@ void VectorDrawable_setPanX(VectorDrawable *self, float panX) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void VectorDrawable_setPanY(VectorDrawable *self, float panY) {
     if (!self)
         return;
@@ -285,6 +326,7 @@ void VectorDrawable_setPanY(VectorDrawable *self, float panY) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void VectorDrawable_setZoom(VectorDrawable *self, float zoom) {
     if (!self)
         return;
@@ -292,6 +334,7 @@ void VectorDrawable_setZoom(VectorDrawable *self, float zoom) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void VectorDrawable_setSize(VectorDrawable *self, uint32_t w, uint32_t h) {
     if (!self)
         return;
@@ -300,6 +343,7 @@ void VectorDrawable_setSize(VectorDrawable *self, uint32_t w, uint32_t h) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void VectorDrawable_setWidth(VectorDrawable *self, uint32_t width) {
     if (!self)
         return;
@@ -307,6 +351,7 @@ void VectorDrawable_setWidth(VectorDrawable *self, uint32_t width) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void VectorDrawable_setHeight(VectorDrawable *self, uint32_t height) {
     if (!self)
         return;
@@ -314,13 +359,18 @@ void VectorDrawable_setHeight(VectorDrawable *self, uint32_t height) {
     (*self).dirty = true;
 }
 
+;;SETTER
 void VectorDrawable_setDirty(VectorDrawable *self, bool dirty) {
     if (!self)
         return;
     (*self).dirty = dirty;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 void VectorDrawable_getPan(const VectorDrawable *self, float *outPanX, float *outPanY) {
     if (outPanX)
         *outPanX = self ? (*self).panX : 0.0f;
@@ -328,34 +378,42 @@ void VectorDrawable_getPan(const VectorDrawable *self, float *outPanX, float *ou
         *outPanY = self ? (*self).panY : 0.0f;
 }
 
+;;GETTER
 float VectorDrawable_getPanX(const VectorDrawable *self) {
     return self ? (*self).panX : 0.0f;
 }
 
+;;GETTER
 float VectorDrawable_getPanY(const VectorDrawable *self) {
     return self ? (*self).panY : 0.0f;
 }
 
+;;GETTER
 float VectorDrawable_getZoom(const VectorDrawable *self) {
     return self ? (*self).zoom : 0.0f;
 }
 
+;;GETTER
 uint32_t VectorDrawable_getWidth(const VectorDrawable *self) {
     return self ? (*self).width : 0;
 }
 
+;;GETTER
 uint32_t VectorDrawable_getHeight(const VectorDrawable *self) {
     return self ? (*self).height : 0;
 }
 
+;;GETTER
 bool VectorDrawable_isDirty(const VectorDrawable *self) {
     return self ? (*self).dirty : false;
 }
 
+;;GETTER
 size_t VectorDrawable_getCommandCount(const VectorDrawable *self) {
     return self ? (*self).commandCount : 0;
 }
 
+;;GETTER
 uint64_t VectorDrawable_getTypeId(const VectorDrawable *self) {
     return self ? (*self).typeId : 0;
 }

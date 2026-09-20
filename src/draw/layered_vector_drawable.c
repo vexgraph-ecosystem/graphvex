@@ -5,7 +5,25 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: LayeredVectorDrawable
+ * ============================================================================
+ * Multi-layer vector drawing board managing an ordered dynamic array of VectorDrawable
+ * layer rows. Encapsulates independent vector stream layers with individual opacity,
+ * Porter-Duff blend modes, visibility masking, and active layer focus.
+ *
+ * Composites visible vector layers into a destination raster Drawable board on demand
+ * while enforcing data-oriented row table reallocation and sub-part field segregation
+ * in compliance with the Unified Graphics Abstraction Law and the Dynamic Scalability & Anti-Hardcoding Law.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -41,41 +59,53 @@
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - LayeredVectorDrawable()              : LayeredVectorDrawable_0()
- *   - LayeredVectorDrawable(w, h)          : LayeredVectorDrawable_2(w, h)
- *   - LayeredVectorDrawable(w, h, layers)  : LayeredVectorDrawable_3(w, h, layers)
+ * Public Constructors: (.h)
+ *   - LayeredVectorDrawable_0(void)                         : Default 1x1 1-layer board
+ *   - LayeredVectorDrawable_2(w, h)                         : Sized 1-layer board
+ *   - LayeredVectorDrawable_3(w, h, initialLayers)          : Sized N-layer board
  *
- * Core Functions:
- *   - LayeredVectorDrawable_free(self)
- *   - LayeredVectorDrawable_addLayer(self)
- *   - LayeredVectorDrawable_removeLayer(self, index)
- *   - LayeredVectorDrawable_render(self, dest)
- *   - LayeredVectorDrawable_activeLayer(self)
- *   - LayeredVectorDrawable_layerGet(self, index)
- *   - LayeredVectorDrawable_layerSetOpacity(self, index, opacity)
- *   - LayeredVectorDrawable_layerGetOpacity(self, index)
- *   - LayeredVectorDrawable_layerSetBlend(self, index, blendMode)
- *   - LayeredVectorDrawable_layerGetBlend(self, index)
- *   - LayeredVectorDrawable_layerSetVisible(self, index, visible)
- *   - LayeredVectorDrawable_layerIsVisible(self, index)
+ * Private Constructors: (.c static)
+ *   - layeredVectorDrawableCreate(w, h, initialLayers)      : Allocate and initialize board
  *
- * Setters:
- *   - LayeredVectorDrawable_setActiveIndex(self, activeIndex)
- *   - LayeredVectorDrawable_setVisibleMask(self, visibleMask)
- *   - LayeredVectorDrawable_setWidth(self, width)
- *   - LayeredVectorDrawable_setHeight(self, height)
- *   - LayeredVectorDrawable_setSize(self, w, h)
- *   - LayeredVectorDrawable_setDirty(self, dirty)
+ * Public Core Functions: (.h)
+ *   - LayeredVectorDrawable_free(self)                      : Release board and layer rows
+ *   - LayeredVectorDrawable_addLayer(self)                  : Append new layer row
+ *   - LayeredVectorDrawable_removeLayer(self, index)        : Remove layer row by index
+ *   - LayeredVectorDrawable_render(self, dest)              : Render visible layers to raster board
+ *   - LayeredVectorDrawable_activeLayer(self)               : Pointer to active target layer
+ *   - LayeredVectorDrawable_layerGet(self, index)           : Pointer to layer at index
+ *   - LayeredVectorDrawable_layerSetOpacity(self, idx, op)  : Set layer opacity [0..1]
+ *   - LayeredVectorDrawable_layerGetOpacity(self, idx)      : Query layer opacity
+ *   - LayeredVectorDrawable_layerSetBlend(self, idx, mode)  : Set layer blend mode
+ *   - LayeredVectorDrawable_layerGetBlend(self, idx)        : Query layer blend mode
+ *   - LayeredVectorDrawable_layerSetVisible(self, idx, vis) : Set layer visibility
+ *   - LayeredVectorDrawable_layerIsVisible(self, idx)       : Query layer visibility
  *
- * Getters:
- *   - LayeredVectorDrawable_getActiveIndex(self)
- *   - LayeredVectorDrawable_getVisibleMask(self)
- *   - LayeredVectorDrawable_getLayerCount(self)
- *   - LayeredVectorDrawable_isDirty(self)
- *   - LayeredVectorDrawable_getWidth(self)
- *   - LayeredVectorDrawable_getHeight(self)
- *   - LayeredVectorDrawable_getTypeId(self)
+ * Private Core Functions: (.c static)
+ *   - layeredVectorDrawableFreeStorage(self)                : Deallocate heap memory
+ *
+ * Public Setters: (.h)
+ *   - LayeredVectorDrawable_setActiveIndex(self, idx)       : Set active target layer index
+ *   - LayeredVectorDrawable_setVisibleMask(self, mask)      : Set 32-bit visibility bitmask
+ *   - LayeredVectorDrawable_setWidth(self, width)           : Set board width
+ *   - LayeredVectorDrawable_setHeight(self, height)         : Set board height
+ *   - LayeredVectorDrawable_setSize(self, w, h)             : Set board dimensions
+ *   - LayeredVectorDrawable_setDirty(self, dirty)           : Set board dirty flag
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - LayeredVectorDrawable_getActiveIndex(self)            : Query active target layer index
+ *   - LayeredVectorDrawable_getVisibleMask(self)            : Query 32-bit visibility bitmask
+ *   - LayeredVectorDrawable_getLayerCount(self)             : Query total layer row count
+ *   - LayeredVectorDrawable_isDirty(self)                   : Query board dirty flag
+ *   - LayeredVectorDrawable_getWidth(self)                  : Query board pixel width
+ *   - LayeredVectorDrawable_getHeight(self)                 : Query board pixel height
+ *   - LayeredVectorDrawable_getTypeId(self)                 : Query block type ID
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
@@ -134,11 +164,13 @@ static LayeredVectorDrawable *layeredVectorDrawableCreate(uint32_t w, uint32_t h
     (*self).height = h;
     (*self).dirty = false;
     (*self).typeId = TYPE_LAYERED_VECTOR_DRAWABLE_SINGLETON;
-
     return self;
 }
 
-// CONSTRUCTORS
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
+
 LayeredVectorDrawable *LayeredVectorDrawable_0(void) {
     return layeredVectorDrawableCreate(1, 1, 1);
 }
@@ -151,7 +183,10 @@ LayeredVectorDrawable *LayeredVectorDrawable_3(uint32_t w, uint32_t h, size_t in
     return layeredVectorDrawableCreate(w, h, initialLayers);
 }
 
-// CORE FUNCTIONS
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
+
 void LayeredVectorDrawable_free(LayeredVectorDrawable *self) {
     if (!self)
         return;
@@ -286,7 +321,11 @@ bool LayeredVectorDrawable_layerIsVisible(const LayeredVectorDrawable *self, uin
     return (*self).layers[index].visible;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
 void LayeredVectorDrawable_setActiveIndex(LayeredVectorDrawable *self, uint32_t activeIndex) {
     if (!self)
         return;
@@ -294,6 +333,7 @@ void LayeredVectorDrawable_setActiveIndex(LayeredVectorDrawable *self, uint32_t 
         (*self).activeIndex = activeIndex;
 }
 
+;;SETTER
 void LayeredVectorDrawable_setVisibleMask(LayeredVectorDrawable *self, uint32_t visibleMask) {
     if (!self)
         return;
@@ -305,6 +345,7 @@ void LayeredVectorDrawable_setVisibleMask(LayeredVectorDrawable *self, uint32_t 
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredVectorDrawable_setWidth(LayeredVectorDrawable *self, uint32_t width) {
     if (!self)
         return;
@@ -312,6 +353,7 @@ void LayeredVectorDrawable_setWidth(LayeredVectorDrawable *self, uint32_t width)
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredVectorDrawable_setHeight(LayeredVectorDrawable *self, uint32_t height) {
     if (!self)
         return;
@@ -319,6 +361,7 @@ void LayeredVectorDrawable_setHeight(LayeredVectorDrawable *self, uint32_t heigh
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredVectorDrawable_setSize(LayeredVectorDrawable *self, uint32_t w, uint32_t h) {
     if (!self)
         return;
@@ -327,17 +370,23 @@ void LayeredVectorDrawable_setSize(LayeredVectorDrawable *self, uint32_t w, uint
     (*self).dirty = true;
 }
 
+;;SETTER
 void LayeredVectorDrawable_setDirty(LayeredVectorDrawable *self, bool dirty) {
     if (!self)
         return;
     (*self).dirty = dirty;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 uint32_t LayeredVectorDrawable_getActiveIndex(const LayeredVectorDrawable *self) {
     return self ? (*self).activeIndex : 0;
 }
 
+;;GETTER
 uint32_t LayeredVectorDrawable_getVisibleMask(const LayeredVectorDrawable *self) {
     if (!self)
         return 0;
@@ -351,22 +400,27 @@ uint32_t LayeredVectorDrawable_getVisibleMask(const LayeredVectorDrawable *self)
     return mask;
 }
 
+;;GETTER
 size_t LayeredVectorDrawable_getLayerCount(const LayeredVectorDrawable *self) {
     return self ? (*self).layerCount : 0;
 }
 
+;;GETTER
 bool LayeredVectorDrawable_isDirty(const LayeredVectorDrawable *self) {
     return self ? (*self).dirty : false;
 }
 
+;;GETTER
 uint32_t LayeredVectorDrawable_getWidth(const LayeredVectorDrawable *self) {
     return self ? (*self).width : 0;
 }
 
+;;GETTER
 uint32_t LayeredVectorDrawable_getHeight(const LayeredVectorDrawable *self) {
     return self ? (*self).height : 0;
 }
 
+;;GETTER
 uint64_t LayeredVectorDrawable_getTypeId(const LayeredVectorDrawable *self) {
     return self ? (*self).typeId : 0;
 }
