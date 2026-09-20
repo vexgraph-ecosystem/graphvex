@@ -2,9 +2,29 @@
 
 #include <stdlib.h>
 
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
 #include "nio/mem.h"
 #include "oop/type.h"
-#include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Shape
+ * ============================================================================
+ * Pure 2D vector path geometry representation modeling scalable vector graphics
+ * without raster hardware coupling. Manages dynamic, contiguous arrays of Bézier
+ * command verbs (move, line, cubic curve, close) paired with interleaved (x, y)
+ * coordinate floating-point sequences. Computes exact axis-aligned bounding boxes
+ * dynamically as path primitives are appended. Supports SVG path mini-language
+ * parsing ("M", "L", "H", "V", "C", "Z") and geometric primitives such as
+ * rectangles and cubic Bézier circles. Instances reside in unified heap memory
+ * tagged TYPE_SHAPE_SINGLETON while coordinate and verb buffers scale dynamically
+ * through standard realloc.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
@@ -15,10 +35,7 @@
  * Pure vector paths without raster: builds and manipulates 2D Bézier paths
  * represented as dynamic arrays of verbs and coordinate points. Supports
  * moveTo, lineTo, cubicTo, close, procedural primitives (rect, circle),
- * and simple SVG path string parsing ("M x y L x y Z"). The struct rides
- * the vexspoke arena via Memory_alloc(TYPE_SHAPE_SINGLETON) with a calloc
- * fallback for standalone builds; coordinate and verb arrays are owned
- * system memory.
+ * and simple SVG path string parsing ("M x y L x y Z").
  *
  * STRUCT FIELDS (Mirroring vector/shape.h):
  * ----------------------------------------------------------------------------
@@ -34,49 +51,88 @@
  *     uint64_t typeId;      // block-header type id (TYPE_SHAPE_SINGLETON)
  *   }
  *
- * PRIVATE HELPERS:
- * ----------------------------------------------------------------------------
- *   ShapeVerb (per-verb path command enum — Shape's slot record, no own API):
- *     typedef enum ShapeVerb {
- *         SHAPE_VERB_MOVE = 0,
- *         SHAPE_VERB_LINE = 1,
- *         SHAPE_VERB_CUBIC = 2,
- *         SHAPE_VERB_CLOSE = 3
- *     } ShapeVerb;
- *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
- * Constructors:
- *   - Shape()                                       : Shape_0()
- *   - Shape(x, y, w, h)                             : Shape_4(x, y, w, h)
+ * Public Constructors: (.h)
+ *   - Shape_0(void)                                        : Allocate default vector shape
+ *   - Shape_4(x, y, w, h)                                  : Allocate vector rectangle
  *
- * Core Functions:
- *   - Shape_free(self)
- *   - Shape_rect(dest, x, y, w, h)
- *   - Shape_circle(dest, cx, cy, r)
- *   - Shape_moveTo(self, x, y)
- *   - Shape_lineTo(self, x, y)
- *   - Shape_cubicTo(self, x1, y1, x2, y2, x3, y3)
- *   - Shape_close(self)
- *   - Shape_reset(self)
- *   - Shape_fromSvg(pathStr, dest)
+ * Private Constructors: (.c static)
+ *   - (none)
  *
- * Setters:
- *   - Shape_setClosed(self, closed)
+ * Public Core Functions: (.h)
+ *   - Shape_free(self)                                     : Release shape heap storage
+ *   - Shape_rect(dest, x, y, w, h)                         : Generate rectangle path
+ *   - Shape_circle(dest, cx, cy, r)                        : Generate circle path
+ *   - Shape_moveTo(self, x, y)                             : Append move verb
+ *   - Shape_lineTo(self, x, y)                             : Append line verb
+ *   - Shape_cubicTo(self, x1, y1, x2, y2, x3, y3)          : Append cubic Bézier verb
+ *   - Shape_close(self)                                    : Close current path contour
+ *   - Shape_reset(self)                                    : Clear verbs and points
+ *   - Shape_fromSvg(pathStr, dest)                         : Parse SVG path commands into shape
  *
- * Getters:
- *   - Shape_isClosed(self)
- *   - Shape_getTypeId(self)
- *   - Shape_getPointCount(self)
- *   - Shape_getVerbCount(self)
- *   - Shape_getBounds(self, outBounds4)
+ * Private Core Functions: (.c static)
+ *   - shapeFreeStorage(self)                               : Release heap storage
+ *   - shapeEnsurePointCapacity(self, needed)               : Grow points buffer capacity
+ *   - shapeEnsureVerbCapacity(self, needed)                : Grow verbs buffer capacity
+ *   - shapeExpandBounds(self, x, y, isFirst)               : Expand bounding box
+ *   - shapeSkipSvgSpaces(p)                                : Skip SVG whitespace delimiters
+ *   - shapeParseSvgFloat(pp, outVal)                       : Parse float from SVG text stream
+ *
+ * Public Setters: (.h)
+ *   - Shape_setClosed(self, closed)                        : Set path closed state flag
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Shape_isClosed(self)                                 : Query path closed status
+ *   - Shape_getTypeId(self)                                : Query block type ID
+ *   - Shape_getPointCount(self)                            : Query point count
+ *   - Shape_getVerbCount(self)                             : Query verb count
+ *   - Shape_getBounds(self, outBounds4)                    : Retrieve axis-aligned bounding box
+ *
+ * Private Getters: (.c static)
+ *   - (none)
  * ============================================================================
  */
 
-// vector/shape.c — Pure vector path geometry implementation.
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
-// Verb codes live in vector/shape.h (SHAPE_VERB_*); consumers such as
-// DirectGraphics flatten paths by verb, so the header owns them.
+Shape *Shape_0(void) {
+    Shape *self = (Shape*) Memory_alloc(TYPE_SHAPE_SINGLETON, sizeof(Shape));
+    if (!self)
+        self = (Shape*) calloc(1, sizeof(Shape));
+    if (!self)
+        return nullptr;
+    (*self).points = nullptr;
+    (*self).verbs = nullptr;
+    (*self).pointCount = 0;
+    (*self).pointCapacity = 0;
+    (*self).verbCount = 0;
+    (*self).verbCapacity = 0;
+    (*self).bounds[0] = 0.0f;
+    (*self).bounds[1] = 0.0f;
+    (*self).bounds[2] = 0.0f;
+    (*self).bounds[3] = 0.0f;
+    (*self).closed = false;
+    (*self).typeId = TYPE_SHAPE_SINGLETON;
+    return self;
+}
+
+Shape *Shape_4(float x, float y, float w, float h) {
+    Shape *self = Shape_0();
+    if (!self)
+        return nullptr;
+    Shape_rect(self, x, y, w, h);
+    return self;
+}
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 static void shapeFreeStorage(Shape *self) {
     if (Memory_length(self) != 0)
@@ -149,39 +205,6 @@ static bool shapeParseSvgFloat(const char **pp, float *outVal) {
     *pp = end;
     return true;
 }
-
-// CONSTRUCTORS
-
-Shape *Shape_0(void) {
-    Shape *self = (Shape*) Memory_alloc(TYPE_SHAPE_SINGLETON, sizeof(Shape));
-    if (!self)
-        self = (Shape*) calloc(1, sizeof(Shape));
-    if (!self)
-        return nullptr;
-    (*self).points = nullptr;
-    (*self).verbs = nullptr;
-    (*self).pointCount = 0;
-    (*self).pointCapacity = 0;
-    (*self).verbCount = 0;
-    (*self).verbCapacity = 0;
-    (*self).bounds[0] = 0.0f;
-    (*self).bounds[1] = 0.0f;
-    (*self).bounds[2] = 0.0f;
-    (*self).bounds[3] = 0.0f;
-    (*self).closed = false;
-    (*self).typeId = TYPE_SHAPE_SINGLETON;
-    return self;
-}
-
-Shape *Shape_4(float x, float y, float w, float h) {
-    Shape *self = Shape_0();
-    if (!self)
-        return nullptr;
-    Shape_rect(self, x, y, w, h);
-    return self;
-}
-
-// CORE FUNCTIONS
 
 void Shape_free(Shape *self) {
     if (!self)
@@ -403,32 +426,42 @@ bool Shape_fromSvg(const char *pathStr, Shape *dest) {
     return (*dest).verbCount > 0;
 }
 
-// SETTERS
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;SETTER
 void Shape_setClosed(Shape *self, bool closed) {
     if (!self)
         return;
     (*self).closed = closed;
 }
 
-// GETTERS
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
 
+;;GETTER
 bool Shape_isClosed(const Shape *self) {
     return self ? (*self).closed : false;
 }
 
+;;GETTER
 uint64_t Shape_getTypeId(const Shape *self) {
     return self ? (*self).typeId : 0;
 }
 
+;;GETTER
 size_t Shape_getPointCount(const Shape *self) {
     return self ? (*self).pointCount : 0;
 }
 
+;;GETTER
 size_t Shape_getVerbCount(const Shape *self) {
     return self ? (*self).verbCount : 0;
 }
 
+;;GETTER
 void Shape_getBounds(const Shape *self, float *outBounds4) {
     if (!outBounds4)
         return;
