@@ -3,7 +3,6 @@
 
 #include "vulkan/vk.h"
 #include "vulkan/vk_layer.h"
-#include "vulkan/vk_pane.h"
 #include "vulkan/vk_mac.h"
 #include "vulkan/vk_guard.h"
 #include "vulkan/vk_window_seam.h"
@@ -22,97 +21,108 @@
 #include "oop/type.h"
 #include "time/nanotime.h"
 #include "atomic/spin.h"
+#include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/getter.h"
+#include "annotation/setter.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Vulkan
+ * ============================================================================
+ * Runtime-loaded Vulkan backend chain and swapchain compositor implementation.
+ * Manages dynamically linked Vulkan loaders, device enumeration, physical
+ * devices, command queues, surface seams, and multi-buffered swapchains in strict
+ * compliance with the Unified Graphics Abstraction Law and the Strict 0xRRGGBBAA Color Law.
+ *
+ * Provides a generation-tracked swapchain graveyard to insulate asynchronous
+ * GPU flight from modal window resizes and dynamic buffer reconfigurations.
+ * ============================================================================
+ */
 
 ;;OVERVIEW
 /**
  * ============================================================================
-  * CLASS: Vulkan (vulkan/vulkan.c)
-  * LEVEL: L4 — Self-Management (runtime-loaded Vulkan chain setup)
-  * ============================================================================
-  * runtime-loaded Vulkan chain over the compositor model.
-  *
-  * STRUCT FIELDS (local to this file — exactly this file's class):
-  * ----------------------------------------------------------------------------
-  *   RetiredChain (one retired swapchain generation):
-  *     VkSwapchainKHR chain;                  // retired swapchain (destroyed 3 generations later)
-  *     uint32_t generation;                   // rebuild generation when retired
-  *     uint32_t imageCount;                   // used slots in views[]/fbs[]
-  *     VkImageView views[VK_SWAP_IMAGES_MAX]; // per-image views (die with the chain)
-  *     VkFramebuffer fbs[VK_SWAP_IMAGES_MAX];// per-image framebuffers (die with the chain)
-  *   Graveyard: RetiredChain *s_retired over [0, s_retiredCount), cap
-  *   s_retiredCap starting at 8 and doubling via retiredGrow() (the Dynamic
-  *   Scalability & Anti-Hardcoding Law); growth is index-safe (rows never
-  *   leave the table) and OOM falls back to oldest-entry eviction.
-  *
-  *   Module statics (file-scope, own the chain across frames):
-  *     VkInstance s_instance;                 // loader instance handle
-  *     VkSurfaceKHR s_surface;                // CAMetalLayer-backed surface
-  *     VkPhysicalDevice s_phys;               // chosen physical device
-  *     VkDevice s_device;                     // logical device
-  *     VkQueue s_queue;                       // graphics queue
-  *     VkSwapchainKHR s_swapchain;            // live swapchain
-  *
-  * FUNCTION REGISTRY:
- * ----------------------------------------------------------------------------
- * Constructors:
- *   - Vk_init(void)
+ * CLASS: Vulkan (vulkan/vulkan.c)
+ * LEVEL: L4 — Self-Management (runtime-loaded Vulkan chain setup)
+ * ============================================================================
+ * Runtime-loaded Vulkan chain over the compositor model.
  *
-  * Core Functions:
-  *   - Vk_shutdown(void)
-  *   - Vk_clearPresent(void)
-  *   - Vk_reloadShaders(void)
-  *   - Vk_fillRect(cmdBuffer, surfaceW, surfaceH, x, y, w, h, r, g, b, a)
-  *   - Vk_drawTexture(cmdBuffer, surfaceW, surfaceH, x, y, w, h, r, g, b, a, textureId, mode, imgW, imgH)
-  *   - Vk_drawSDFText(cmdBuffer, surfaceW, surfaceH, x, y, w, h, r, g, b, a, textureId, bold, smoothness, u0, v0, u1, v1)
-  *   - Vk_drawColorGlyph(cmdBuffer, surfaceW, surfaceH, x, y, w, h, alpha, textureId, u0, v0, u1, v1)
-  *   - (the Ecosystem Vulkan Safety Nets Law net: drawTexture / drawSDFText / drawColorGlyph clamp textureId
-  *     against Texture_maxBoundId() so OOB ids never reach the bindless sampler)
-  *   - rebuildTargets(void)
-  *   - destroyTargets(void)
-  *   - buildPipelines(void)
- *   - presentFrameLocked(void)     : board present chain (the Ecosystem Vulkan Safety Nets Law seam guard;
- *                                    live-drag freeze: caps-drift rebuilds
- *                                    are SKIPPED while Vk_seamIsLiveResizing
- *                                    (settle rebuilds once), OUT_OF_DATE
- *                                    rebuilds + retries inline regardless)
-  *   - Vk_clearPresent(void)          : bounded present contract — silent false
-  *                                    on null device/swapchain, false on the
-  *                                    device-lost latch, try-lock drop with
-  *                                    dirty retained; fence 100ms, acquire
-  *                                    25ms, zero hot logging
-  *   - Vk_clearPresentLive(void)      : live-drag variant — same single-frame
-  *                                    contract, but the try-lock retries in
-  *                                    ~1ms slices up to ~8ms before dropping
-  *                                    (the Bounded Wait Law)
- *   - presentFrameTail(imageIndex)   : submit + present tail; present-time
- *                                    OUT_OF_DATE rebuilds once and returns
- *                                    false (retry next tick), SUBOPTIMAL is
- *                                    success without rebuild
- *   - presentNote(reason)
- *   - presentNoteCode(what, code)
- *   - presentRefenceSignaled(void)
- *   - Vk_presentFlightIdle(void)     : the Ecosystem Vulkan Safety Nets Law flight probe — true when the
- *                                      present submit fence is signaled (the
- *                                      board present CB that may sample
- *                                      bindless via the frame renderer has
- *                                      drained); consumed by the texture-retire
- *                                      guard to defer Destroy/FreeMemory under a
- *                                      flying present Submit (page-fault defect)
- *   - presentDeviceLost(where)
- *   - ensureDrawablePass(void)
-  *
- * Setters:
- *   - Vk_setPreFrameRenderer(fn, userdata)
- *   - Vk_setFrameRenderer(fn, userdata)
-  *   - Vk_setClearColor(r, g, b, a)
-  *
- * Getters:
- *   - Vk_ready(void)
- *   - Vk_status(void)
- *   - Vk_isDeviceLost(void)
- *   - Vk_isDebugUtilsEnabled(void)   : VK_EXT_debug_utils live on the device?
-  * ============================================================================
+ * STRUCT FIELDS (local to this file — exactly this file's class):
+ * ----------------------------------------------------------------------------
+ *   RetiredChain (one retired swapchain generation):
+ *     VkSwapchainKHR chain;                  // retired swapchain (destroyed 3 generations later)
+ *     uint32_t generation;                   // rebuild generation when retired
+ *     uint32_t imageCount;                   // used slots in views[]/fbs[]
+ *     VkImageView views[VK_SWAP_IMAGES_MAX]; // per-image views (die with the chain)
+ *     VkFramebuffer fbs[VK_SWAP_IMAGES_MAX];// per-image framebuffers (die with the chain)
+ *   Graveyard: RetiredChain *s_retired over [0, s_retiredCount), cap
+ *   s_retiredCap starting at 8 and doubling via retiredGrow() (the Dynamic
+ *   Scalability & Anti-Hardcoding Law); growth is index-safe (rows never
+ *   leave the table) and OOM falls back to oldest-entry eviction.
+ *
+ *   Module statics (file-scope, own the chain across frames):
+ *     VkInstance s_instance;                 // loader instance handle
+ *     VkSurfaceKHR s_surface;                // CAMetalLayer-backed surface
+ *     VkPhysicalDevice s_phys;               // chosen physical device
+ *     VkDevice s_device;                     // logical device
+ *     VkQueue s_queue;                       // graphics queue
+ *     VkSwapchainKHR s_swapchain;            // live swapchain
+ *
+ * PRIVATE HELPERS:
+ * ----------------------------------------------------------------------------
+ *   retiredGrow(void)                        : Expand swapchain retirement graveyard
+ *   createShaderModule(filename, outSize)    : Load SPIR-V bytecode into shader module
+ *   s_libLoad(void)                          : Dynamically link Vulkan runtime library
+ *   rebuildTargets(void)                     : Recreate swapchain targets and passes
+ *   destroyTargets(void)                     : Clean up swapchain targets and passes
+ *   buildPipelines(void)                     : Compile and link graphics pipelines
+ *   presentFrameLocked(void)                 : Perform thread-synchronized presentation
+ *   presentFrameTail(imageIndex)             : Submit and present recorded frame
+ *   ensureDrawablePass(void)                 : Ensure compatible renderpass exists
+ *
+ * FUNCTION REGISTRY:
+ * ----------------------------------------------------------------------------
+ * Public Constructors: (.h)
+ *   - Vk_init(void)                          : Initialize Vulkan loader and devices
+ *
+ * Private Constructors: (.c static)
+ *   - (none)
+ *
+ * Public Core Functions: (.h)
+ *   - Vk_shutdown(void)                      : Release Vulkan instance and devices
+ *   - Vk_clearPresent(void)                  : Perform bounded clear and present
+ *   - Vk_clearPresentLive(void)              : Live-drag optimized clear and present
+ *   - Vk_reloadShaders(void)                 : Hot reload pipeline shaders
+ *   - Vk_fillRect(cb, sW, sH, x, y, w, h, r, g, b, a) : Draw solid color quad
+ *   - Vk_drawTexture(cb, sW, sH, x, y, w, h, r, g, b, a, tex, mode, iW, iH) : Draw textured quad
+ *   - Vk_drawSDFText(cb, sW, sH, x, y, w, h, r, g, b, a, tex, bold, smooth, u0, v0, u1, v1) : Draw SDF text
+ *   - Vk_drawColorGlyph(cb, sW, sH, x, y, w, h, a, tex, u0, v0, u1, v1) : Draw color glyph
+ *
+ * Private Core Functions: (.c static)
+ *   - (none)
+ *
+ * Public Setters: (.h)
+ *   - Vk_setPreFrameRenderer(fn, userdata)   : Register pre-frame rendering callback
+ *   - Vk_setFrameRenderer(fn, userdata)      : Register frame rendering callback
+ *   - Vk_setClearColor(r, g, b, a)           : Configure background clear color
+ *
+ * Private Setters: (.c static)
+ *   - (none)
+ *
+ * Public Getters: (.h)
+ *   - Vk_ready(void)                         : Query if Vulkan chain is initialized
+ *   - Vk_status(void)                        : Query human-readable initialization status
+ *   - Vk_isDeviceLost(void)                  : Query if device loss was detected
+ *   - Vk_presentFlightIdle(void)             : Query if present command queue is idle
+ *   - Vk_isDebugUtilsEnabled(void)           : Query if debug utils extension is active
+ *   - Vk_getFormat(void)                     : Query swapchain pixel format
+ *   - Vk_getDrawablePass(void)               : Query active drawable render pass handle
+ *
+ * Private Getters: (.c static)
+ *   - (none)
+ * ============================================================================
   */
 
 
@@ -153,16 +163,23 @@ static VkPreFrameFn s_preFrameRenderer = nullptr;
 static VkFrameRenderFn s_frameRenderer = nullptr;
 static void *s_frameRendererUserdata = nullptr;
 
+// ============================================================================
+// SETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;SETTER
 void Vk_setPreFrameRenderer(VkPreFrameFn fn, void *userdata) {
     s_preFrameRenderer = fn;
     if (userdata) s_frameRendererUserdata = userdata;
 }
 
+;;SETTER
 void Vk_setFrameRenderer(VkFrameRenderFn fn, void *userdata) {
     s_frameRenderer = fn;
     if (userdata) s_frameRendererUserdata = userdata;
 }
 
+;;SETTER
 void Vk_setClearColor(float r, float g, float b, float a) {
     s_clearColor[0] = r;
     s_clearColor[1] = g;
@@ -259,7 +276,16 @@ static bool s_deviceLost = false;
 
 static VkFormat s_format;
 static VkExtent2D s_extent;
+// Seam-owner extent request (Vk_seamSetExtent): the RENDER AREA for the next
+// present, in native px. 0x0 = whole chain.
+static VkExtent2D s_requestedExtent;
+// Fixed seam chain extent (Vk_seamSetMaxExtent): allocated once, never
+// rebuilt for a window resize. 0x0 = fall back to the surface's current
+// extent at build time.
+static VkExtent2D s_maxExtent;
 static void *s_window = nullptr;
+
+;;GETTER
 unsigned int Vk_getFormat(void) {
     return (unsigned int) s_format;
 }
@@ -279,6 +305,7 @@ static uint32_t s_swapchainImageCount = 0;
 static VkRenderPass s_drawablePass = VK_NULL_HANDLE;
 static bool ensureDrawablePass(void);
 
+;;GETTER
 void *Vk_getDrawablePass(void) {
     return s_drawablePass;
 }
@@ -426,6 +453,10 @@ static bool createDebugMessenger(VkInstance instance, PFN_vkGetInstanceProcAddr 
     return true;
 }
 #endif
+
+// ============================================================================
+// CONSTRUCTORS (PUBLIC & PRIVATE)
+// ============================================================================
 
 bool Vk_init(void) {
     VK_MARK("loader+gpa");
@@ -732,7 +763,30 @@ static bool rebuildTargets(void) {
     swci.imageFormat = s_format;
     swci.imageColorSpace = formatCount ? formats[0].colorSpace : VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     swci.imageExtent = caps.currentExtent;
-    s_extent = caps.currentExtent;
+    // Fixed-buffer model (Vk_seamSetMaxExtent): the chain is allocated ONCE at
+    // the monitor-sized extent and never rebuilt for a window resize. Window
+    // resizes become a per-present RENDER AREA (Vk_seamSetExtent) — the
+    // CAMetalLayer's TopLeft gravity crops the big drawable 1:1 to the window
+    // bounds, so there is no strip, no scale, and no per-step chain churn.
+    // MoltenVK pins the layer's drawableSize to whatever extent this chain is
+    // built at, so a fixed extent also removes the caps latch entirely.
+    if (s_maxExtent.width > 0 && s_maxExtent.height > 0) {
+        VkExtent2D want = s_maxExtent;
+        if (want.width < caps.minImageExtent.width)
+            want.width = caps.minImageExtent.width;
+        if (want.height < caps.minImageExtent.height)
+            want.height = caps.minImageExtent.height;
+        if (caps.maxImageExtent.width > 0 && want.width > caps.maxImageExtent.width)
+            want.width = caps.maxImageExtent.width;
+        if (caps.maxImageExtent.height > 0 && want.height > caps.maxImageExtent.height)
+            want.height = caps.maxImageExtent.height;
+        if (want.width > 0 && want.height > 0) {
+            swci.imageExtent = want;
+            fprintf(stderr, "vk: seam chain fixed at %ux%u (native px, allocated once)\n",
+                    want.width, want.height);
+        }
+    }
+    s_extent = swci.imageExtent;
     swci.imageArrayLayers = 1;
     // The blit is the writer now: transfer-dst is a spec-mandated supported
     // usage for swapchain images, color-attachment stays for safety.
@@ -991,22 +1045,61 @@ static void destroyTargets(void) {
     }
 }
 
+// ============================================================================
+// GETTERS (PUBLIC & PRIVATE)
+// ============================================================================
+
+;;GETTER
 bool Vk_ready(void) {
     return s_lib && s_device != VK_NULL_HANDLE && s_swapchain != VK_NULL_HANDLE;
 }
 
+;;GETTER
+void Vk_seamExtent(int32_t *outW, int32_t *outH) {
+    if (outW != nullptr)
+        *outW = (int32_t) s_extent.width;
+    if (outH != nullptr)
+        *outH = (int32_t) s_extent.height;
+}
+
+;;SETTER
+void Vk_seamSetExtent(int32_t widthPx, int32_t heightPx) {
+    if (widthPx <= 0 || heightPx <= 0) {
+        s_requestedExtent.width = 0;
+        s_requestedExtent.height = 0;
+        return;
+    }
+    s_requestedExtent.width = (uint32_t) widthPx;
+    s_requestedExtent.height = (uint32_t) heightPx;
+}
+
+;;SETTER
+void Vk_seamSetMaxExtent(int32_t widthPx, int32_t heightPx) {
+    if (widthPx <= 0 || heightPx <= 0) {
+        s_maxExtent.width = 0;
+        s_maxExtent.height = 0;
+        return;
+    }
+    s_maxExtent.width = (uint32_t) widthPx;
+    s_maxExtent.height = (uint32_t) heightPx;
+}
+
+;;GETTER
 const char *Vk_status(void) {
     return s_status;
 }
+
+// ============================================================================
+// CORE FUNCTIONS (PUBLIC & PRIVATE)
+// ============================================================================
 
 void Vk_shutdown(void) {
     if (!s_lib)
         return;
     if (s_device != VK_NULL_HANDLE) {
-        // Retained offscreen layer targets + per-pane CAMetalLayer chains
-        // first; board targets last (the Teardown Order Law: destroy top-down, free last).
+        // Retained offscreen board targets first, then the seam chain (the
+        // Teardown Order Law: destroy top-down, free last).
         VkLayer_shutdown();
-        VkPane_shutdown();
         destroyTargets();
         s_pipelinesBuilt = false;
     }
@@ -1195,13 +1288,15 @@ void Vk_fillRect(void *cmdBuffer, float surfaceW, float surfaceH,
         return;
 
     VkViewport viewport = {0};
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
     viewport.width = drawW;
-    viewport.height = -drawH; // Negative for top-down UI map to bottom-up frame
-    viewport.y = drawH;
+    viewport.height = drawH;
+    viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     VkRect2D scissor = {0};
     scissor.offset.x = (int32_t)fx;
-    scissor.offset.y = (int32_t)(drawH - fy - h);
+    scissor.offset.y = (int32_t)fy;
     scissor.extent.width = (uint32_t)w;
     scissor.extent.height = (uint32_t)h;
 
@@ -1628,6 +1723,7 @@ static void presentDeviceLost(const char *where) {
     fflush(stderr);
 }
 
+;;GETTER
 bool Vk_isDeviceLost(void) {
     return s_deviceLost;
 }
@@ -1637,6 +1733,7 @@ bool Vk_isDeviceLost(void) {
 // non-blocking poll reports "no present CB executing" truthfully — never
 // presented => idle, submit in flight/device lost => busy (defers destroys),
 // frame drained => idle. Never waits, never allocates.
+;;GETTER
 bool Vk_presentFlightIdle(void) {
     if (!Vk_ready())
         return true;
@@ -1648,6 +1745,7 @@ bool Vk_presentFlightIdle(void) {
     return GetFenceStatus_fn(s_device, s_fence) == VK_SUCCESS;
 }
 
+;;GETTER
 bool Vk_isDebugUtilsEnabled(void) {
     return s_instanceDebugUtils;
 }
@@ -1700,7 +1798,7 @@ bool Vk_clearPresentLive(void) {
     return ok;
 }
 
-static bool presentFrameTail(uint32_t imageIndex);
+static bool presentFrameTail(uint32_t imageIndex, VkExtent2D area);
 
 static bool presentFrameLocked(void) {
     // the Ecosystem Vulkan Safety Nets Law seam guard: never touch the driver on a broken health chain.
@@ -1721,17 +1819,16 @@ static bool presentFrameLocked(void) {
         return false;
     }
 
-    // Live-drag freeze (sticky, no churn): while the seam reports a live
-    // resize, surface caps drift off the chain every step and the extent
-    // block below is SKIPPED — no swapchain destroy/create, no fence-chasing
-    // rebuild latency, so the presented frame can never lag one step behind
-    // the edge. The pass presents the current chain TopLeft-pinned (shrink
-    // drags are pixel-perfect; grow drags pin with a clear strip that fills
-    // on settle) and the FIRST settled present rebuilds exactly once. The
-    // render-gen block above keeps its own live gate; OUT_OF_DATE stays
-    // reactive (driver truth, not churn). Fence (100ms) and acquire (25ms)
-    // bounds stay (the Bounded Wait Law / the Ecosystem Vulkan Safety Nets
-    // Law).
+    // Live-drag policy: the extent-drift block below REBUILDS the chain on
+    // every drag step (ANTI_RESIZE_HZ=0 default — the Continuous Real-Time
+    // Live Resize Law: each step renders and presents at the NEW size, no
+    // settle-only jump, no dropped frames). Only the policy-drift rebuild
+    // (presentMode / transparent, above) defers to settle. Fence (100ms)
+    // and acquire (25ms) bounds stay (the Bounded Wait Law / the Ecosystem
+    // Vulkan Safety Nets Law). NOTE: a stale comment here once claimed the
+    // extent block is "skipped" while live — it never was; that claim drove
+    // a drawableSize freeze on the seam layer that stuck the chain at its
+    // drag-start extent (the stretch-then-snap slinky).
 
     // Retire the PREVIOUS frame through its fence BEFORE touching the chain.
     // Bounded wait: if the surface died (e.g. fullscreen close yanked the
@@ -1795,17 +1892,39 @@ static bool presentFrameLocked(void) {
         // no settle-only jump). Set ANTI_RESIZE_HZ=N to cap rebuilds per
         // second (e.g. 30 for programmatic resize floods); when throttled,
         // the pass still falls through to present at the current chain
-        // extent, top-left pinned, never frozen. The CAMetalLayer
-        // panes never rebuild anyway (the Pane-of-Glass Law).
+        // extent, top-left pinned, never frozen. The fixed-buffer seam
+        // canvas never rebuilds on window resize (the Single-Seam Canvas Law).
         int hz = hzEnv ? atoi(hzEnv) : 0;
         s_minRebuildGapNs = hz > 0 ? (int64_t)(1000000000LL / hz) : 0;
     }
-    bool dragLive = Vk_seamIsLiveResizing();
     VkSurfaceCapabilitiesKHR live;
     memset(&live, 0, sizeof(live));
-    if (!dragLive
-        && GetPhysicalDeviceSurfaceCapabilitiesKHR_fn(s_phys, s_surface, &live) == VK_SUCCESS
-        && (live.currentExtent.width != s_extent.width || live.currentExtent.height != s_extent.height)) {
+    VkResult capsResult = GetPhysicalDeviceSurfaceCapabilitiesKHR_fn(s_phys, s_surface, &live);
+    static int s_resizeTrace = -1;
+    if (s_resizeTrace < 0)
+        s_resizeTrace = getenv("ANTI_RESIZE_TRACE") != nullptr;
+    bool extentDrift = capsResult == VK_SUCCESS
+        && (live.currentExtent.width != s_extent.width || live.currentExtent.height != s_extent.height);
+    // NOTE: the seam's render-area request (Vk_seamSetExtent) is deliberately
+    // NOT a rebuild trigger — in the fixed-buffer model the chain never
+    // follows the window, it only re-scissors. The caps comparison above
+    // catches genuine surface changes (display switch, surface recreation).
+    if (s_resizeTrace) {
+        // Read back the BOUND LAYER's drawableSize in the same breath as the
+        // driver's caps: if the layer says 2046x1110 while caps say
+        // 1600x1200, the driver is not reading this layer (and an identity
+        // bug is proven, not guessed). If the layer itself reads 1600x1200,
+        // something reverted our write between the seam sync and this query.
+        extern void GraphicsLayer_drawableSizeOf(void *layer, int *outW, int *outH);
+        int layerW = 0;
+        int layerH = 0;
+        GraphicsLayer_drawableSizeOf(Vk_seamMetalLayer(), &layerW, &layerH);
+        fprintf(stderr, "vk:resize caps=%ux%u chain=%ux%u layer=%dx%d %s\n",
+                live.currentExtent.width, live.currentExtent.height,
+                s_extent.width, s_extent.height, layerW, layerH,
+                extentDrift ? "DRIFT->rebuild" : "steady");
+    }
+    if (extentDrift) {
         uint64_t nowNs = NanoTime_now();
         bool throttled = s_lastRebuildNs != 0 && s_minRebuildGapNs > 0
             && nowNs - s_lastRebuildNs < (uint64_t)s_minRebuildGapNs;
@@ -1822,22 +1941,28 @@ static bool presentFrameLocked(void) {
             // Resize Law). The next drift past the gap rebuilds the chain.
             presentNote("rebuild throttled (present at current extent)");
         }
-    } else if (!dragLive) {
+    } else {
         s_lastRebuildNs = 0;
     }
 
+    // Render area (fixed-buffer model): the chain covers the display; the
+    // window occupies its top-left live-px region. Scissor/viewport/renderArea
+    // to that region — the WindowServer crops the rest via TopLeft gravity.
+    VkExtent2D area = s_extent;
+    if (s_requestedExtent.width > 0 && s_requestedExtent.height > 0) {
+        area.width = s_requestedExtent.width < s_extent.width ? s_requestedExtent.width : s_extent.width;
+        area.height = s_requestedExtent.height < s_extent.height ? s_requestedExtent.height : s_extent.height;
+    }
     if (s_preFrameRenderer) {
-        s_preFrameRenderer(s_window, (int)s_extent.width, (int)s_extent.height, s_frameRendererUserdata);
+        s_preFrameRenderer(s_window, (int)area.width, (int)area.height, s_frameRendererUserdata);
     }
 
-    // The seam canvas is the window's PRIMARY on-screen layer (the Window
-    // Compositing Layer Order Law, managed exception): it composites the two
-    // retained board images (scene bottom, content top) plus any legacy
-    // direct-UI paint, so it ALWAYS presents on demand — even when DIRECT
-    // pane chains exist (the panes are separate CAMetalLayers above it and
-    // present through VkPane_presentAll on their own demand, never replacing
-    // this pass). Boards inverse: board VkLayers are retained offscreen
-    // targets, NOT panes, so VkPane_count() no longer gates this chain.
+    // The seam canvas is the window's PRIMARY on-screen layer (the only
+    // CAMetalLayer in the window — the Single-Seam Canvas Law): it
+    // composites the two retained board images (scene bottom, content top)
+    // plus any legacy direct-UI paint, so it ALWAYS presents on demand.
+    // Board VkLayers are retained offscreen targets, never panes: they
+    // publish images the seam shader samples, they never present.
 
     uint32_t imageIndex = 0;
     VkResult ar = AcquireNextImageKHR_fn(s_device, s_swapchain, 25000000ULL /* ~1 frame */,
@@ -1853,7 +1978,7 @@ static bool presentFrameLocked(void) {
             presentNote("acquire retry failed");
             return false;
         }
-        return presentFrameTail(imageIndex);
+        return presentFrameTail(imageIndex, area);
     }
     if (ar == VK_TIMEOUT || ar == VK_NOT_READY) {
         presentNote("acquire timeout");
@@ -1884,13 +2009,13 @@ static bool presentFrameLocked(void) {
             presentNoteCode("acquire retry failed", (int) ar);
             return false;
         }
-        return presentFrameTail(imageIndex);
+        return presentFrameTail(imageIndex, area);
     }
 
-    return presentFrameTail(imageIndex);
+    return presentFrameTail(imageIndex, area);
 }
 
-static bool presentFrameTail(uint32_t imageIndex) {
+static bool presentFrameTail(uint32_t imageIndex, VkExtent2D area) {
     // the Ecosystem Vulkan Safety Nets Law seam guard at the board submit/present boundary (device + queue).
     if (!VkGuard_check("presentFrameTail", s_device, s_queue, s_deviceLost))
         return false;
@@ -1952,12 +2077,16 @@ static bool presentFrameTail(uint32_t imageIndex) {
         rbi2.renderPass = s_drawablePass;
         rbi2.framebuffer = s_swapchainFbs[imageIndex];
         rbi2.renderArea.offset = (VkOffset2D){0, 0};
-        rbi2.renderArea.extent = s_extent;
+        // Render only the live window region of the fixed monitor-sized chain
+        // (the fixed-buffer model): the rest is cropped away by the
+        // CAMetalLayer's TopLeft gravity. Cheaper per step, and the
+        // drawable↔window mapping stays 1:1 (no scaling anywhere).
+        rbi2.renderArea.extent = area;
         CmdBeginRenderPass_fn(s_cmdBuffer, &rbi2, VK_SUBPASS_CONTENTS_INLINE);
     }
 
     if (s_frameRenderer)
-        s_frameRenderer(s_cmdBuffer, (int)s_extent.width, (int)s_extent.height, s_frameRendererUserdata);
+        s_frameRenderer(s_cmdBuffer, (int)area.width, (int)area.height, s_frameRendererUserdata);
 
     CmdEndRenderPass_fn(s_cmdBuffer);
 
@@ -2151,10 +2280,10 @@ void Vk_drawTexture(void *cmdBuffer, float surfaceW, float surfaceH,
     if (scRight <= scLeft || scTop <= scBottom)
         return;
 
-    VkViewport viewport = { .x = 0.0f, .y = surfaceH, .width = surfaceW, .height = -surfaceH, .maxDepth = 1.0f };
+    VkViewport viewport = { .x = 0.0f, .y = 0.0f, .width = surfaceW, .height = surfaceH, .minDepth = 0.0f, .maxDepth = 1.0f };
     VkRect2D scissor = {
         .offset.x = (int32_t) scLeft,
-        .offset.y = (int32_t) (surfaceH - scTop),
+        .offset.y = (int32_t) scBottom,
         .extent.width = (uint32_t) (scRight - scLeft),
         .extent.height = (uint32_t) (scTop - scBottom)
     };

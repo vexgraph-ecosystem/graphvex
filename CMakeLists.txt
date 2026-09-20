@@ -58,7 +58,6 @@ add_library(graphvex STATIC
     src/vulkan/vk_instance.c
     src/vulkan/vk_mac.c
     src/vulkan/vk_layer.c
-    src/vulkan/vk_pane.c
     src/vulkan/vk_window_seam.c
     src/vulkan/vk_scene.c
     src/vulkan/vk_view.c

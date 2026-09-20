@@ -34,9 +34,9 @@ float horzOffset(uint mode, float slack) {
 
 // Returns the y-axis offset for a specific mode.
 float vertOffset(uint mode, float slack) {
-    if (mode == MODE_FILL_TOP_LEFT || mode == MODE_FILL_TOP_RIGHT) return slack;
+    if (mode == MODE_FILL_BOTTOM_LEFT || mode == MODE_FILL_BOTTOM_RIGHT) return slack;
     if (mode == MODE_FILL_CENTER || mode == MODE_ZOOM_FILL || mode == MODE_ZOOM_FIT) return slack * 0.5;
-    return 0.0; // BOTTOM_LEFT, BOTTOM_RIGHT
+    return 0.0; // TOP_LEFT, TOP_RIGHT
 }
 
 void main() {
@@ -94,6 +94,6 @@ void main() {
         }
     }
 
-    vec4 texColor = texture(u_textures[nonuniformEXT(push.u_textureId)], vec2(uv.x, 1.0 - uv.y));
+    vec4 texColor = texture(u_textures[nonuniformEXT(push.u_textureId)], uv);
     fragColor = texColor * push.u_color;
 }

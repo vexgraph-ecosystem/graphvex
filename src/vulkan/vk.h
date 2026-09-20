@@ -49,6 +49,25 @@ bool Vk_init(void);
 void Vk_shutdown(void);
 bool Vk_ready(void);
 
+// The seam swapchain's CURRENT image extent — the pixels the next present
+// will actually put on screen. Zeroes before the chain exists.
+void Vk_seamExtent(int32_t *outW, int32_t *outH);
+
+// The extent the SEAM OWNER wants RENDERED next (the frame's authoritative
+// live drawable px, published every geometry step). In the fixed-buffer model
+// this is the RENDER AREA, not the chain size: the chain is allocated ONCE at
+// Vk_seamSetMaxExtent and never rebuilt for a window resize, and each present
+// scissors/viewports + render-areas to this region. The CAMetalLayer's
+// kCAGravityTopLeft then crops the big drawable 1:1 to the window bounds —
+// no scaling, no strip, no per-step swapchain churn. Zero = whole chain.
+void Vk_seamSetExtent(int32_t widthPx, int32_t heightPx);
+
+// Allocate the seam chain ONCE at this extent (native px) — the monitor-sized
+// buffer the window is plastered onto. Clamped into the surface's supported
+// range; usually the display's native pixel size. Call before Vk_init (or any
+// time: it applies at the next chain build) from the platform seam.
+void Vk_seamSetMaxExtent(int32_t widthPx, int32_t heightPx);
+
 // Terminal device-loss latch: true once the driver reports
 // VK_ERROR_DEVICE_LOST. The VkDevice is dead from that point — presents
 // short-circuit and only a restart recovers. Lets the title report
@@ -77,6 +96,14 @@ bool Vk_isDebugUtilsEnabled(void);
 // False when not ready or the swapchain is _out of date. Present pacing
 // follows the seam's GetPresentMode callback.
 bool Vk_clearPresent(void);
+
+// Live-drag variant of Vk_clearPresent: identical single-frame contract
+// (same guards, same 100ms fence / 25ms acquire bounds, dirty retained on
+// drop), except the present-lock acquisition retries in ~1ms slices up to
+// an ~8ms budget (half a 60Hz vsync) before dropping — the modal drag step
+// on thread 0 must plaster under worker contention without freezing the
+// modal loop (the Bounded Wait Law). Consumed by GraphicsLoop_modalTickForced.
+bool Vk_clearPresentLive(void);
 
 // Phase-3 live shader reload: rebuild tri/quad pipelines from current
 // .spv bytes with no device/surface/window teardown (tex/sdf rebuild
@@ -107,9 +134,9 @@ const char *Vk_status(void);
 void Vk_fillRect(void *cmdBuffer, float surfaceW, float surfaceH, float x, float y, float w, float h,
                  float r, float g, float b, float a);
 
-// Format + render pass currently backing the window's swapchain. Pane
-// (per-CAMetalLayer) swapchains are built with the same format and a
-// compatible pass so every existing pipeline binds unchanged.
+// Format + render pass currently backing the window's swapchain. The seam
+// canvas is the window's only swapchain, so every existing pipeline binds
+// unchanged.
 unsigned int Vk_getFormat(void);
 void *Vk_getDrawablePass(void);
 
