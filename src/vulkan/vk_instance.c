@@ -107,6 +107,8 @@
  *   - Vk_setPreFrameRenderer(fn, userdata)   : Register pre-frame rendering callback
  *   - Vk_setFrameRenderer(fn, userdata)      : Register frame rendering callback
  *   - Vk_setClearColor(r, g, b, a)           : Configure background clear color
+ *   - Vk_seamSetExtent(w, h)                 : Set seam render area (live drawable px)
+ *   - Vk_seamSetMaxExtent(w, h)              : Allocate seam chain once at monitor px
  *
  * Private Setters: (.c static)
  *   - (none)
@@ -119,6 +121,8 @@
  *   - Vk_isDebugUtilsEnabled(void)           : Query if debug utils extension is active
  *   - Vk_getFormat(void)                     : Query swapchain pixel format
  *   - Vk_getDrawablePass(void)               : Query active drawable render pass handle
+ *   - Vk_seamExtent(outW, outH)              : Query seam chain's current extent
+ *   - Vk_seamMaxExtent(outW, outH)           : Query seam chain's fixed monitor px extent
  *
  * Private Getters: (.c static)
  *   - (none)
@@ -1060,6 +1064,14 @@ void Vk_seamExtent(int32_t *outW, int32_t *outH) {
         *outW = (int32_t) s_extent.width;
     if (outH != nullptr)
         *outH = (int32_t) s_extent.height;
+}
+
+;;GETTER
+void Vk_seamMaxExtent(int32_t *outW, int32_t *outH) {
+    if (outW != nullptr)
+        *outW = (int32_t) s_maxExtent.width;
+    if (outH != nullptr)
+        *outH = (int32_t) s_maxExtent.height;
 }
 
 ;;SETTER

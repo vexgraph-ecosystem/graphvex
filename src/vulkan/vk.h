@@ -53,6 +53,12 @@ bool Vk_ready(void);
 // will actually put on screen. Zeroes before the chain exists.
 void Vk_seamExtent(int32_t *outW, int32_t *outH);
 
+// The seam chain's FIXED allocated extent (native px) — the monitor-sized
+// extent published via Vk_seamSetMaxExtent. Boards (retained VkLayer
+// targets) register at this extent so their images match the seam buffer
+// 1:1 (the Single-Seam Canvas Law). Zero before the seam owner publishes it.
+void Vk_seamMaxExtent(int32_t *outW, int32_t *outH);
+
 // The extent the SEAM OWNER wants RENDERED next (the frame's authoritative
 // live drawable px, published every geometry step). In the fixed-buffer model
 // this is the RENDER AREA, not the chain size: the chain is allocated ONCE at
