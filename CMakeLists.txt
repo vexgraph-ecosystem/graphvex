@@ -86,6 +86,8 @@ add_library(graphvex STATIC
     src/image/swapchain.c
     src/vector/shape.c
     src/graphics/graphics.c
+    src/effect/visual_effect.c
+    src/surface/surface.c
     src/raster/raster_graphics.c
     src/draw/layered_drawable.c
     src/draw/vector_drawable.c
@@ -118,8 +120,10 @@ if(APPLE)
     target_sources(graphvex PRIVATE
         src/objc/font_cocoa.m
         src/objc/graphics_layer_cocoa.m
+        src/objc/visual_effect_cocoa.m
+        src/objc/surface_cocoa.m
     )
-    set_source_files_properties(src/objc/font_cocoa.m src/objc/graphics_layer_cocoa.m PROPERTIES
+    set_source_files_properties(src/objc/font_cocoa.m src/objc/graphics_layer_cocoa.m src/objc/visual_effect_cocoa.m src/objc/surface_cocoa.m PROPERTIES
         COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(graphvex PUBLIC
         "-framework CoreFoundation"

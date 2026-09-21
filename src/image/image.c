@@ -5,6 +5,7 @@
 
 #include "nio/mem.h"
 #include "oop/type.h"
+#include "graphics/graphics.h"
 #include "annotation/definition.h"
 #include "annotation/overview.h"
 #include "annotation/getter.h"
@@ -15,22 +16,17 @@
  * ============================================================================
  * DEFINITION: Image
  * ============================================================================
- * Backend-agnostic two-dimensional discrete pixel memory container serving as
- * the unified graphics image primitive across all rendering layers. Succeeds
- * legacy bindless textures and platform-specific surface bridges by decoupling
- * host CPU image allocations from downstream graphics device driver specifics.
+ * Unified graphics image primitive serving across all rendering pipelines
+ * according to the Unified Graphics System Law. Supports Vulkan (VkImage),
+ * Metal (MTLTexture / IOSurface), Direct3D 12 (ID3D12Resource*), and CPU-side
+ * RGBA8 fallback buffers.
+ *
+ * Automatically resolves the active GPU handle via Image_getGpuHandle based on
+ * the currently selected backend in Graphics (graphics/graphics.h).
  *
  * Each image instance maintains an owned CPU-side RGBA8 shadow buffer sized to
  * exactly width * height * 4 bytes (byte 0 = RED, 1 = GREEN, 2 = BLUE,
  * 3 = ALPHA — the monotonic memory layout of the Strict 0xRRGGBBAA Color Law).
- * Struct memory allocations are serviced via
- * the vexspoke typed memory arena (TYPE_IMAGE_SINGLETON) — the single
- * allocation source; the arena falls back to a private malloc block when its
- * bump region is full, and Image_free reclaims (or safely declines) through
- * Memory_free, never a raw free of the struct. The pixel
- * payload buffer is strictly owned by the Image handle and released upon destruction.
- * In accordance with the Unified Graphics Abstraction Law, coordinate systems,
- * formats, and dimensions remain backend-neutral and zero-tolerant.
  * ============================================================================
  */
 
@@ -38,59 +34,64 @@
 /**
  * ============================================================================
  * CLASS: Image (image/image.c)
- * LEVEL: L2 — Behavior (GPU image behavior API, CPU-shadow stub)
+ * LEVEL: L2 — Behavior (GPU image behavior API, unified graphics handles)
  * ============================================================================
  * SUMMARY:
- *   Backend-agnostic GPU image primitive and successor to legacy bindless
- *   registries and platform-specific surface bridges. Maintains an owned
- *   CPU-side RGBA8 shadow buffer (width * height * 4 bytes, byte0=red..byte3=alpha)
- *   zero-initialized to transparent black until bound to a hardware rasterization pipeline.
+ *   Unified GPU image primitive. Manages backend handles (VkImage, MTLTexture,
+ *   D3D12, IOSurface) alongside an owned CPU RGBA8 shadow buffer.
  *
  * STRUCT FIELDS (Mirroring image/image.h):
  * ----------------------------------------------------------------------------
- *   uint32_t width;   // pixels across (>= 1)
- *   uint32_t height;  // pixels down (>= 1)
- *   uint32_t format;  // backend-agnostic pixel format code (0 = RGBA8 stub default)
- *   uint32_t usage;   // backend-agnostic usage flags (0 = none)
- *   uint64_t typeId;  // block-header type id (TYPE_IMAGE_SINGLETON)
- *   uint8_t *rgba;    // OWNED CPU shadow, width*height*4 bytes RGBA8 (byte0=red..byte3=alpha per the Strict 0xRRGGBBAA Color Law; null = no backing); freed by Image_free, never borrowed
+ *   uint32_t width;        // pixels across (>= 1)
+ *   uint32_t height;       // pixels down (>= 1)
+ *   uint32_t format;       // backend-agnostic pixel format code (0 = RGBA8 stub default)
+ *   uint32_t usage;        // backend-agnostic usage flags (0 = none)
+ *   uint64_t typeId;       // block-header type id (TYPE_IMAGE_SINGLETON)
+ *   uint8_t *rgba;         // OWNED CPU shadow, width*height*4 bytes RGBA8
+ *   void    *vkImage;      // VkImage handle (Vulkan backend)
+ *   void    *metalTexture; // id<MTLTexture> handle (Metal backend)
+ *   void    *d3d12Resource;// ID3D12Resource* handle (DirectX 12 backend)
+ *   void    *ioSurface;    // IOSurfaceRef handle (zero-copy shared GPU memory)
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Public Constructors: (.h)
- *   - Image_0(void)                                      : 1x1 placeholder image
- *   - Image_2(w, h)                                      : Sized image with default format and usage
- *   - Image_4(w, h, format, usage)                       : Fully specified image instance
+ *   - Image_0(void)
+ *   - Image_2(w, h)
+ *   - Image_4(w, h, format, usage)
  *
  * Private Constructors: (.c static)
- *   - imageCreate(w, h, format, usage)                   : Internal allocator and shadow initializer
+ *   - imageCreate(w, h, format, usage)
  *
  * Public Core Functions: (.h)
- *   - Image_free(img)                                    : Release image shadow and struct memory
- *   - Image_upload(rgba, w, h, dest)                     : Copy RGBA8 pixels into destination shadow
+ *   - Image_free(img)
+ *   - Image_upload(rgba, w, h, dest)
+ *   - Image_getGpuHandle(img)
  *
  * Private Core Functions: (.c static)
- *   - imageByteCount(w, h, outBytes)                     : Validate dimensions and compute byte size
- *   - imageFreeStorage(img)                              : Deallocate arena or heap struct block
- *   - imageResize(img, w, h)                             : Reallocate owned shadow buffer to new dims
+ *   - imageByteCount(w, h, outBytes)
+ *   - imageFreeStorage(img)
+ *   - imageResize(img, w, h)
  *
  * Public Setters: (.h)
- *   - Image_setWidth(img, w)                             : Mutate image width and resize buffer
- *   - Image_setHeight(img, h)                            : Mutate image height and resize buffer
- *   - Image_setFormat(img, format)                       : Mutate image pixel format code
- *   - Image_setUsage(img, usage)                         : Mutate image backend usage flags
- *
- * Private Setters: (.c static)
- *   - (none)
+ *   - Image_setWidth(img, w)
+ *   - Image_setHeight(img, h)
+ *   - Image_setFormat(img, format)
+ *   - Image_setUsage(img, usage)
+ *   - Image_setVkImage(img, vkImage)
+ *   - Image_setMetalTexture(img, metalTexture)
+ *   - Image_setDirect12Resource(img, d3d12Resource)
+ *   - Image_setIOSurface(img, ioSurface)
  *
  * Public Getters: (.h)
- *   - Image_getWidth(img)                                : Query image pixel width
- *   - Image_getHeight(img)                               : Query image pixel height
- *   - Image_getFormat(img)                               : Query image pixel format code
- *   - Image_getUsage(img)                                : Query image backend usage flags
- *
- * Private Getters: (.c static)
- *   - (none)
+ *   - Image_getWidth(img)
+ *   - Image_getHeight(img)
+ *   - Image_getFormat(img)
+ *   - Image_getUsage(img)
+ *   - Image_getVkImage(img)
+ *   - Image_getMetalTexture(img)
+ *   - Image_getDirect12Resource(img)
+ *   - Image_getIOSurface(img)
  * ============================================================================
  */
 
@@ -108,10 +109,7 @@ static Image *imageCreate(uint32_t w, uint32_t h, uint32_t format, uint32_t usag
         return nullptr;
     Image *img = (Image*) Memory_alloc(TYPE_IMAGE_SINGLETON, sizeof(Image));
     if (!img)
-        return nullptr; // single allocation source: the arena. Memory_alloc
-                        // itself falls back to a private malloc block when the
-                        // bump region is full, and Memory_free reclaims (or
-                        // safely declines) accordingly — see imageFreeStorage.
+        return nullptr;
     uint8_t *pixels = (uint8_t*) calloc(bytes, 1);
     if (!pixels) {
         imageFreeStorage(img);
@@ -123,6 +121,10 @@ static Image *imageCreate(uint32_t w, uint32_t h, uint32_t format, uint32_t usag
     (*img).usage = usage;
     (*img).typeId = TYPE_IMAGE_SINGLETON;
     (*img).rgba = pixels;
+    (*img).vkImage = nullptr;
+    (*img).metalTexture = nullptr;
+    (*img).d3d12Resource = nullptr;
+    (*img).ioSurface = nullptr;
     return img;
 }
 
@@ -143,8 +145,8 @@ Image *Image_4(uint32_t w, uint32_t h, uint32_t format, uint32_t usage) {
 static bool imageByteCount(uint32_t w, uint32_t h, size_t *outBytes) {
     if (!outBytes)
         return false;
-    size_t n = (size_t)w * (size_t)h;
-    if (w != 0 && n / (size_t)w != (size_t)h)
+    size_t n = (size_t) w * (size_t) h;
+    if (w != 0 && n / (size_t) w != (size_t) h)
         return false;
     if (n > SIZE_MAX / 4)
         return false;
@@ -153,12 +155,6 @@ static bool imageByteCount(uint32_t w, uint32_t h, size_t *outBytes) {
 }
 
 static void imageFreeStorage(Image *img) {
-    // The struct is ALWAYS arena-managed (Memory_alloc): imageCreate has no
-    // calloc fallback, so a raw free() can never be correct here. Memory_free
-    // is safe on every block Memory_alloc can return — bump-resident, slab
-    // slots, and the arena's own malloc-fallback blocks (which arena_free
-    // deliberately declines to reclaim, an OOM-only leak by design). A raw
-    // free() of an arena block would trip malloc's zone ownership checks.
     Memory_free(img);
 }
 
@@ -192,8 +188,22 @@ bool Image_upload(const uint8_t *rgba, uint32_t w, uint32_t h, Image *dest) {
         imageResize(dest, w, h);
     if (!(*dest).rgba || w != (*dest).width || h != (*dest).height)
         return false;
-    memcpy((*dest).rgba, rgba, (size_t)w * (size_t)h * 4);
+    memcpy((*dest).rgba, rgba, (size_t) w * (size_t) h * 4);
     return true;
+}
+
+void *Image_getGpuHandle(const Image *img) {
+    if (!img)
+        return nullptr;
+    uint32_t backend = Graphics_getGraphicsId();
+    switch (backend) {
+        case GRAPHICS_BACKEND_VULKAN:
+            return (*img).vkImage;
+        case GRAPHICS_BACKEND_METAL:
+            return (*img).metalTexture;
+        default:
+            return (*img).rgba;
+    }
 }
 
 // SETTERS (PUBLIC & PRIVATE)
@@ -230,6 +240,34 @@ void Image_setUsage(Image *img, uint32_t usage) {
     (*img).usage = usage;
 }
 
+;;SETTER
+void Image_setVkImage(Image *img, void *vkImage) {
+    if (!img)
+        return;
+    (*img).vkImage = vkImage;
+}
+
+;;SETTER
+void Image_setMetalTexture(Image *img, void *metalTexture) {
+    if (!img)
+        return;
+    (*img).metalTexture = metalTexture;
+}
+
+;;SETTER
+void Image_setDirect12Resource(Image *img, void *d3d12Resource) {
+    if (!img)
+        return;
+    (*img).d3d12Resource = d3d12Resource;
+}
+
+;;SETTER
+void Image_setIOSurface(Image *img, void *ioSurface) {
+    if (!img)
+        return;
+    (*img).ioSurface = ioSurface;
+}
+
 // GETTERS (PUBLIC & PRIVATE)
 
 ;;GETTER
@@ -250,4 +288,24 @@ uint32_t Image_getFormat(const Image *img) {
 ;;GETTER
 uint32_t Image_getUsage(const Image *img) {
     return img ? (*img).usage : 0;
+}
+
+;;GETTER
+void *Image_getVkImage(const Image *img) {
+    return img ? (*img).vkImage : nullptr;
+}
+
+;;GETTER
+void *Image_getMetalTexture(const Image *img) {
+    return img ? (*img).metalTexture : nullptr;
+}
+
+;;GETTER
+void *Image_getDirect12Resource(const Image *img) {
+    return img ? (*img).d3d12Resource : nullptr;
+}
+
+;;GETTER
+void *Image_getIOSurface(const Image *img) {
+    return img ? (*img).ioSurface : nullptr;
 }
