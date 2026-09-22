@@ -51,6 +51,8 @@ typedef struct Label {
     uint32_t  mnemonic;                     // the &accelerator key (0 = none)
     bool      ligatures;
     float     spacing;
+    bool      autoW;                        // SIZE_AUTO width: measure on render
+    bool      autoH;                        // SIZE_AUTO height: measure on render
 } Label;
 
 // --- Constructors (arity) ---
@@ -73,9 +75,13 @@ void Label_free(Label *label);
 // format ERASES the previous bindings. \[ emits a literal '['.
 void Label_setText(Label *label, const char *fmt, ...);
 
-// Re-render from the stored format + slots (called by the reactive observers).
+// Re-render from the stored format + slots: drains bound reactives on the owner
+// thread, resolves AUTO dims (measure on render), and emits the text.
 void Label_render(Label *label);
 
+// Set the size. Either dim may be SIZE_AUTO: the label then measures its text
+// (font size + padding) on every render instead of holding a fixed extent.
+// Concrete values clear the AUTO intent for that dim.
 void Label_setSize(Label *label, float w, float h);
 void Label_setLocation(Label *label, float x, float y);
 void Label_setAnchor(Label *label, int anchor);
@@ -89,6 +95,8 @@ void Label_setSpacing(Label *label, float spacing);
 const char *Label_getText(const Label *label);
 uint32_t Label_getTextColor(const Label *label);
 uint32_t Label_getMnemonic(const Label *label);
+bool Label_isAutoWidth(const Label *label);
+bool Label_isAutoHeight(const Label *label);
 bool Label_isValid(const Label *label);
 
 // --- toString Law (bounded, cold-path) ---

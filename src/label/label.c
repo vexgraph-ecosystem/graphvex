@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "font/font.h"
+#include "lang/size.h"
 #include "lang/str.h"
 #include "annotation/definition.h"
 #include "annotation/overview.h"
@@ -49,10 +51,12 @@
  *   LabelSlot slots[16];   // the bound slots (in order)
  *   uint32_t slotCount;
  *   uint32_t textColor; uint32_t mnemonic; bool ligatures; float spacing;
+ *   bool autoW, autoH;     // SIZE_AUTO dims: measure text on render
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
  *   drainSlots(label)                : drain every bound reactive (owner fire)
+ *   resolveAuto(label)               : measure text -> concrete AUTO dims
  *   buildText(label, fmt, args, collecting) : one format walk (collect or render)
  *
  * FUNCTION REGISTRY:
@@ -62,12 +66,13 @@
  *
  * Public Core Functions: (.h)
  *   - Label_setText(label, fmt, ...) / Label_render(label)
+ *   - Label_setSize(label, w, h) (SIZE_AUTO arms measure-on-render per dim)
  *
  * Public Setters: (.h)
  *   - Label_setTextColor/Mnemonic/Ligatures/Spacing
  *
  * Public Getters: (.h)
- *   - Label_getText/TextColor/Mnemonic / Label_isValid
+ *   - Label_getText/TextColor/Mnemonic / Label_isAutoWidth/Height / Label_isValid
  *
  * Public toString: (.h)
  *   - Label_toString / Label_toStringStruct
@@ -84,6 +89,9 @@ static void drainSlots(Label *label) {
             Reactive_drain((*label).slots[i].reactive);
     }
 }
+
+// Forward: defined in the setters (needs labelPrimary); called by Label_render.
+static void resolveAuto(Label *label);
 
 // One walk of the format. collecting=true reads the varargs into the slots;
 // collecting=false reads the stored slots and emits the text.
@@ -176,6 +184,8 @@ static Label *labelCreate(const char *text, uint32_t color) {
     GraphicsComponent_init(&gc);
     Component_addGraphics(&(*label).component, &gc);
     (*label).textColor = color;
+    (*label).autoW = false;
+    (*label).autoH = false;
     if (text != nullptr) {
         size_t n = strlen(text);
         if (n >= sizeof((*label).text))
@@ -241,6 +251,8 @@ void Label_render(Label *label) {
         return;
     drainSlots(label);                                   // owner-thread reactive pull
     buildText(label, (*label).format, nullptr, false);   // emit from the stored slots
+    if ((*label).autoW || (*label).autoH)
+        resolveAuto(label);                              // measure text -> concrete size
 }
 
 // SETTERS (PUBLIC & PRIVATE)
@@ -250,8 +262,34 @@ static GraphicsComponent *labelPrimary(Label *label) {
 }
 
 ;;SETTER
+// Measure the rendered text (font advances + the label's padding) and write the
+// measured extent into the AUTO dims. The AUTO flags persist, so every render
+// re-measures — text, font, and padding may all have moved since the last one.
+static void resolveAuto(Label *label) {
+    GraphicsComponent *gc = labelPrimary(label);
+    if (gc == nullptr)
+        return;
+    float padL, padT, padR, padB;
+    GraphicsComponent_getPadding(gc, &padL, &padT, &padR, &padB);
+    float textW = 0.0f;
+    for (const char *p = (*label).text; *p != '\0'; p++)
+        textW += (float) Font_advance(*p);
+    float textH = (float) Font_lineHeight();
+    float w = GraphicsComponent_getWidth(gc);
+    float h = GraphicsComponent_getHeight(gc);
+    if ((*label).autoW)
+        w = textW + padL + padR;
+    if ((*label).autoH)
+        h = textH + padT + padB;
+    GraphicsComponent_setSize(gc, w, h);
+}
+
 void Label_setSize(Label *label, float w, float h) {
     if (label == nullptr) return;
+    // AUTO arms measure-on-render for that dim (the flag persists; the gc holds
+    // the last resolved concrete extent). Concrete clears the intent.
+    (*label).autoW = Size_isAutoF(w);
+    (*label).autoH = Size_isAutoF(h);
     GraphicsComponent *gc = labelPrimary(label);
     if (gc != nullptr) GraphicsComponent_setSize(gc, w, h);
 }
@@ -323,6 +361,16 @@ uint32_t Label_getTextColor(const Label *label) {
 ;;GETTER
 uint32_t Label_getMnemonic(const Label *label) {
     return label ? (*label).mnemonic : 0u;
+}
+
+;;GETTER
+bool Label_isAutoWidth(const Label *label) {
+    return label ? (*label).autoW : false;
+}
+
+;;GETTER
+bool Label_isAutoHeight(const Label *label) {
+    return label ? (*label).autoH : false;
 }
 
 ;;GETTER
