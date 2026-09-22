@@ -85,4 +85,12 @@ bool Graphics_drawPath(const Shape *shape, const Stroke *stroke);
 bool Graphics_drawImage(const Image *image, const Rectangle *dst);
 bool Graphics_drawText(const Rectangle *rect, const char *text, const Brush *brush);
 
+// Fitted image draw: resolve the fit (Image_fitRect) into the destination,
+// scissor to the clip when the whole-image rect overflows it, draw, then reset
+// the scissor. outFit (nullable) receives the resolved geometry (dest-last).
+// False on an unselected row or a hostile image/dst (the Cold-Strict,
+// Hot-Minimal Validation Law). This is the one call a picture makes.
+bool Graphics_drawImageFit(const Image *image, const Rectangle *dst, ImageFitMode mode,
+                           ImageAnchor anchor, float windowW, float windowH, ImageFit *outFit);
+
 #endif // LANG_GRAPHICS_H

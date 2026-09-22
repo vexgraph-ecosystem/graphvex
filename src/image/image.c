@@ -1,5 +1,6 @@
 #include "lang/image.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,6 +28,11 @@
  * Lifetime: the struct + shadow are heap-owned; destroy frees both. The
  * dialect handle is NOT freed here (the device owns it) — set it to null
  * before destroy, or let the device reap it first (the Teardown Order Law).
+ *
+ * The fit contract rides here too: Image_fitRect resolves how the image maps
+ * into a destination rect — stretch, contain (letterbox), cover (crop), or a
+ * source-pixel window (anchored, scaled to fill) — into an ImageFit record the
+ * Graphics seam scissors and draws. Pure math, no backend, no drawing.
  * ============================================================================
  */
 
@@ -67,9 +73,14 @@
  *   - Image_destroy(image)
  *   - Image_upload(rgba, w, h, dest)
  *   - Image_ensureShadow(w, h, dest)
+ *   - Image_fitRect(image, dst, mode, anchor, windowW, windowH, outFit)
+ *     : resolve how the image maps into dst (STRETCH / CONTAIN / COVER /
+ *       WINDOW) into an ImageFit record — dst rect + clip rect + needsClip
  *
  * Private Core Functions: (.c static)
  *   - shadowAlloc(width, height)
+ *   - windowOriginX(anchor, imageW, windowW)  : WINDOW source origin, X
+ *   - windowOriginY(anchor, imageH, windowH)  : WINDOW source origin, Y
  *
  * Public Setters: (.h)
  *   - Image_setNative(image, native)
@@ -176,6 +187,95 @@ bool Image_upload(const uint8_t *rgba, uint32_t width, uint32_t height, Image *d
     if (!Image_ensureShadow(width, height, dest))
         return false;
     memcpy((*dest).pixels, rgba, (size_t) width * (size_t) height * 4u);
+    return true;
+}
+
+// WINDOW source origin: which pixel the window starts at, per anchor.
+static float windowOriginX(ImageAnchor anchor, float imageW, float windowW) {
+    switch (anchor) {
+        case IMAGE_ANCHOR_TOP_LEFT:
+        case IMAGE_ANCHOR_BOTTOM_LEFT:
+            return 0.0f;
+        case IMAGE_ANCHOR_TOP_RIGHT:
+        case IMAGE_ANCHOR_BOTTOM_RIGHT:
+            return imageW - windowW;
+        default:
+            return (imageW - windowW) * 0.5f;
+    }
+}
+
+static float windowOriginY(ImageAnchor anchor, float imageH, float windowH) {
+    switch (anchor) {
+        case IMAGE_ANCHOR_TOP_LEFT:
+        case IMAGE_ANCHOR_TOP_RIGHT:
+            return 0.0f;
+        case IMAGE_ANCHOR_BOTTOM_LEFT:
+        case IMAGE_ANCHOR_BOTTOM_RIGHT:
+            return imageH - windowH;
+        default:
+            return (imageH - windowH) * 0.5f;
+    }
+}
+
+bool Image_fitRect(const Image *image, const Rectangle *dst, ImageFitMode mode,
+                   ImageAnchor anchor, float windowW, float windowH, ImageFit *outFit) {
+    if (image == nullptr || dst == nullptr || outFit == nullptr)
+        return false;
+    float iw = (float) Image_width(image);
+    float ih = (float) Image_height(image);
+    float dx = (*dst).x, dy = (*dst).y, dw = (*dst).width, dh = (*dst).height;
+    if (iw <= 0.0f || ih <= 0.0f || dw <= 0.0f || dh <= 0.0f)
+        return false;
+
+    ImageFit fit;
+    switch (mode) {
+        case IMAGE_FIT_STRETCH:
+            fit.dst = *dst;
+            fit.clip = *dst;
+            fit.needsClip = false;
+            break;
+        case IMAGE_FIT_CONTAIN: {
+            // Scale the whole image inside dst, centered (letterbox).
+            float s = fminf(dw / iw, dh / ih);
+            float w = iw * s, h = ih * s;
+            fit.dst = (Rectangle){ dx + (dw - w) * 0.5f, dy + (dh - h) * 0.5f, w, h };
+            fit.clip = *dst;
+            fit.needsClip = false;
+            break;
+        }
+        case IMAGE_FIT_COVER: {
+            // Scale to cover dst, centered; the overflow is scissored away.
+            float s = fmaxf(dw / iw, dh / ih);
+            float w = iw * s, h = ih * s;
+            fit.dst = (Rectangle){ dx + (dw - w) * 0.5f, dy + (dh - h) * 0.5f, w, h };
+            fit.clip = *dst;
+            fit.needsClip = true;
+            break;
+        }
+        case IMAGE_FIT_WINDOW: {
+            // The widest widget-shaped window that fits inside the image (the
+            // cover window) is the clamp ceiling: showing more is impossible.
+            float coverW = fminf(iw, ih * (dw / dh));
+            float wW = windowW > 0.0f ? windowW
+                     : windowH > 0.0f ? windowH * (dw / dh)
+                     : dw;                       // unset = dst pixels (1:1)
+            if (wW > coverW)
+                wW = coverW;
+            if (wW <= 0.0f)
+                return false;
+            float wH = wW * (dh / dw);
+            float s = dw / wW;                   // the window maps onto dst
+            float wx = windowOriginX(anchor, iw, wW);
+            float wy = windowOriginY(anchor, ih, wH);
+            fit.dst = (Rectangle){ dx - wx * s, dy - wy * s, iw * s, ih * s };
+            fit.clip = *dst;
+            fit.needsClip = true;
+            break;
+        }
+        default:
+            return false;
+    }
+    *outFit = fit;
     return true;
 }
 

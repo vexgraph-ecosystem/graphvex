@@ -220,3 +220,13 @@ if(EXISTS "${GRAPHVEX_TEST_DIR}/size_test.c" AND NOT TARGET size_test)
     target_link_libraries(size_test PRIVATE graphvex)
     target_compile_options(size_test PRIVATE -Wall -Wextra -Werror)
 endif()
+
+# Picture fit contract: STRETCH/CONTAIN/COVER/WINDOW geometry + the two-door
+# window spelling + anchors + clamp, then bg fill + fitted draw pixels.
+if(EXISTS "${GRAPHVEX_TEST_DIR}/image_fit_test.c" AND NOT TARGET image_fit_test)
+    add_executable(image_fit_test
+        ${GRAPHVEX_TEST_DIR}/image_fit_test.c
+    )
+    target_link_libraries(image_fit_test PRIVATE graphvex)
+    target_compile_options(image_fit_test PRIVATE -Wall -Wextra -Werror)
+endif()

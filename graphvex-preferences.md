@@ -37,6 +37,7 @@ Directly coupling UI widgets or game logic to Vulkan or Metal handles creates in
 1. **Agnostic Primitives First:** High-level rendering operates exclusively on unified `Image`, `Swapchain`, `CommandBuffer`, and `GraphicsLayer` structs. Never expose driver handles (`VkImage`, `VkDevice`, `MTLDevice`) in client headers.
 2. **Bounded Synchronization:** All fence joins and timeline waits must obey `FENCE_WAIT_TIMEOUT_NS` (100ms max). Indefinite GPU waits (`UINT64_MAX`) are strictly prohibited.
 3. **Transparent Backing Resolution:** Backing surfaces must resolve pixel scaling via `backingScaleFactor` to ensure native 1:1 hardware pixel mapping.
+4. **Fitted Image Contract:** Every image drawn into a destination rect resolves through `Image_fitRect` + `Graphics_drawImageFit` — never a bespoke widget transform. The families are `IMAGE_FIT_STRETCH` (whole image stretched into dst), `IMAGE_FIT_CONTAIN` (fit inside, centered, letterboxed), `IMAGE_FIT_COVER` (cover, centered, overflow cropped), and `IMAGE_FIT_WINDOW` (a source-pixel window, anchored, scaled to fill dst). A WINDOW is widget-shaped: at most one of `windowW` / `windowH` drives it and the other derives from the dst aspect, so the same window is expressible from either axis; unset means dst pixels (true 1:1); the window always clamps to the image (you cannot show pixels that do not exist). The scale is `dst ÷ window` — a 300-px window in a 600-px dst draws at 2x. Fit math is pure, R3-owned, and testable without a backend; widgets call it, never reimplement it.
 
 ---
 

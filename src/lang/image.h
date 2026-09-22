@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "c23/constructor.h"
+#include "lang/rect/rectangle.h" // vexspoke R2 Rectangle (native pixels, Y-down)
 
 // lang/image.h — the image contract (the language's pixel currency).
 //
@@ -90,5 +91,53 @@ void    *Image_iosurface(const Image *image); // IOSurfaceRef when shared (nulla
 // --- Setters (dialect handle attach; opaque transit) ---
 void Image_setNative(Image *image, void *native);
 void Image_setIOSurface(Image *image, void *ioSurface);
+
+// --- Fit modes (the picture contract) ---
+// How an image maps into a destination rect: the three scaling families plus
+// the source-pixel WINDOW family (the anchored picture modes).
+//
+//   IMAGE_FIT_STRETCH : the whole image stretched into dst (aspect free).
+//   IMAGE_FIT_CONTAIN : the whole image scaled to fit INSIDE dst, centered —
+//                       letterboxed, every pixel of the image shows.
+//   IMAGE_FIT_COVER   : the image scaled to COVER dst, centered — overflow
+//                       cropped to dst, no background shows.
+//   IMAGE_FIT_WINDOW  : a SOURCE-PIXEL window drawn into dst, anchored. The
+//                       window is widget-shaped: at most one of windowW /
+//                       windowH drives it, the other derives from the dst
+//                       aspect, and the window scales to fill dst — so a
+//                       300-px window in a 600-px dst draws at 2x. Unset
+//                       (both 0) means dst pixels (true 1:1). Always clamped
+//                       to the image: you cannot show pixels that do not exist.
+typedef enum ImageFitMode {
+    IMAGE_FIT_STRETCH = 0,
+    IMAGE_FIT_CONTAIN,
+    IMAGE_FIT_COVER,
+    IMAGE_FIT_WINDOW,
+} ImageFitMode;
+
+// Which source pixels a WINDOW draw shows.
+typedef enum ImageAnchor {
+    IMAGE_ANCHOR_CENTER = 0,
+    IMAGE_ANCHOR_TOP_LEFT,
+    IMAGE_ANCHOR_TOP_RIGHT,
+    IMAGE_ANCHOR_BOTTOM_LEFT,
+    IMAGE_ANCHOR_BOTTOM_RIGHT,
+} ImageAnchor;
+
+// Resolved geometry of a fitted draw (native pixels, Y-down). A behaviorless
+// record owned by Image (the SLOT RECORD doctrine, like ImageDesc): dst is
+// where the WHOLE image lands — it may exceed the widget for COVER/WINDOW —
+// clip is the visible region, and needsClip says the caller must scissor.
+typedef struct ImageFit {
+    Rectangle dst;    // whole-image rect (may overflow the widget)
+    Rectangle clip;   // visible region (the widget rect when clipped)
+    bool needsClip;   // true when dst overflows clip
+} ImageFit;
+
+// Resolve the fit of `image` into `dst`, filling outFit (dest-last). Pure
+// math, no drawing. False on null, zero extent, or an unknown mode (the
+// Cold-Strict, Hot-Minimal Validation Law: fail closed).
+bool Image_fitRect(const Image *image, const Rectangle *dst, ImageFitMode mode,
+                   ImageAnchor anchor, float windowW, float windowH, ImageFit *outFit);
 
 #endif // LANG_IMAGE_H

@@ -46,6 +46,8 @@
  *   - Graphics_registerRow(row) / Graphics_setGraphics(backendId)
  *   - Graphics_getCurrent(void) / Graphics_getGraphicsId(void)
  *   - Graphics_<verb>(...) forwarders
+ *   - Graphics_drawImageFit(image, dst, mode, anchor, windowW, windowH, outFit)
+ *     : fit resolve + scissor + draw + scissor reset (the picture one-call)
  *
  * Private Core Functions: (.c static)
  *   - registryGrow(void)
@@ -174,6 +176,21 @@ bool Graphics_drawPath(const Shape *shape, const Stroke *stroke) {
 bool Graphics_drawImage(const Image *image, const Rectangle *dst) {
     const Graphics *g = s_current;
     return (g != nullptr && (*g).drawImage != nullptr) ? (*g).drawImage(image, dst) : false;
+}
+
+bool Graphics_drawImageFit(const Image *image, const Rectangle *dst, ImageFitMode mode,
+                           ImageAnchor anchor, float windowW, float windowH, ImageFit *outFit) {
+    ImageFit fit;
+    if (!Image_fitRect(image, dst, mode, anchor, windowW, windowH, &fit))
+        return false;
+    if (fit.needsClip)
+        Graphics_clip(&fit.clip);
+    bool ok = Graphics_drawImage(image, &fit.dst);
+    if (fit.needsClip)
+        Graphics_clip(nullptr);
+    if (outFit != nullptr)
+        *outFit = fit;
+    return ok;
 }
 
 bool Graphics_drawText(const Rectangle *rect, const char *text, const Brush *brush) {
