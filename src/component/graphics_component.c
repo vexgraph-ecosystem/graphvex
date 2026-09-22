@@ -45,13 +45,14 @@
  *
  * STRUCT FIELDS (Mirroring lang/graphics_component.h):
  * ----------------------------------------------------------------------------
- *   float x, y, w, h;        // Placement + size in parent units
+ *   float x, y, w, h;        // Placement + size in parent units (w/h may be SIZE_AUTO)
  *   float scaleX, scaleY;    // Axis scale multipliers (1 = unscaled)
  *   uint8_t origin;          // GRAPHICS_COMPONENT_ORIGIN_* 0..3
  *   uint8_t anchor;          // GRAPHICS_COMPONENT_ANCHOR_* 0..8
  *   int32_t pivot;           // GRAPHICS_COMPONENT_PIVOT_* 0..4
  *   float minW, minH; float maxW, maxH;   // Size constraints (0 = unset)
  *   float minX, minY; float maxX, maxY;   // Location constraints
+ *   float measuredW, measuredH;           // AUTO equivalence (owner-supplied)
  *   float marginL/T/R/B;     // Additive placement offsets
  *   float paddingL/T/R/B;    // Inward content insets
  *   float borderWidth; uint32_t borderColor; uint32_t backgroundColor;
@@ -110,8 +111,12 @@ void GraphicsComponent_init(GraphicsComponent *self) {
         return;
     (*self).x = 0.0f;
     (*self).y = 0.0f;
-    (*self).w = 0.0f;
-    (*self).h = 0.0f;
+    // AUTO by default: the declared size starts as the åuto sentinel and
+    // resolves to the element's AUTO equivalence (0 for a dumb element).
+    (*self).w = (float) SIZE_AUTO;
+    (*self).h = (float) SIZE_AUTO;
+    (*self).measuredW = 0.0f;
+    (*self).measuredH = 0.0f;
     (*self).scaleX = 1.0f;
     (*self).scaleY = 1.0f;
     (*self).origin = GRAPHICS_COMPONENT_ORIGIN_TOP_LEFT;
@@ -169,11 +174,11 @@ void GraphicsComponent_free(GraphicsComponent *component) {
 void GraphicsComponent_recompute(GraphicsComponent *self) {
     if (!self)
         return;
-    // AUTO dims (negative) are UNRESOLVED: the owner measures content and writes
-    // concrete sizes, so the abs of an AUTO dim resolves to zero here — never
-    // garbage from a negative extent (the Absolute Size and Location Law).
-    float rw = Size_isAutoF((*self).w) ? 0.0f : (*self).w;
-    float rh = Size_isAutoF((*self).h) ? 0.0f : (*self).h;
+    // AUTO dims (the åuto sentinel) resolve to the element's AUTO equivalence:
+    // the owner-supplied measured size, 0 for a dumb element. The declared
+    // sentinel survives, so an AUTO dim re-resolves on every recompute.
+    float rw = Size_isAutoF((*self).w) ? (*self).measuredW : (*self).w;
+    float rh = Size_isAutoF((*self).h) ? (*self).measuredH : (*self).h;
     float sw = rw * (*self).scaleX;
     float sh = rh * (*self).scaleY;
     float locX = (*self).x;
@@ -335,14 +340,20 @@ void GraphicsComponent_setLocation(GraphicsComponent *self, float x, float y) {
 void GraphicsComponent_setSize(GraphicsComponent *self, float w, float h) {
     if (!self)
         return;
-    if (w < (*self).minW)
-        w = (*self).minW;
-    if (h < (*self).minH)
-        h = (*self).minH;
-    if ((*self).maxW > 0.0f && w > (*self).maxW)
-        w = (*self).maxW;
-    if ((*self).maxH > 0.0f && h > (*self).maxH)
-        h = (*self).maxH;
+    // AUTO (the åuto sentinel) is never clamped: a negative dim passes straight
+    // through so the declared sentinel survives to resolve via the equivalence.
+    if (!Size_isAutoF(w)) {
+        if (w < (*self).minW)
+            w = (*self).minW;
+        if ((*self).maxW > 0.0f && w > (*self).maxW)
+            w = (*self).maxW;
+    }
+    if (!Size_isAutoF(h)) {
+        if (h < (*self).minH)
+            h = (*self).minH;
+        if ((*self).maxH > 0.0f && h > (*self).maxH)
+            h = (*self).maxH;
+    }
     GraphicsComponent_setWidth(self, w);
     GraphicsComponent_setHeight(self, h);
 }
@@ -474,6 +485,15 @@ void GraphicsComponent_setPadding(GraphicsComponent *self, float l, float t, flo
 }
 
 ;;SETTER
+void GraphicsComponent_setMeasuredSize(GraphicsComponent *self, float w, float h) {
+    if (!self)
+        return;
+    (*self).measuredW = w < 0.0f ? 0.0f : w;
+    (*self).measuredH = h < 0.0f ? 0.0f : h;
+    GraphicsComponent_recompute(self);
+}
+
+;;SETTER
 void GraphicsComponent_setBorderWidth(GraphicsComponent *self, float w) {
     if (!self)
         return;
@@ -548,6 +568,26 @@ bool GraphicsComponent_isAutoWidth(const GraphicsComponent *self) {
 ;;GETTER
 bool GraphicsComponent_isAutoHeight(const GraphicsComponent *self) {
     return self ? Size_isAutoF((*self).h) : false;
+}
+;;GETTER
+float GraphicsComponent_getResolvedWidth(const GraphicsComponent *self) {
+    if (self == nullptr)
+        return 0.0f;
+    return Size_isAutoF((*self).w) ? (*self).measuredW : (*self).w;
+}
+;;GETTER
+float GraphicsComponent_getResolvedHeight(const GraphicsComponent *self) {
+    if (self == nullptr)
+        return 0.0f;
+    return Size_isAutoF((*self).h) ? (*self).measuredH : (*self).h;
+}
+;;GETTER
+float GraphicsComponent_getMeasuredWidth(const GraphicsComponent *self) {
+    return self ? (*self).measuredW : 0.0f;
+}
+;;GETTER
+float GraphicsComponent_getMeasuredHeight(const GraphicsComponent *self) {
+    return self ? (*self).measuredH : 0.0f;
 }
 ;;GETTER
 float GraphicsComponent_getScaleX(const GraphicsComponent *self) { return self ? (*self).scaleX : 1.0f; }

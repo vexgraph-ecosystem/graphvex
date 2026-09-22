@@ -51,8 +51,6 @@ typedef struct Label {
     uint32_t  mnemonic;                     // the &accelerator key (0 = none)
     bool      ligatures;
     float     spacing;
-    bool      autoW;                        // SIZE_AUTO width: measure on render
-    bool      autoH;                        // SIZE_AUTO height: measure on render
 } Label;
 
 // --- Constructors (arity) ---
@@ -80,8 +78,9 @@ void Label_setText(Label *label, const char *fmt, ...);
 void Label_render(Label *label);
 
 // Set the size. Either dim may be SIZE_AUTO: the label then measures its text
-// (font size + padding) on every render instead of holding a fixed extent.
-// Concrete values clear the AUTO intent for that dim.
+// (font advances x lines + padding) into the AUTO equivalence on every render.
+// A Label is AUTO by default (its GraphicsComponent starts at the sentinel), so
+// it auto-sizes out of the box. Concrete values clear the AUTO intent per dim.
 void Label_setSize(Label *label, float w, float h);
 void Label_setLocation(Label *label, float x, float y);
 void Label_setAnchor(Label *label, int anchor);

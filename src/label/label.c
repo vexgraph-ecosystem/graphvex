@@ -51,12 +51,12 @@
  *   LabelSlot slots[16];   // the bound slots (in order)
  *   uint32_t slotCount;
  *   uint32_t textColor; uint32_t mnemonic; bool ligatures; float spacing;
- *   bool autoW, autoH;     // SIZE_AUTO dims: measure text on render
+ *   (no AUTO flags: the GraphicsComponent's declared dims carry the sentinel)
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
  *   drainSlots(label)                : drain every bound reactive (owner fire)
- *   resolveAuto(label)               : measure text -> concrete AUTO dims
+ *   measureText(label)               : text -> the AUTO equivalence
  *   buildText(label, fmt, args, collecting) : one format walk (collect or render)
  *
  * FUNCTION REGISTRY:
@@ -90,8 +90,9 @@ static void drainSlots(Label *label) {
     }
 }
 
-// Forward: defined in the setters (needs labelPrimary); called by Label_render.
-static void resolveAuto(Label *label);
+// Forward: defined in the setters; used by the core render path.
+static GraphicsComponent *labelPrimary(Label *label);
+static void measureText(Label *label);
 
 // One walk of the format. collecting=true reads the varargs into the slots;
 // collecting=false reads the stored slots and emits the text.
@@ -102,7 +103,10 @@ static void buildText(Label *label, const char *fmt, va_list *args, bool collect
     const char *p = fmt;
     while (*p != '\0') {
         if (*p == '\\' && *(p + 1) != '\0') {       // escape
-            Str_putc(&out, *(p + 1));
+            char e = *(p + 1);
+            if (e == 'n')      Str_putc(&out, '\n');    // newline
+            else if (e == 't') Str_putc(&out, '\t');    // tab
+            else               Str_putc(&out, e);       // \[ -> literal, etc.
             p += 2;
             continue;
         }
@@ -184,8 +188,6 @@ static Label *labelCreate(const char *text, uint32_t color) {
     GraphicsComponent_init(&gc);
     Component_addGraphics(&(*label).component, &gc);
     (*label).textColor = color;
-    (*label).autoW = false;
-    (*label).autoH = false;
     if (text != nullptr) {
         size_t n = strlen(text);
         if (n >= sizeof((*label).text))
@@ -251,8 +253,9 @@ void Label_render(Label *label) {
         return;
     drainSlots(label);                                   // owner-thread reactive pull
     buildText(label, (*label).format, nullptr, false);   // emit from the stored slots
-    if ((*label).autoW || (*label).autoH)
-        resolveAuto(label);                              // measure text -> concrete size
+    GraphicsComponent *gc = labelPrimary(label);
+    if (gc != nullptr && (GraphicsComponent_isAutoWidth(gc) || GraphicsComponent_isAutoHeight(gc)))
+        measureText(label);                              // text -> AUTO equivalence
 }
 
 // SETTERS (PUBLIC & PRIVATE)
@@ -262,34 +265,31 @@ static GraphicsComponent *labelPrimary(Label *label) {
 }
 
 ;;SETTER
-// Measure the rendered text (font advances + the label's padding) and write the
-// measured extent into the AUTO dims. The AUTO flags persist, so every render
-// re-measures — text, font, and padding may all have moved since the last one.
-static void resolveAuto(Label *label) {
+// Measure the rendered text (font advances x lines — explicit '\n' plus wrap at
+// a concrete width — and the label's padding) and write the result as the AUTO
+// equivalence. The declared dims keep the sentinel, so this re-runs every
+// render: text, font, padding, and wrap width may all have moved.
+static void measureText(Label *label) {
     GraphicsComponent *gc = labelPrimary(label);
     if (gc == nullptr)
         return;
     float padL, padT, padR, padB;
     GraphicsComponent_getPadding(gc, &padL, &padT, &padR, &padB);
-    float textW = 0.0f;
-    for (const char *p = (*label).text; *p != '\0'; p++)
-        textW += (float) Font_advance(*p);
-    float textH = (float) Font_lineHeight();
-    float w = GraphicsComponent_getWidth(gc);
-    float h = GraphicsComponent_getHeight(gc);
-    if ((*label).autoW)
-        w = textW + padL + padR;
-    if ((*label).autoH)
-        h = textH + padT + padB;
-    GraphicsComponent_setSize(gc, w, h);
+    // Wrap only when the declared width is concrete (an AUTO width never wraps).
+    int wrap = 0;
+    if (!GraphicsComponent_isAutoWidth(gc)) {
+        float avail = GraphicsComponent_getWidth(gc) - padL - padR;
+        if (avail > 0.0f)
+            wrap = (int) avail;
+    }
+    int tw = 0;
+    int th = 0;
+    Font_measure((*label).text, wrap, &tw, &th);
+    GraphicsComponent_setMeasuredSize(gc, (float) tw + padL + padR, (float) th + padT + padB);
 }
 
 void Label_setSize(Label *label, float w, float h) {
     if (label == nullptr) return;
-    // AUTO arms measure-on-render for that dim (the flag persists; the gc holds
-    // the last resolved concrete extent). Concrete clears the intent.
-    (*label).autoW = Size_isAutoF(w);
-    (*label).autoH = Size_isAutoF(h);
     GraphicsComponent *gc = labelPrimary(label);
     if (gc != nullptr) GraphicsComponent_setSize(gc, w, h);
 }
@@ -365,12 +365,16 @@ uint32_t Label_getMnemonic(const Label *label) {
 
 ;;GETTER
 bool Label_isAutoWidth(const Label *label) {
-    return label ? (*label).autoW : false;
+    if (label == nullptr)
+        return false;
+    return GraphicsComponent_isAutoWidth(Component_graphics((Component*) &(*label).component, 0));
 }
 
 ;;GETTER
 bool Label_isAutoHeight(const Label *label) {
-    return label ? (*label).autoH : false;
+    if (label == nullptr)
+        return false;
+    return GraphicsComponent_isAutoHeight(Component_graphics((Component*) &(*label).component, 0));
 }
 
 ;;GETTER

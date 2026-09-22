@@ -154,6 +154,43 @@ int Font_lineHeight(void) {
     return 8;
 }
 
+// The shared line-breaking rule (measure + draw must agree): from p, take chars
+// until an explicit '\n' or the wrap width (<= 0 = no wrap). Never wraps an
+// empty line, and a single char wider than the wrap still occupies its line.
+// Returns the end pointer and the line's advance.
+static const char *lineEnd(const char *p, int wrapWidth, int *outAdvance) {
+    int adv = 0;
+    const char *q = p;
+    while (*q != '\0' && *q != '\n') {
+        int a = Font_advance(*q);
+        if (wrapWidth > 0 && adv + a > wrapWidth && q != p)
+            break;
+        adv += a;
+        q++;
+    }
+    if (outAdvance) *outAdvance = adv;
+    return q;
+}
+
+int Font_measure(const char *text, int wrapWidth, int *outW, int *outH) {
+    const char *p = text ? text : "";
+    int widest = 0;
+    int lines = 0;
+    for (;;) {
+        int adv = 0;
+        const char *e = lineEnd(p, wrapWidth, &adv);
+        if (adv > widest)
+            widest = adv;
+        lines++;
+        if (*e == '\0')
+            break;
+        p = e + 1;                      // skip the '\n'
+    }
+    if (outW) *outW = widest;
+    if (outH) *outH = lines * Font_lineHeight();
+    return widest;
+}
+
 // Blend one pixel (straight-alpha over) into an RGBA8 buffer, bounds-checked.
 static void fontPutPixel(uint8_t *rgba, uint32_t w, uint32_t h, int x, int y,
                          float r, float g, float b, float a) {
@@ -167,7 +204,7 @@ static void fontPutPixel(uint8_t *rgba, uint32_t w, uint32_t h, int x, int y,
 }
 
 int Font_drawText(uint8_t *rgba, uint32_t width, uint32_t height,
-                  const char *text, int x, int y, uint32_t color) {
+                  const char *text, int x, int y, int wrapWidth, uint32_t color) {
     if (rgba == nullptr || text == nullptr)
         return x;
     float r = (float) ((color >> 24) & 0xFFu) / 255.0f;
@@ -175,20 +212,33 @@ int Font_drawText(uint8_t *rgba, uint32_t width, uint32_t height,
     float b = (float) ((color >> 8) & 0xFFu) / 255.0f;
     float a = (float) (color & 0xFFu) / 255.0f;
     int cx = x;
-    for (const char *p = text; *p != '\0'; p++) {
-        const uint8_t *glyph = Font_glyph(*p);
-        if (glyph != nullptr) {
-            for (int row = 0; row < 8; row++) {
-                uint8_t bits = glyph[row];
-                for (int col = 0; col < 8; col++) {
-                    // Bit 7 is the LEFTMOST pixel (the table's convention: 'L' is
-                    // 0xC0, its bar on the left). 0x80 >> col maps col 0 -> bit 7.
-                    if ((bits & (0x80u >> col)) != 0u)
-                        fontPutPixel(rgba, width, height, cx + col, y + row, r, g, b, a);
+    int cy = y;
+    const char *p = text;
+    for (;;) {
+        int adv = 0;
+        const char *e = lineEnd(p, wrapWidth, &adv);
+        (void) adv;
+        for (const char *q = p; q < e; q++) {
+            const uint8_t *glyph = Font_glyph(*q);
+            if (glyph != nullptr) {
+                for (int row = 0; row < 8; row++) {
+                    uint8_t bits = glyph[row];
+                    for (int col = 0; col < 8; col++) {
+                        // Bit 7 is the LEFTMOST pixel (the table's convention:
+                        // 'L' is 0xC0, its bar on the left). 0x80 >> col maps
+                        // col 0 -> bit 7.
+                        if ((bits & (0x80u >> col)) != 0u)
+                            fontPutPixel(rgba, width, height, cx + col, cy + row, r, g, b, a);
+                    }
                 }
             }
+            cx += Font_advance(*q);
         }
-        cx += Font_advance(*p);
+        if (*e == '\0')
+            break;
+        p = e + 1;                      // skip the '\n'
+        cx = x;
+        cy += Font_lineHeight();
     }
     return cx;
 }

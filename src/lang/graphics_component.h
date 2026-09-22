@@ -79,6 +79,9 @@ typedef struct GraphicsComponentView {
 
 typedef struct GraphicsComponent {
     // --- Geometry (parent units; placement varies with anchor) ---
+    // w/h hold the DECLARED size, which may be SIZE_AUTO (the åuto sentinel).
+    // AUTO is the default; `w == SIZE_AUTO` is the check that swaps in the
+    // element's AUTO EQUIVALENCE (measuredW/measuredH below).
     float x, y, w, h;
     float scaleX, scaleY;
     uint8_t origin;          // GRAPHICS_COMPONENT_ORIGIN_*
@@ -88,6 +91,11 @@ typedef struct GraphicsComponent {
     float maxW, maxH;
     float minX, minY;
     float maxX, maxY;
+    // --- AUTO equivalence (owner-supplied; the class's AUTO default size) ---
+    // A dumb element (base/Panel) leaves these 0, so its AUTO resolves to 0.
+    // An element with intrinsic content (Label) writes its measured size here,
+    // leaving w/h at the sentinel so it re-measures on every render.
+    float measuredW, measuredH;
     // --- Spacing ---
     float marginL, marginT, marginR, marginB;
     float paddingL, paddingT, paddingR, paddingB;
@@ -145,6 +153,10 @@ void GraphicsComponent_setPivot(GraphicsComponent *self, int pivot);
 void GraphicsComponent_setCenter(GraphicsComponent *self);
 void GraphicsComponent_setMargin(GraphicsComponent *self, float l, float t, float r, float b);
 void GraphicsComponent_setPadding(GraphicsComponent *self, float l, float t, float r, float b);
+// The AUTO equivalence: the concrete size an AUTO dim resolves to. Owners with
+// intrinsic content (Label) write their measured size here; a dumb element
+// leaves it 0. Does not touch w/h (the declared sentinel survives).
+void GraphicsComponent_setMeasuredSize(GraphicsComponent *self, float w, float h);
 
 // --- Presentation setters (no recompute) ---
 void GraphicsComponent_setBorderWidth(GraphicsComponent *self, float w);
@@ -163,6 +175,12 @@ float GraphicsComponent_getWidth(const GraphicsComponent *self);
 float GraphicsComponent_getHeight(const GraphicsComponent *self);
 bool GraphicsComponent_isAutoWidth(const GraphicsComponent *self);
 bool GraphicsComponent_isAutoHeight(const GraphicsComponent *self);
+// The resolved (pre-scale) extent: the declared size, or the AUTO equivalence
+// when the declared dim is the sentinel.
+float GraphicsComponent_getResolvedWidth(const GraphicsComponent *self);
+float GraphicsComponent_getResolvedHeight(const GraphicsComponent *self);
+float GraphicsComponent_getMeasuredWidth(const GraphicsComponent *self);
+float GraphicsComponent_getMeasuredHeight(const GraphicsComponent *self);
 float GraphicsComponent_getScaleX(const GraphicsComponent *self);
 float GraphicsComponent_getScaleY(const GraphicsComponent *self);
 Transform GraphicsComponent_getLocal(const GraphicsComponent *self);

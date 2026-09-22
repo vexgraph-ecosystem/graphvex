@@ -168,6 +168,17 @@ preserved — R4 may `#include` graphvex; graphvex never includes R4.
    layer, no collision.
 4. **Allowlist unchanged.** R4 darling may include graphvex (R3); graphvex
    includes only vexspoke (R2). No reverse edge is created by this law.
+5. **AUTO is a sentinel with a per-class equivalence.** `lang/size.h` owns
+   `SIZE_AUTO` (the åuto FourCC, `0xE575746F`, negative on every platform).
+   A declared `w`/`h` holds either a concrete size or the sentinel; `w ==
+   SIZE_AUTO` is the check that swaps in the element's **AUTO equivalence** —
+   the size that class defaults to. The base `GraphicsComponent`/`Panel`
+   equivalence is **0** (a dumb element has no intrinsic content); a `Label`'s
+   is its **measured text** (font advances x lines — explicit `\n` plus wrap at
+   a concrete width — plus padding), written through
+   `GraphicsComponent_setMeasuredSize` so the declared sentinel survives and
+   re-resolves every render. AUTO is the **default** for every element. The
+   sentinel is never clamped by min/max.
 
 ---
 

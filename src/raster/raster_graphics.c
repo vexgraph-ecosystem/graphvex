@@ -313,7 +313,10 @@ static bool rasterDrawText(const Rectangle *rect, const char *text, const Brush 
     uint8_t *px = Image_pixels(s_fb);
     if (px == nullptr)
         return false;
-    Font_drawText(px, s_w, s_h, text, (int) (float) (*rect).x, (int) (float) (*rect).y, Brush_getColor(brush));
+    // Wrap at the rect width so multi-line text honors its box (the same rule
+    // Font_measure used for the Label's AUTO size).
+    Font_drawText(px, s_w, s_h, text, (int) (float) (*rect).x, (int) (float) (*rect).y,
+                  (int) (float) (*rect).width, Brush_getColor(brush));
     return true;
 }
 
