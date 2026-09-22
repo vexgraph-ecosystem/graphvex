@@ -17,15 +17,16 @@
  * DEFINITION: Label
  * ============================================================================
  * The element Label — a Component plus a text string and a format. Label_setText
- * runs the [] formatter: a bare [] slot consumes a Reactive* and the Label
- * re-renders itself when that reactive changes (no setText call); a [%d]/[%.2f]/
- * [%s] slot consumes a typed scalar and formats it. The Label stores the format +
- * the bound slots, so a re-render walks the stored slots, not the varargs. A
- * slotless format erases the bindings — the old reactive can no longer change
- * the text.
+ * runs the [] formatter: a bare [] slot consumes a Reactive* and the Label reads
+ * that reactive on every render (no setText call); a [%d]/[%.2f]/[%s] slot
+ * consumes a typed scalar and formats it. The Label stores the format + the bound
+ * slots, so a re-render walks the stored slots, not the varargs. A slotless
+ * format erases the bindings — the old reactive can no longer change the text.
  *
- * The reactive binding is a push observer (Reactive_addOnChanged, userdata = the
- * Label); a new setText removes the old observers first (safe unbind).
+ * The reactive binding is a PULL: Label_render drains each bound reactive on the
+ * owner thread (coalesced fire for any external observers) and then reads the
+ * live atomic value, so a writer on any thread only moves the value and the
+ * owner renders it. No observer ever runs on a writer's thread.
  * ============================================================================
  */
 
@@ -37,8 +38,8 @@
  * ============================================================================
  * SUMMARY:
  *   Component + a format + bound slots + rendered text. setText parses the
- *   format, binds the slots (reactive observers), and renders; a reactive change
- *   re-renders.
+ *   format, stores the slots, and renders; a render drains the bound reactives
+ *   on the owner thread and reads their live atomic values.
  *
  * STRUCT FIELDS (Mirroring lang/label.h):
  * ----------------------------------------------------------------------------
@@ -51,9 +52,8 @@
  *
  * PRIVATE HELPERS:
  * ----------------------------------------------------------------------------
- *   unbind(label)                    : remove every reactive observer
+ *   drainSlots(label)                : drain every bound reactive (owner fire)
  *   buildText(label, fmt, args, collecting) : one format walk (collect or render)
- *   onReactiveChanged(r, o, n, ud)   : the observer -> Label_render
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -74,21 +74,14 @@
  * ============================================================================
  */
 
-// The reactive observer: re-render this label.
-static void onReactiveChanged(Reactive *reactive, uint64_t oldValue, uint64_t newValue, void *userdata) {
-    (void) reactive;
-    (void) oldValue;
-    (void) newValue;
-    Label *label = (Label*) userdata;
-    if (label != nullptr)
-        Label_render(label);
-}
-
-// Remove every reactive observer this label holds.
-static void unbind(Label *label) {
+// Drain every bound reactive on the owner thread: this consumes the pending
+// writes (coalesced) and fires any EXTERNAL observers, then the render below
+// reads the live atomic values. A writer on another thread never renders this
+// label — the owner pulls.
+static void drainSlots(Label *label) {
     for (uint32_t i = 0; i < (*label).slotCount; i++) {
         if ((*label).slots[i].kind == LABEL_SLOT_REACTIVE && (*label).slots[i].reactive != nullptr)
-            Reactive_removeOnChanged((*label).slots[i].reactive, onReactiveChanged, label);
+            Reactive_drain((*label).slots[i].reactive);
     }
 }
 
@@ -189,6 +182,10 @@ static Label *labelCreate(const char *text, uint32_t color) {
             n = sizeof((*label).text) - 1u;
         memcpy((*label).text, text, n);
         (*label).text[n] = '\0';
+        // A plain label's format IS its text (no slots), so a later render
+        // rebuilds the same string instead of wiping it.
+        memcpy((*label).format, text, n);
+        (*label).format[n] = '\0';
     }
     return label;
 }
@@ -212,7 +209,8 @@ Label *Label_zero(void) {
 void Label_free(Label *label) {
     if (label == nullptr)
         return;
-    unbind(label);
+    // Pull model: the label registers no observers, so there is nothing to
+    // unbind — the bound reactives simply stop being read.
     Component_destroy(&(*label).component);
     free(label);
 }
@@ -224,7 +222,6 @@ void Label_setText(Label *label, const char *fmt, ...) {
         return;
     if (fmt == nullptr)
         fmt = "";
-    unbind(label);                                   // erase the old bindings
     size_t n = strlen(fmt);
     if (n >= sizeof((*label).format))
         n = sizeof((*label).format) - 1u;
@@ -236,17 +233,13 @@ void Label_setText(Label *label, const char *fmt, ...) {
     buildText(label, (*label).format, &args, true);  // collect the slots
     va_end(args);
 
-    // Bind every reactive slot (push: the reactive re-renders this label).
-    for (uint32_t i = 0; i < (*label).slotCount; i++) {
-        if ((*label).slots[i].kind == LABEL_SLOT_REACTIVE && (*label).slots[i].reactive != nullptr)
-            Reactive_addOnChanged((*label).slots[i].reactive, onReactiveChanged, label);
-    }
     Label_render(label);
 }
 
 void Label_render(Label *label) {
     if (label == nullptr)
         return;
+    drainSlots(label);                                   // owner-thread reactive pull
     buildText(label, (*label).format, nullptr, false);   // emit from the stored slots
 }
 

@@ -72,8 +72,12 @@ static void paintComponent(const Component *component) {
         }
 
         // A Label draws its text (type-dispatched; the base has no text).
+        // Render first: the label PULLS its bound reactives on this (owner)
+        // thread, so the paint pass is where a cross-thread write becomes
+        // visible — the text cache is refreshed here, never on a writer thread.
         if (Component_getType(component) == LABEL_TYPE) {
-            const Label *label = (const Label*) component;
+            Label *label = (Label*) component;
+            Label_render(label);
             Brush text = { (*label).textColor, 1.0f };
             Graphics_drawText(&rect, (*label).text, &text);
         }
