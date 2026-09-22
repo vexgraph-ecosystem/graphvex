@@ -18,6 +18,7 @@
 | **SPIR-V Shader Deployment Law** | R3 GPU Driver | Mandatory for `graphvex` |
 | **Ecosystem Vulkan Safety Nets Law (Determinism + Tree-Shaken Truth)** | R3 GPU Driver | Mandatory for `graphvex` |
 | **Native Pixel Law** | R3 GPU Driver | Mandatory for `graphvex` |
+| **R3 Graphics Language & Board Compositor Law** | R3 GPU Driver | Mandatory for `graphvex` |
 
 ## 2. Exclusive Repo-Local Laws (FULL PROSE RESTATEMENT)
 
@@ -123,6 +124,50 @@ seam's swapchain to logical points at exact 1:1 screen resolution, preventing
 the content from appearing doubled in size. The seam canvas is the window's
 only `CAMetalLayer` (the Single-Seam Canvas Law in `darling-framework`):
 there are no per-pane surfaces or swapchains.
+
+---
+
+### R3 Graphics Language & Board Compositor Law
+
+#### Definition:
+`graphvex` (R3) hosts the **graphics language** (`lang/`): the backend-agnostic
+vocabulary every layer speaks — `Device` (the dialect registry), `Image`,
+`Filter` + `FilterStack` (the ordered filter chain), the **board compositor**,
+and the **element placement vocabulary** (`GraphicsComponent` + `ElementNode` +
+`Transform`, the origin/anchor/pivot dials). These are generic graphics
+primitives, not UI widgets: the board compositor folds the window's board images
+into one seam image and runs the filter chain; the placement vocabulary places
+any rect — a board, a scene object, or a UI element — inside a parent rect.
+
+The **UI toolkit proper** — panels, widgets, input, the widget tree, and the
+*UI* compositor that paints it — remains R4 `darling-framework` (the Vertical
+Integration Law).
+
+#### The Why:
+The Vertical Integration Law names "compositor" under R4, but there are two
+compositors, and conflating them inverts the dependency. The **board compositor**
+is a pure image operation (over-composite + filter chain) the seam needs; the
+origin/anchor/pivot math is ONE vocabulary that the compositor, scenes, and UI
+all place with. Duplicating either per layer drifts. So the placement vocabulary
+and the board compositor live at R3 (the language), and darling becomes the
+interface that consumes them. This is a managed exception per the Conflict
+Triage Law: the Tier-1/Tier-2 invariants (Vertical Integration allowlist) are
+preserved — R4 may `#include` graphvex; graphvex never includes R4.
+
+#### The Rule:
+1. **`lang/` owns the graphics vocabulary:** `device`, `image`, `filter`,
+   `filter_stack`, `compositor`, `graphics_component`, `element_node`,
+   `transform`. Each is a `lang/<name>.h` contract with a `<dir>/<name>.c`
+   implementation.
+2. **Two compositors, two layers.** The **board compositor** (R3, image collage
+   + filter chain) is graphvex; the **UI compositor** (widget-tree paint) stays
+   R4 darling.
+3. **Naming marks the layer.** The placement type is `GraphicsComponent`
+   (graphvex), never `Component` (darling's own interface type). The container is
+   `ElementNode` (graphvex), never darling's container. Same idea, different
+   layer, no collision.
+4. **Allowlist unchanged.** R4 darling may include graphvex (R3); graphvex
+   includes only vexspoke (R2). No reverse edge is created by this law.
 
 ---
 
