@@ -78,7 +78,7 @@ The runtime loader (`loadSpvAny`) must search in this exact precedence order:
 1. `ANTI_SPV_DIR` / `VEX_SPV_DIR` (build-time staging directory `${CMAKE_BINARY_DIR}/spv/`, populated from `../graphvex/shader/spv/`)
 2. `<exe_dir>/spv/<name>` (adjacent deployment)
 3. `<exe_dir>/../Resources/spv/<name>` (macOS `.app` bundle)
-4. CWD-relative paths (`spv/<name>`, `src/vulkan/spv/<name>`)
+4. CWD-relative paths (`spv/<name>`, `src/_old/vulkan/spv/<name>`)
 
 The top-level `vexgraph` CMake build staging copies all `.spv` blobs from `../graphvex/shader/spv/` into `${CMAKE_BINARY_DIR}/spv/` so all subsystems discover their shaders seamlessly.
 
