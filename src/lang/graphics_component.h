@@ -161,6 +161,8 @@ float GraphicsComponent_getX(const GraphicsComponent *self);
 float GraphicsComponent_getY(const GraphicsComponent *self);
 float GraphicsComponent_getWidth(const GraphicsComponent *self);
 float GraphicsComponent_getHeight(const GraphicsComponent *self);
+bool GraphicsComponent_isAutoWidth(const GraphicsComponent *self);
+bool GraphicsComponent_isAutoHeight(const GraphicsComponent *self);
 float GraphicsComponent_getScaleX(const GraphicsComponent *self);
 float GraphicsComponent_getScaleY(const GraphicsComponent *self);
 Transform GraphicsComponent_getLocal(const GraphicsComponent *self);

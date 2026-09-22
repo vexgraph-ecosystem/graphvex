@@ -211,3 +211,12 @@ if(EXISTS "${GRAPHVEX_TEST_DIR}/tostring_test.c" AND NOT TARGET tostring_test)
     target_link_libraries(tostring_test PRIVATE graphvex)
     target_compile_options(tostring_test PRIVATE -Wall -Wextra -Werror)
 endif()
+
+# Size: the AUTO FourCC sentinel + the AUTO protocol (predicates, AUTO guard).
+if(EXISTS "${GRAPHVEX_TEST_DIR}/size_test.c" AND NOT TARGET size_test)
+    add_executable(size_test
+        ${GRAPHVEX_TEST_DIR}/size_test.c
+    )
+    target_link_libraries(size_test PRIVATE graphvex)
+    target_compile_options(size_test PRIVATE -Wall -Wextra -Werror)
+endif()

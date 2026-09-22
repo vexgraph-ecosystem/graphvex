@@ -1,4 +1,5 @@
 #include "lang/graphics_component.h"
+#include "lang/size.h"
 #include "lang/str.h"
 
 #include <math.h>
@@ -39,7 +40,8 @@
  * ============================================================================
  * SUMMARY:
  *   Pure metadata for one element plus its resolved local Transform + abs AABB.
- *   No tree, no hooks. Owned in arrays by ElementNode.
+ *   No tree, no hooks. Owned in arrays by ElementNode. AUTO dims (negative)
+ *   resolve a zero abs — the owner measures content and writes concrete sizes.
  *
  * STRUCT FIELDS (Mirroring lang/graphics_component.h):
  * ----------------------------------------------------------------------------
@@ -79,6 +81,7 @@
  *
  * Public Getters: (.h)
  *   - GraphicsComponent_get... / GraphicsComponent_is...(...)
+ *   - GraphicsComponent_isAutoWidth/Height(self) : AUTO (negative) dims
  * ============================================================================
  */
 
@@ -166,8 +169,13 @@ void GraphicsComponent_free(GraphicsComponent *component) {
 void GraphicsComponent_recompute(GraphicsComponent *self) {
     if (!self)
         return;
-    float sw = (*self).w * (*self).scaleX;
-    float sh = (*self).h * (*self).scaleY;
+    // AUTO dims (negative) are UNRESOLVED: the owner measures content and writes
+    // concrete sizes, so the abs of an AUTO dim resolves to zero here — never
+    // garbage from a negative extent (the Absolute Size and Location Law).
+    float rw = Size_isAutoF((*self).w) ? 0.0f : (*self).w;
+    float rh = Size_isAutoF((*self).h) ? 0.0f : (*self).h;
+    float sw = rw * (*self).scaleX;
+    float sh = rh * (*self).scaleY;
     float locX = (*self).x;
     float locY = (*self).y;
     float parentW = (*self).parentAbsW;
@@ -216,8 +224,8 @@ void GraphicsComponent_recompute(GraphicsComponent *self) {
     Transform_multiply(&trans, &scale, &(*self).local);
     (*self).absX = (*self).local.m02;
     (*self).absY = (*self).local.m12;
-    (*self).absW = (*self).local.m00 * (*self).w;
-    (*self).absH = (*self).local.m11 * (*self).h;
+    (*self).absW = (*self).local.m00 * rw;
+    (*self).absH = (*self).local.m11 * rh;
 }
 
 void GraphicsComponent_setParentAbs(GraphicsComponent *self, float px, float py, float pw, float ph) {
@@ -533,6 +541,14 @@ float GraphicsComponent_getY(const GraphicsComponent *self) { return self ? (*se
 float GraphicsComponent_getWidth(const GraphicsComponent *self) { return self ? (*self).w : 0.0f; }
 ;;GETTER
 float GraphicsComponent_getHeight(const GraphicsComponent *self) { return self ? (*self).h : 0.0f; }
+;;GETTER
+bool GraphicsComponent_isAutoWidth(const GraphicsComponent *self) {
+    return self ? Size_isAutoF((*self).w) : false;
+}
+;;GETTER
+bool GraphicsComponent_isAutoHeight(const GraphicsComponent *self) {
+    return self ? Size_isAutoF((*self).h) : false;
+}
 ;;GETTER
 float GraphicsComponent_getScaleX(const GraphicsComponent *self) { return self ? (*self).scaleX : 1.0f; }
 ;;GETTER
