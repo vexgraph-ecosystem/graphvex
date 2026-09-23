@@ -173,7 +173,7 @@ preserved — R4 may `#include` graphvex; graphvex never includes R4.
    `SIZE_AUTO` (the åuto FourCC, `0xE575746F`, negative on every platform).
    A declared `w`/`h` holds either a concrete size or the sentinel; `w ==
    SIZE_AUTO` is the check that swaps in the element's **AUTO equivalence** —
-   the size that class defaults to. The base `GraphicsComponent`/`Panel`
+   the size that class defaults to. The base `GraphicsComponent`/`GraphicsPanel`
    equivalence is **0** (a dumb element has no intrinsic content); a `Label`'s
    is its **measured text** (font advances x lines — explicit `\n` plus wrap at
    a concrete width — plus padding), written through

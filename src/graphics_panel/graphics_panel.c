@@ -1,4 +1,4 @@
-#include "lang/panel.h"
+#include "lang/graphics_panel.h"
 #include "lang/str.h"
 
 #include <stdlib.h>
@@ -11,33 +11,33 @@
 ;;DEFINITION
 /**
  * ============================================================================
- * DEFINITION: Panel
+ * DEFINITION: GraphicsPanel
  * ============================================================================
- * The element Panel — a Component (identity + tree + graphics + children)
- * wrapped with a forwarding surface so a call site reads Panel_setCornerRadius
+ * The element GraphicsPanel — a Component (identity + tree + graphics + children)
+ * wrapped with a forwarding surface so a call site reads GraphicsPanel_setCornerRadius
  * instead of reaching through the component. Every forwarding verb targets the
  * panel's PRIMARY GraphicsComponent (graphics[0]).
  *
- * This is the AbsoluteLayout section: a Panel places its children with the
+ * This is the AbsoluteLayout section: a GraphicsPanel places its children with the
  * origin/anchor/pivot dials. Flex/scroll/list panels are other layouts (other
  * element types), added later.
  *
- * Arity surface (the Arity and Constructive Convenience Law): Panel_0/1/2 + the
- * Panel(...) chooser, Panel_zero(), and Panel_add() as the additive verb.
+ * Arity surface (the Arity and Constructive Convenience Law): GraphicsPanel_0/1/2 + the
+ * GraphicsPanel(...) chooser, GraphicsPanel_zero(), and GraphicsPanel_add() as the additive verb.
  * ============================================================================
  */
 
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: Panel (panel/panel.c)
- * LEVEL: L2 — Behavior (the element Panel: a Component + forwarding surface)
+ * CLASS: GraphicsPanel (graphics_panel/graphics_panel.c)
+ * LEVEL: L2 — Behavior (the element GraphicsPanel: a Component + forwarding surface)
  * ============================================================================
  * SUMMARY:
  *   Wraps one embedded Component (with a primary GraphicsComponent); every
- *   forwarding setter/getter targets graphics[0]. Panel_add adds any element.
+ *   forwarding setter/getter targets graphics[0]. GraphicsPanel_add adds any element.
  *
- * STRUCT FIELDS (Mirroring lang/panel.h):
+ * STRUCT FIELDS (Mirroring lang/graphics_panel.h):
  * ----------------------------------------------------------------------------
  *   Component component;   // the element base (identity + tree + graphics + children)
  *
@@ -48,28 +48,28 @@
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Public Constructors: (.h)
- *   - Panel_0/1/2 + the Panel(...) chooser / Panel_zero / Panel_free
+ *   - GraphicsPanel_0/1/2 + the GraphicsPanel(...) chooser / GraphicsPanel_zero / GraphicsPanel_free
  *
  * Public Core Functions: (.h)
- *   - Panel_component(panel) / Panel_add(panel, child)
+ *   - GraphicsPanel_component(panel) / GraphicsPanel_add(panel, child)
  *
  * Public Setters: (.h)
- *   - Panel_setColor/Border/CornerRadius/Size/Location/Anchor/Pivot/Origin/Opacity/Visible/Z
+ *   - GraphicsPanel_setColor/Border/CornerRadius/Size/Location/Anchor/Pivot/Origin/Opacity/Visible/Z
  *
  * Public Getters: (.h)
- *   - Panel_getColor/CornerRadius/AbsX/AbsY/AbsW/AbsH / Panel_isVisible / Panel_isValid
+ *   - GraphicsPanel_getColor/CornerRadius/AbsX/AbsY/AbsW/AbsH / GraphicsPanel_isVisible / GraphicsPanel_isValid
  * ============================================================================
  */
 
 // The panel's primary graphics part (its own placement + style).
-static GraphicsComponent *primary(Panel *panel) {
+static GraphicsComponent *primary(GraphicsPanel *panel) {
     return Component_graphics(&(*panel).component, 0);
 }
 
 // CONSTRUCTORS (PUBLIC & PRIVATE)
 
-Panel *Panel_0(void) {
-    Panel *panel = (Panel*) calloc(1, sizeof(Panel));
+GraphicsPanel *GraphicsPanel_0(void) {
+    GraphicsPanel *panel = (GraphicsPanel*) calloc(1, sizeof(GraphicsPanel));
     if (panel == nullptr)
         return nullptr;
     Component_init(&(*panel).component);
@@ -79,36 +79,36 @@ Panel *Panel_0(void) {
     return panel;
 }
 
-Panel *Panel_1(uint32_t color) {
-    Panel *panel = Panel_0();
+GraphicsPanel *GraphicsPanel_1(uint32_t color) {
+    GraphicsPanel *panel = GraphicsPanel_0();
     if (panel != nullptr)
-        Panel_setColor(panel, color);
+        GraphicsPanel_setColor(panel, color);
     return panel;
 }
 
-Panel *Panel_2(const char *name, uint32_t color) {
-    Panel *panel = Panel_1(color);
+GraphicsPanel *GraphicsPanel_2(const char *name, uint32_t color) {
+    GraphicsPanel *panel = GraphicsPanel_1(color);
     if (panel != nullptr)
         Component_setName(&(*panel).component, name);
     return panel;
 }
 
-Panel *Panel_zero(void) {
-    return Panel_0();
+GraphicsPanel *GraphicsPanel_zero(void) {
+    return GraphicsPanel_0();
 }
 
-void Panel_free(Panel *panel) {
+void GraphicsPanel_free(GraphicsPanel *panel) {
     if (panel == nullptr)
         return;
     Component_destroy(&(*panel).component);
     free(panel);
 }
 
-Component *Panel_component(Panel *panel) {
+Component *GraphicsPanel_component(GraphicsPanel *panel) {
     return panel ? &(*panel).component : nullptr;
 }
 
-bool Panel_add(Panel *panel, Component *child) {
+bool GraphicsPanel_add(GraphicsPanel *panel, Component *child) {
     if (panel == nullptr)
         return false;
     return Element_add(&(*panel).component, child);
@@ -117,7 +117,7 @@ bool Panel_add(Panel *panel, Component *child) {
 // SETTERS (PUBLIC & PRIVATE) — forwarded to the primary GraphicsComponent.
 
 ;;SETTER
-void Panel_setColor(Panel *panel, uint32_t color) {
+void GraphicsPanel_setColor(GraphicsPanel *panel, uint32_t color) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -126,7 +126,7 @@ void Panel_setColor(Panel *panel, uint32_t color) {
 }
 
 ;;SETTER
-void Panel_setBorder(Panel *panel, uint32_t color, float width) {
+void GraphicsPanel_setBorder(GraphicsPanel *panel, uint32_t color, float width) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -137,7 +137,7 @@ void Panel_setBorder(Panel *panel, uint32_t color, float width) {
 }
 
 ;;SETTER
-void Panel_setCornerRadius(Panel *panel, float cornerRadius) {
+void GraphicsPanel_setCornerRadius(GraphicsPanel *panel, float cornerRadius) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -146,7 +146,7 @@ void Panel_setCornerRadius(Panel *panel, float cornerRadius) {
 }
 
 ;;SETTER
-void Panel_setSize(Panel *panel, float w, float h) {
+void GraphicsPanel_setSize(GraphicsPanel *panel, float w, float h) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -155,7 +155,7 @@ void Panel_setSize(Panel *panel, float w, float h) {
 }
 
 ;;SETTER
-void Panel_setLocation(Panel *panel, float x, float y) {
+void GraphicsPanel_setLocation(GraphicsPanel *panel, float x, float y) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -164,7 +164,7 @@ void Panel_setLocation(Panel *panel, float x, float y) {
 }
 
 ;;SETTER
-void Panel_setAnchor(Panel *panel, int anchor) {
+void GraphicsPanel_setAnchor(GraphicsPanel *panel, int anchor) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -173,7 +173,7 @@ void Panel_setAnchor(Panel *panel, int anchor) {
 }
 
 ;;SETTER
-void Panel_setPivot(Panel *panel, int pivot) {
+void GraphicsPanel_setPivot(GraphicsPanel *panel, int pivot) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -182,7 +182,7 @@ void Panel_setPivot(Panel *panel, int pivot) {
 }
 
 ;;SETTER
-void Panel_setOrigin(Panel *panel, int origin) {
+void GraphicsPanel_setOrigin(GraphicsPanel *panel, int origin) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -191,7 +191,7 @@ void Panel_setOrigin(Panel *panel, int origin) {
 }
 
 ;;SETTER
-void Panel_setOpacity(Panel *panel, float opacity) {
+void GraphicsPanel_setOpacity(GraphicsPanel *panel, float opacity) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -200,7 +200,7 @@ void Panel_setOpacity(Panel *panel, float opacity) {
 }
 
 ;;SETTER
-void Panel_setVisible(Panel *panel, bool visible) {
+void GraphicsPanel_setVisible(GraphicsPanel *panel, bool visible) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -209,7 +209,7 @@ void Panel_setVisible(Panel *panel, bool visible) {
 }
 
 ;;SETTER
-void Panel_setZ(Panel *panel, int z) {
+void GraphicsPanel_setZ(GraphicsPanel *panel, int z) {
     if (panel == nullptr)
         return;
     GraphicsComponent *gc = primary(panel);
@@ -220,7 +220,7 @@ void Panel_setZ(Panel *panel, int z) {
 // GETTERS (PUBLIC & PRIVATE)
 
 ;;GETTER
-uint32_t Panel_getColor(const Panel *panel) {
+uint32_t GraphicsPanel_getColor(const GraphicsPanel *panel) {
     if (panel == nullptr)
         return GRAPHICS_COMPONENT_COLOR_CLEAR;
     GraphicsComponent *gc = Component_graphics((Component*) &(*panel).component, 0);
@@ -228,7 +228,7 @@ uint32_t Panel_getColor(const Panel *panel) {
 }
 
 ;;GETTER
-float Panel_getCornerRadius(const Panel *panel) {
+float GraphicsPanel_getCornerRadius(const GraphicsPanel *panel) {
     if (panel == nullptr)
         return 0.0f;
     GraphicsComponent *gc = Component_graphics((Component*) &(*panel).component, 0);
@@ -236,7 +236,7 @@ float Panel_getCornerRadius(const Panel *panel) {
 }
 
 ;;GETTER
-float Panel_getAbsX(const Panel *panel) {
+float GraphicsPanel_getAbsX(const GraphicsPanel *panel) {
     if (panel == nullptr)
         return 0.0f;
     GraphicsComponent *gc = Component_graphics((Component*) &(*panel).component, 0);
@@ -244,7 +244,7 @@ float Panel_getAbsX(const Panel *panel) {
 }
 
 ;;GETTER
-float Panel_getAbsY(const Panel *panel) {
+float GraphicsPanel_getAbsY(const GraphicsPanel *panel) {
     if (panel == nullptr)
         return 0.0f;
     GraphicsComponent *gc = Component_graphics((Component*) &(*panel).component, 0);
@@ -252,7 +252,7 @@ float Panel_getAbsY(const Panel *panel) {
 }
 
 ;;GETTER
-float Panel_getAbsW(const Panel *panel) {
+float GraphicsPanel_getAbsW(const GraphicsPanel *panel) {
     if (panel == nullptr)
         return 0.0f;
     GraphicsComponent *gc = Component_graphics((Component*) &(*panel).component, 0);
@@ -260,7 +260,7 @@ float Panel_getAbsW(const Panel *panel) {
 }
 
 ;;GETTER
-float Panel_getAbsH(const Panel *panel) {
+float GraphicsPanel_getAbsH(const GraphicsPanel *panel) {
     if (panel == nullptr)
         return 0.0f;
     GraphicsComponent *gc = Component_graphics((Component*) &(*panel).component, 0);
@@ -268,7 +268,7 @@ float Panel_getAbsH(const Panel *panel) {
 }
 
 ;;GETTER
-bool Panel_isVisible(const Panel *panel) {
+bool GraphicsPanel_isVisible(const GraphicsPanel *panel) {
     if (panel == nullptr)
         return false;
     GraphicsComponent *gc = Component_graphics((Component*) &(*panel).component, 0);
@@ -276,13 +276,13 @@ bool Panel_isVisible(const Panel *panel) {
 }
 
 ;;GETTER
-bool Panel_isValid(const Panel *panel) {
+bool GraphicsPanel_isValid(const GraphicsPanel *panel) {
     return panel != nullptr;
 }
 
 // --- toString Law (bounded, cold-path) ---
 
-void Panel_toString(const Panel *self, char *dest, size_t cap, bool *outTruncated) {
+void GraphicsPanel_toString(const GraphicsPanel *self, char *dest, size_t cap, bool *outTruncated) {
     Str s;
     Str_init(&s, dest, cap);
     if (self == nullptr) {
@@ -290,11 +290,11 @@ void Panel_toString(const Panel *self, char *dest, size_t cap, bool *outTruncate
         if (outTruncated) *outTruncated = false;
         return;
     }
-    Str_printf(&s, "Panel(\"%s\", 0x%08X)", (*self).component.name, Panel_getColor(self));
+    Str_printf(&s, "GraphicsPanel(\"%s\", 0x%08X)", (*self).component.name, GraphicsPanel_getColor(self));
     if (outTruncated) *outTruncated = Str_isTruncated(&s);
 }
 
-void Panel_toStringStruct(const Panel *self, char *dest, size_t cap, bool *outTruncated) {
-    // A Panel IS its Component: the structural dump is the component's.
+void GraphicsPanel_toStringStruct(const GraphicsPanel *self, char *dest, size_t cap, bool *outTruncated) {
+    // A GraphicsPanel IS its Component: the structural dump is the component's.
     Component_toStringStruct(self ? &(*self).component : nullptr, dest, cap, outTruncated);
 }

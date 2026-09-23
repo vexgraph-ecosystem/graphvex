@@ -7,7 +7,7 @@
 // lang/element_node.h — the child container (a flat array of Component*).
 //
 // An ElementNode owns a flat array of child Component POINTERS — no slicing, so
-// a child can be any element kind (Panel, Label, ListPane, …) and its `type`
+// a child can be any element kind (GraphicsPanel, Label, ListPane, …) and its `type`
 // tells you which. This is the Data-Oriented Storage Law: one node, N children,
 // contiguous slots.
 //

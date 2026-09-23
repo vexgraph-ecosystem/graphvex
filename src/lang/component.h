@@ -55,7 +55,7 @@ Component *Component_zero(void);
 // the Teardown Order Law: children first, then this node). Null-safe.
 void Component_free(Component *component);
 // Free only the INTERNALS (graphics + children) of an embedded component,
-// leaving the struct itself (used by embedded wrappers like Panel).
+// leaving the struct itself (used by embedded wrappers like GraphicsPanel).
 void Component_destroy(Component *component);
 
 // --- Core functions ---

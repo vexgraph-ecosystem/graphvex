@@ -92,7 +92,7 @@ typedef struct GraphicsComponent {
     float minX, minY;
     float maxX, maxY;
     // --- AUTO equivalence (owner-supplied; the class's AUTO default size) ---
-    // A dumb element (base/Panel) leaves these 0, so its AUTO resolves to 0.
+    // A dumb element (base/GraphicsPanel) leaves these 0, so its AUTO resolves to 0.
     // An element with intrinsic content (Label) writes its measured size here,
     // leaving w/h at the sentinel so it re-measures on every render.
     float measuredW, measuredH;
