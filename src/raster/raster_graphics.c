@@ -52,6 +52,7 @@
  *   - rasterFillRect / rasterDrawRect
  *   - rasterFillCircle / rasterDrawCircle
  *   - rasterFillPath / rasterDrawPath  (cold-false until Shape lands)
+ *   - rasterDrawText : glyph coverage through clip-aware, opacity-aware putPixel
  *   - rasterDrawImage
  * ============================================================================
  */
@@ -185,10 +186,16 @@ static bool rasterFillRect(const Rectangle *rect, const Brush *brush) {
     float r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f;
     unpackRGBA(Brush_getColor(brush), &r, &g, &b, &a);
     a *= Brush_getOpacity(brush);
-    int x0 = (int) floorf((*rect).x + 0.5f);
-    int y0 = (int) floorf((*rect).y + 0.5f);
-    int x1 = (int) floorf((*rect).x + (*rect).width + 0.5f);
-    int y1 = (int) floorf((*rect).y + (*rect).height + 0.5f);
+    // Bound work to the visible target before converting logical extents to ints.
+    // Large virtual documents must not cause full-document raster loops.
+    float left = s_clipEnabled ? fmaxf(0.0f, s_clipX) : 0.0f;
+    float top = s_clipEnabled ? fmaxf(0.0f, s_clipY) : 0.0f;
+    float right = s_clipEnabled ? fminf((float) s_w, s_clipX + s_clipW) : (float) s_w;
+    float bottom = s_clipEnabled ? fminf((float) s_h, s_clipY + s_clipH) : (float) s_h;
+    int x0 = (int) fminf((float) s_w, fmaxf(left, floorf((*rect).x + 0.5f)));
+    int y0 = (int) fminf((float) s_h, fmaxf(top, floorf((*rect).y + 0.5f)));
+    int x1 = (int) fmaxf(0.0f, fminf(right, floorf((*rect).x + (*rect).width + 0.5f)));
+    int y1 = (int) fmaxf(0.0f, fminf(bottom, floorf((*rect).y + (*rect).height + 0.5f)));
     for (int y = y0; y < y1; y++)
         for (int x = x0; x < x1; x++)
             putPixel(s_fb, x, y, r, g, b, a);
@@ -310,13 +317,34 @@ static bool rasterDrawImage(const Image *image, const Rectangle *dst) {
 static bool rasterDrawText(const Rectangle *rect, const char *text, const Brush *brush) {
     if (s_fb == nullptr || rect == nullptr || text == nullptr || brush == nullptr)
         return false;
-    uint8_t *px = Image_pixels(s_fb);
-    if (px == nullptr)
-        return false;
-    // Wrap at the rect width so multi-line text honors its box (the same rule
-    // Font_measure used for the Label's AUTO size).
-    Font_drawText(px, s_w, s_h, text, (int) (float) (*rect).x, (int) (float) (*rect).y,
-                  (int) (float) (*rect).width, Brush_getColor(brush));
+    float r, g, b, a;
+    unpackRGBA(Brush_getColor(brush), &r, &g, &b, &a);
+    a *= Brush_getOpacity(brush);
+    int startX = (int) (*rect).x;
+    int x = startX;
+    int y = (int) (*rect).y;
+    int wrap = (int) (*rect).width;
+    for (const char *p = text; *p; p++) {
+        int advance = Font_advance(*p);
+        if (*p == '\n') {
+            x = startX;
+            y += Font_lineHeight();
+            continue;
+        }
+        if (wrap > 0 && x > startX && x - startX + advance > wrap) {
+            x = startX;
+            y += Font_lineHeight();
+        }
+        const uint8_t *glyph = Font_glyph(*p);
+        if (glyph) {
+            // The built-in font's fixed 8-by-8 glyph format, not a row limit.
+            for (int row = 0; row < 8; row++)
+                for (int col = 0; col < 8; col++)
+                    if (glyph[row] & (0x80u >> col))
+                        putPixel(s_fb, x + col, y + row, r, g, b, a);
+        }
+        x += advance;
+    }
     return true;
 }
 

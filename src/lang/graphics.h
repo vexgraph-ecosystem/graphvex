@@ -76,6 +76,8 @@ bool Graphics_present(void);
 bool Graphics_resize(uint32_t width, uint32_t height);
 bool Graphics_clear(uint32_t color);
 bool Graphics_clip(const Rectangle *rect);
+// Read the active scissor; false means unbounded. Save/restore around nested paint.
+bool Graphics_getClip(Rectangle *dest);
 bool Graphics_fillRect(const Rectangle *rect, const Brush *brush);
 bool Graphics_drawRect(const Rectangle *rect, const Stroke *stroke);
 bool Graphics_fillCircle(float cx, float cy, float radius, const Brush *brush);
@@ -86,8 +88,8 @@ bool Graphics_drawImage(const Image *image, const Rectangle *dst);
 bool Graphics_drawText(const Rectangle *rect, const char *text, const Brush *brush);
 
 // Fitted image draw: resolve the fit (Image_fitRect) into the destination,
-// scissor to the clip when the whole-image rect overflows it, draw, then reset
-// the scissor. outFit (nullable) receives the resolved geometry (dest-last).
+// scissor to the clip when the whole-image rect overflows it, draw, then restore
+// the incoming scissor (intersecting it while drawing). outFit (nullable) receives the resolved geometry (dest-last).
 // False on an unselected row or a hostile image/dst (the Cold-Strict,
 // Hot-Minimal Validation Law). This is the one call a picture makes.
 bool Graphics_drawImageFit(const Image *image, const Rectangle *dst, ImageFitMode mode,

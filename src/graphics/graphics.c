@@ -45,9 +45,10 @@
  * Public Core Functions: (.h)
  *   - Graphics_registerRow(row) / Graphics_setGraphics(backendId)
  *   - Graphics_getCurrent(void) / Graphics_getGraphicsId(void)
+ *   - Graphics_getClip(dest) : snapshot scissor for nested widget painting
  *   - Graphics_<verb>(...) forwarders
  *   - Graphics_drawImageFit(image, dst, mode, anchor, windowW, windowH, outFit)
- *     : fit resolve + scissor + draw + scissor reset (the picture one-call)
+ *     : fit resolve + scissor + draw + parent-scissor restoration (the picture one-call)
  *
  * Private Core Functions: (.c static)
  *   - registryGrow(void)
@@ -58,6 +59,8 @@
 static const Graphics **s_rows = nullptr;
 static uint32_t s_rowCount = 0;
 static uint32_t s_rowCap = 0;
+static Rectangle s_clip = {0};
+static bool s_hasClip = false;
 static const Graphics *s_current = nullptr;   // the active row (null = none)
 
 // The all-cold row: every forwarder answers false when nothing is selected.
@@ -97,6 +100,7 @@ bool Graphics_setGraphics(uint32_t backendId) {
     for (uint32_t i = 0; i < s_rowCount; i++) {
         if ((*s_rows[i]).backendId == backendId) {
             s_current = s_rows[i];
+            Graphics_clip(nullptr);
             return true;
         }
     }
@@ -130,7 +134,9 @@ bool Graphics_present(void) {
 
 bool Graphics_resize(uint32_t width, uint32_t height) {
     const Graphics *g = s_current;
-    return (g != nullptr && (*g).resize != nullptr) ? (*g).resize(width, height) : false;
+    if (g == nullptr || (*g).resize == nullptr || !(*g).resize(width, height))
+        return false;
+    return Graphics_clip(nullptr);
 }
 
 bool Graphics_clear(uint32_t color) {
@@ -140,7 +146,18 @@ bool Graphics_clear(uint32_t color) {
 
 bool Graphics_clip(const Rectangle *rect) {
     const Graphics *g = s_current;
-    return (g != nullptr && (*g).clip != nullptr) ? (*g).clip(rect) : false;
+    if (g == nullptr || (*g).clip == nullptr || !(*g).clip(rect))
+        return false;
+    s_hasClip = rect != nullptr;
+    if (rect)
+        s_clip = *rect;
+    return true;
+}
+
+bool Graphics_getClip(Rectangle *dest) {
+    if (dest)
+        *dest = s_clip;
+    return s_hasClip;
 }
 
 bool Graphics_fillRect(const Rectangle *rect, const Brush *brush) {
@@ -183,11 +200,16 @@ bool Graphics_drawImageFit(const Image *image, const Rectangle *dst, ImageFitMod
     ImageFit fit;
     if (!Image_fitRect(image, dst, mode, anchor, windowW, windowH, &fit))
         return false;
-    if (fit.needsClip)
-        Graphics_clip(&fit.clip);
+    Rectangle previous, clip = fit.clip;
+    bool hadClip = Graphics_getClip(&previous);
+    if (fit.needsClip) {
+        if (hadClip)
+            Rectangle_intersection(&previous, &fit.clip, &clip);
+        Graphics_clip(&clip);
+    }
     bool ok = Graphics_drawImage(image, &fit.dst);
     if (fit.needsClip)
-        Graphics_clip(nullptr);
+        Graphics_clip(hadClip ? &previous : nullptr);
     if (outFit != nullptr)
         *outFit = fit;
     return ok;
