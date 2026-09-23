@@ -30,7 +30,7 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: GraphicsPanel (graphics_panel/graphics_panel.c)
+ * CLASS: GraphicsPanel (ui/panel/graphics_panel.c)
  * LEVEL: L2 — Behavior (the element GraphicsPanel: a Component + forwarding surface)
  * ============================================================================
  * SUMMARY:

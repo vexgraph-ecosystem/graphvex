@@ -35,7 +35,7 @@
 ;;OVERVIEW
 /**
  * ============================================================================
- * CLASS: Label (label/label.c)
+ * CLASS: Label (ui/label/label.c)
  * LEVEL: L2 — Behavior (the element Label: Component + text + reactive slots)
  * ============================================================================
  * SUMMARY:

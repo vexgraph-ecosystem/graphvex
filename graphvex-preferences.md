@@ -19,6 +19,7 @@
 | **Ecosystem Vulkan Safety Nets Law (Determinism + Tree-Shaken Truth)** | R3 GPU Driver | Mandatory for `graphvex` |
 | **Native Pixel Law** | R3 GPU Driver | Mandatory for `graphvex` |
 | **R3 Graphics Language & Board Compositor Law** | R3 GPU Driver | Mandatory for `graphvex` |
+| **UI Graphics Source Placement Law** | R3 graphics primitives | Mandatory for `graphvex` |
 
 ## 2. Exclusive Repo-Local Laws (FULL PROSE RESTATEMENT)
 
@@ -192,3 +193,7 @@ preserved — R4 may `#include` graphvex; graphvex never includes R4.
 ## 4. Readiness Cross-Reference (the Living Feature Readiness Law)
 
 - Feature readiness matrix tracked in [`../../_repositories/.ecosystem/graphvex.md`](../../_repositories/.ecosystem/graphvex.md) (rendered as `[[graphvex]]` wiki page).
+
+### UI Graphics Source Placement Law
+
+Graphical panel and label implementations live under `src/ui/<kind>/`; their public vocabulary remains under `src/lang/`. The `ui/` directory owns graphics presentation primitives only. Editing, focus, widget composition, and application behavior remain in Darling (R4); Graphvex still includes only vexspoke.

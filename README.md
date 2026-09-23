@@ -1,8 +1,8 @@
-# graphvex — R1.5 GPU compute (supervised by R0 hotcwap Kernel)
+# graphvex — R3 graphics foundation (supervised by R1 hotcwap)
 all graphics computing lies here, bespoken
 
 ## Boilerplate (shared, not vendored)
-Foundation layer (Rule 17): graphvex depends solely on `vexspoke`.
+Foundation layer (the Standalone Autonomy Law): graphvex depends solely on `vexspoke`.
 Shared infrastructure resolves from `vexspoke/src` via the PUBLIC link —
 never copied here, so include strings stay single-sourced:
 
@@ -18,3 +18,7 @@ graphvex-owned code lives under `src/` in subsystem folders — `buffer/`
 Normal/Shadow`), `font/`, `io/`, `vulkan/`, plus `src/graphvex/` core;
 new subsystem folders here must use filenames unique across the include
 path — never shadow a `vexspoke` filename.
+
+### UI graphics primitives
+
+`src/ui/panel/graphics_panel.c` and `src/ui/label/label.c` contain the graphical panel and label implementations. Their stable public contracts remain `lang/graphics_panel.h` and `lang/label.h`. Input, editing, and widget composition remain in Darling; this directory adds no downstream dependency.
