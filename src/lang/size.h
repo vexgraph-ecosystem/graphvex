@@ -29,6 +29,8 @@
 // owners remember the intent; the component itself never renders garbage from
 // a negative extent.
 
+// INTENTIONAL(vex): SIZE_AUTO is the FourCC "åuto" (0xE575746F) by design —
+// negative on every platform so any negative dimension reads as AUTO.
 // "åuto": E5 75 74 6F. The unsigned literal needs the cast (it exceeds INT32_MAX).
 #define SIZE_AUTO_FOURCC 0xE575746Fu
 #define SIZE_AUTO ((int32_t) SIZE_AUTO_FOURCC)
