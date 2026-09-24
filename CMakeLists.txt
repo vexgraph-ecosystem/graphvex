@@ -76,6 +76,9 @@ add_library(graphvex STATIC
     src/ui/panel/graphics_panel.c
     # the element Label — text + the [] formatter + reactive bindings
     src/ui/label/label.c
+    # the scroll chrome — track/thumb primitive + the panel's two-bar holder
+    src/ui/scroll/scroll_bar_graphics.c
+    src/ui/scroll/scroll_panel_graphics.c
     # font — the built-in bitmap font (the first text render)
     src/font/font.c
     # the unified Graphics seam — table + paint types + the software row
