@@ -133,6 +133,7 @@ endif() # NOT TARGET graphvex
 # tests appear under tests/graphvex and are wired here (the Test Segregation
 # Law: no tests in the source tree).
 # ----------------------------------------------------------------------------
+enable_testing()
 set(GRAPHVEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/graphvex")
 if(NOT EXISTS "${GRAPHVEX_TEST_DIR}")
     set(GRAPHVEX_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
@@ -242,4 +243,12 @@ if(EXISTS "${GRAPHVEX_SEAM_TEST_DIR}/text_clip_test.c")
     add_executable(text_clip_test "${GRAPHVEX_SEAM_TEST_DIR}/text_clip_test.c")
     target_link_libraries(text_clip_test PRIVATE graphvex)
     target_compile_options(text_clip_test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+
+# Pixel-exact opaque rectangle fast path and unchanged translucent blending.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/raster_opaque_rect_test.c" AND NOT TARGET raster_opaque_rect_test)
+    add_executable(raster_opaque_rect_test tests/raster_opaque_rect_test.c)
+    target_link_libraries(raster_opaque_rect_test PRIVATE graphvex)
+    target_compile_options(raster_opaque_rect_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    add_test(NAME raster_opaque_rect_test COMMAND raster_opaque_rect_test)
 endif()

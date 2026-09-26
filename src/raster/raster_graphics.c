@@ -22,8 +22,10 @@
  * The row is a process-global singleton (the Graphics table carries no self), so
  * its impls read file-local state. Colors arrive packed 0xRRGGBBAA (the Strict
  * 0xRRGGBBAA Color Law: alpha low byte) and blend straight-alpha over the
- * framebuffer. Before resize binds a framebuffer, every verb cold-returns false
- * (the Cold-Strict, Hot-Minimal Validation Law).
+ * framebuffer. Opaque rectangle fills write one RGBA8 row, then copy that row
+ * across the visible height; other fills retain straight-alpha blending.
+ * Before resize binds a framebuffer, every verb cold-returns false (the
+ * Cold-Strict, Hot-Minimal Validation Law).
  * ============================================================================
  */
 
@@ -49,7 +51,7 @@
  * ----------------------------------------------------------------------------
  * Private Core Functions: (.c static)
  *   - rasterBegin/End/Present/Clear/Clip/Resize
- *   - rasterFillRect / rasterDrawRect
+ *   - rasterFillRect / rasterDrawRect : clipped opaque row copy or pixel blend
  *   - rasterFillCircle / rasterDrawCircle
  *   - rasterFillPath / rasterDrawPath  (cold-false until Shape lands)
  *   - rasterDrawText : glyph coverage through clip-aware, opacity-aware putPixel
@@ -183,8 +185,9 @@ static bool rasterClip(const Rectangle *rect) {
 static bool rasterFillRect(const Rectangle *rect, const Brush *brush) {
     if (s_fb == nullptr || rect == nullptr || brush == nullptr)
         return false;
+    uint32_t color = Brush_getColor(brush);
     float r = 0.0f, g = 0.0f, b = 0.0f, a = 0.0f;
-    unpackRGBA(Brush_getColor(brush), &r, &g, &b, &a);
+    unpackRGBA(color, &r, &g, &b, &a);
     a *= Brush_getOpacity(brush);
     // Bound work to the visible target before converting logical extents to ints.
     // Large virtual documents must not cause full-document raster loops.
@@ -196,6 +199,42 @@ static bool rasterFillRect(const Rectangle *rect, const Brush *brush) {
     int y0 = (int) fminf((float) s_h, fmaxf(top, floorf((*rect).y + 0.5f)));
     int x1 = (int) fmaxf(0.0f, fminf(right, floorf((*rect).x + (*rect).width + 0.5f)));
     int y1 = (int) fmaxf(0.0f, fminf(bottom, floorf((*rect).y + (*rect).height + 0.5f)));
+    if (a == 1.0f && x0 < x1 && y0 < y1) {
+        // The float clip can start between integer pixels: the original
+        // putPixel check excludes that first pixel even when x0/y0 truncates.
+        if (s_clipEnabled) {
+            while (x0 < x1 && (float) x0 < s_clipX)
+                x0++;
+            while (y0 < y1 && (float) y0 < s_clipY)
+                y0++;
+            float clipRight = s_clipX + s_clipW;
+            float clipBottom = s_clipY + s_clipH;
+            while (x1 > x0 && (float) (x1 - 1) >= clipRight)
+                x1--;
+            while (y1 > y0 && (float) (y1 - 1) >= clipBottom)
+                y1--;
+        }
+        uint8_t *pixels = Image_pixels(s_fb);
+        if (pixels != nullptr && x0 < x1 && y0 < y1) {
+            size_t rowBytes = (size_t) (x1 - x0) * 4u;
+            uint8_t *first = pixels + ((size_t) y0 * s_w + (size_t) x0) * 4u;
+            uint8_t red = (uint8_t) (color >> 24);
+            uint8_t green = (uint8_t) (color >> 16);
+            uint8_t blue = (uint8_t) (color >> 8);
+            for (int x = x0; x < x1; x++) {
+                uint8_t *pixel = first + (size_t) (x - x0) * 4u;
+                pixel[0] = red;
+                pixel[1] = green;
+                pixel[2] = blue;
+                pixel[3] = 255u;
+            }
+            for (int y = y0 + 1; y < y1; y++) {
+                uint8_t *row = pixels + ((size_t) y * s_w + (size_t) x0) * 4u;
+                memcpy(row, first, rowBytes);
+            }
+        }
+        return true;
+    }
     for (int y = y0; y < y1; y++)
         for (int x = x0; x < x1; x++)
             putPixel(s_fb, x, y, r, g, b, a);
