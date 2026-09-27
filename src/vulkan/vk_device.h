@@ -26,5 +26,12 @@ bool VkDevice_borrow(const Device *device, VkPhysicalDevice *physical,
                      PFN_vkGetInstanceProcAddr *gpa, VkInstance *instance);
 // Borrowed WSI handle: null for offscreen devices; never destroy it as a borrower.
 VkSurfaceKHR VkDevice_borrowSurface(const Device *device);
+// True only when the windowed device enabled present_id + present_wait and
+// resolved vkWaitForPresentKHR. Does not imply that a swapchain exists yet.
+bool VkDevice_canWaitForPresent(const Device *device);
+// Future swapchain seam: waits at most 100 ms; unsupported/invalid inputs fail
+// closed. VK_TIMEOUT is a dropped-frame result, not proof of presentation.
+VkResult VkDevice_waitForPresent(const Device *device, VkSwapchainKHR swapchain,
+                                 uint64_t presentId, uint64_t timeoutNs);
 
 #endif // VULKAN_VK_DEVICE_H
