@@ -1,6 +1,10 @@
 #include "vulkan/vk_device.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +20,7 @@
  * DEFINITION: VkDevice (vulkan/vk_device.c)
  * ============================================================================
  * The Vulkan dialect of the Device contract — the first real device of the
- * language. It dlopens MoltenVK (falling back to the Khronos loader), creates a
+ * language. It loads the platform Vulkan loader, creates a
  * VkInstance with only the extensions the driver actually exposes, picks the
  * first physical device, and creates one logical device + graphics queue.
  *
@@ -37,15 +41,16 @@
  * LEVEL: L4 — Self-Management (owns the Vulkan device across the process)
  * ============================================================================
  * SUMMARY:
- *   Vulkan DeviceRow. createState loads the loader, builds instance -> physical
- *   device -> logical device -> queue; destroyState tears them down top-down.
+ *   Vulkan DeviceRow. createState loads the loader, then builds instance,
+ *   physical device, logical device and queue; destroyState reverses boot.
+ *   Offscreen boot requests no WSI extensions; portability is optional.
  *
  * STRUCT FIELDS: none — the state is the private VkDeviceState helper.
  *
  * PRIVATE HELPERS (kept file-local, no external API):
  * ----------------------------------------------------------------------------
  *   VkDeviceState
- *     void *lib;               // dlopen'd loader handle
+ *     VkLoaderHandle lib;      // platform loader handle
  *     PFN_vkGetInstanceProcAddr gpa;
  *     VkInstance instance;
  *     VkPhysicalDevice phys;
@@ -58,16 +63,22 @@
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Private Core Functions: (.c static)
- *   - vkLoadLib(void)                : dlopen MoltenVK / Khronos loader
+ *   - vkLoadLib / vkLoadGpa / vkCloseLib : platform loader operations
  *   - vkCreateState(desc) / vkDestroyState(state)
  *   - vkPresent(state) / vkResize(state, w, h)
  *   - vkWidth(state) / vkHeight(state) / vkIsReady(state) / vkNative(state)
  * ============================================================================
  */
 
+#ifdef _WIN32
+typedef HMODULE VkLoaderHandle;
+#else
+typedef void *VkLoaderHandle;
+#endif
+
 // SLOT RECORD state for LANG_BACKEND_VULKAN (owned by the row's createState).
 typedef struct VkDeviceState {
-    void *lib;                          // dlopen'd loader handle
+    VkLoaderHandle lib;
     PFN_vkGetInstanceProcAddr gpa;
     VkInstance instance;
     VkPhysicalDevice phys;
@@ -79,11 +90,19 @@ typedef struct VkDeviceState {
     bool ready;
 } VkDeviceState;
 
-#define VK_DEV_MAX_EXT 64
-
-// dlopen MoltenVK first (the ICD exports everything itself), Khronos loader as
-// fallback for manifest setups. Mirrors the old reference's candidate list.
-static void *vkLoadLib(void) {
+#ifdef _WIN32
+static VkLoaderHandle vkLoadLib(void) {
+    return LoadLibraryA("vulkan-1.dll");
+}
+static PFN_vkGetInstanceProcAddr vkLoadGpa(VkLoaderHandle lib) {
+    return (PFN_vkGetInstanceProcAddr) GetProcAddress(lib, "vkGetInstanceProcAddr");
+}
+static void vkCloseLib(VkLoaderHandle lib) {
+    FreeLibrary(lib);
+}
+#else
+static VkLoaderHandle vkLoadLib(void) {
+#ifdef __APPLE__
     const char *candidates[] = {
         "libMoltenVK.dylib",
         "/opt/homebrew/lib/libMoltenVK.dylib",
@@ -93,12 +112,43 @@ static void *vkLoadLib(void) {
         "/usr/local/lib/libvulkan.dylib",
         nullptr,
     };
-    for (int i = 0; candidates[i] != nullptr; i++) {
+#else
+    const char *candidates[] = { "libvulkan.so.1", "libvulkan.so", nullptr };
+#endif
+    for (size_t i = 0; candidates[i] != nullptr; i++) {
         void *lib = dlopen(candidates[i], RTLD_NOW | RTLD_LOCAL);
         if (lib != nullptr)
             return lib;
     }
     return nullptr;
+}
+static PFN_vkGetInstanceProcAddr vkLoadGpa(VkLoaderHandle lib) {
+    return (PFN_vkGetInstanceProcAddr) dlsym(lib, "vkGetInstanceProcAddr");
+}
+static void vkCloseLib(VkLoaderHandle lib) {
+    dlclose(lib);
+}
+#endif
+
+static void vkDestroyState(void *state) {
+    if (state == nullptr)
+        return;
+    VkDeviceState *s = (VkDeviceState*) state;
+    if ((*s).instance != VK_NULL_HANDLE && (*s).gpa != nullptr) {
+        if ((*s).device != VK_NULL_HANDLE) {
+            PFN_vkDestroyDevice destroyDevice =
+                (PFN_vkDestroyDevice) (*s).gpa((*s).instance, "vkDestroyDevice");
+            if (destroyDevice != nullptr)
+                destroyDevice((*s).device, nullptr);
+        }
+        PFN_vkDestroyInstance destroyInstance =
+            (PFN_vkDestroyInstance) (*s).gpa((*s).instance, "vkDestroyInstance");
+        if (destroyInstance != nullptr)
+            destroyInstance((*s).instance, nullptr);
+    }
+    if ((*s).lib != nullptr)
+        vkCloseLib((*s).lib);
+    free(s);
 }
 
 static void *vkCreateState(const DeviceDesc *desc) {
@@ -113,16 +163,13 @@ static void *vkCreateState(const DeviceDesc *desc) {
     // 1. loader + gpa
     (*state).lib = vkLoadLib();
     if ((*state).lib == nullptr) {
-        fprintf(stderr, "vk_device: no loader dylib\n");
-        free(state);
-        return nullptr;
+        fprintf(stderr, "vk_device: no Vulkan loader\n");
+        goto fail;
     }
-    (*state).gpa = (PFN_vkGetInstanceProcAddr) dlsym((*state).lib, "vkGetInstanceProcAddr");
+    (*state).gpa = vkLoadGpa((*state).lib);
     if ((*state).gpa == nullptr) {
         fprintf(stderr, "vk_device: no vkGetInstanceProcAddr\n");
-        dlclose((*state).lib);
-        free(state);
-        return nullptr;
+        goto fail;
     }
 
     PFN_vkCreateInstance createInstance =
@@ -131,31 +178,29 @@ static void *vkCreateState(const DeviceDesc *desc) {
         (PFN_vkEnumerateInstanceExtensionProperties) (*state).gpa(VK_NULL_HANDLE, "vkEnumerateInstanceExtensionProperties");
     if (createInstance == nullptr || enumExts == nullptr) {
         fprintf(stderr, "vk_device: global entry points missing\n");
-        dlclose((*state).lib);
-        free(state);
-        return nullptr;
+        goto fail;
     }
 
-    // 2. instance — request only the extensions the driver exposes.
+    // Offscreen bootstrap requests only optional portability enumeration.
     uint32_t extCount = 0;
-    enumExts(nullptr, &extCount, nullptr);
-    VkExtensionProperties props[VK_DEV_MAX_EXT];
-    if (extCount > VK_DEV_MAX_EXT)
-        extCount = VK_DEV_MAX_EXT;
-    enumExts(nullptr, &extCount, props);
-
-    const char *exts[4];
-    uint32_t n = 0;
-    for (uint32_t i = 0; i < extCount; i++) {
-        if (strcmp(props[i].extensionName, "VK_KHR_surface") == 0)
-            exts[n++] = "VK_KHR_surface";
-        else if (strcmp(props[i].extensionName, "VK_EXT_metal_surface") == 0)
-            exts[n++] = "VK_EXT_metal_surface";
-        else if (strcmp(props[i].extensionName, "VK_KHR_portability_enumeration") == 0)
-            exts[n++] = "VK_KHR_portability_enumeration";
-        else if (strcmp(props[i].extensionName, "VK_EXT_debug_utils") == 0)
-            exts[n++] = "VK_EXT_debug_utils";
+    if (enumExts(nullptr, &extCount, nullptr) != VK_SUCCESS)
+        goto fail;
+    VkExtensionProperties *props = nullptr;
+    if (extCount != 0) {
+        props = (VkExtensionProperties*) malloc((size_t) extCount * sizeof(*props));
+        if (props == nullptr)
+            goto fail;
+        if (enumExts(nullptr, &extCount, props) != VK_SUCCESS) {
+            free(props);
+            goto fail;
+        }
     }
+    bool portability = false;
+    for (uint32_t i = 0; i < extCount; i++) {
+        if (strcmp(props[i].extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0)
+            portability = true;
+    }
+    free(props);
 
     VkApplicationInfo app = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO };
     app.pApplicationName = "vex";
@@ -163,18 +208,17 @@ static void *vkCreateState(const DeviceDesc *desc) {
 
     VkInstanceCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     ici.pApplicationInfo = &app;
-    ici.enabledExtensionCount = n;
-    ici.ppEnabledExtensionNames = exts;
-    ici.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    const char *portabilityExt = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+    ici.enabledExtensionCount = portability ? 1u : 0u;
+    ici.ppEnabledExtensionNames = portability ? &portabilityExt : nullptr;
+    ici.flags = portability ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0;
 
     if (createInstance(&ici, nullptr, &(*state).instance) != VK_SUCCESS) {
         fprintf(stderr, "vk_device: instance create failed\n");
-        dlclose((*state).lib);
-        free(state);
-        return nullptr;
+        goto fail;
     }
 
-    // 3. physical device (MoltenVK exposes one).
+    // Select the first physical device, then locate its graphics queue family.
     PFN_vkEnumeratePhysicalDevices enumPhys =
         (PFN_vkEnumeratePhysicalDevices) (*state).gpa((*state).instance, "vkEnumeratePhysicalDevices");
     PFN_vkGetPhysicalDeviceQueueFamilyProperties getFamilies =
@@ -183,96 +227,71 @@ static void *vkCreateState(const DeviceDesc *desc) {
         (PFN_vkCreateDevice) (*state).gpa((*state).instance, "vkCreateDevice");
     if (enumPhys == nullptr || getFamilies == nullptr || createDevice == nullptr) {
         fprintf(stderr, "vk_device: instance entry points missing\n");
-        (*state).gpa((*state).instance, "vkDestroyInstance");
-        dlclose((*state).lib);
-        free(state);
-        return nullptr;
+        goto fail;
     }
 
     uint32_t physCount = 0;
     if (enumPhys((*state).instance, &physCount, nullptr) != VK_SUCCESS || physCount == 0) {
         fprintf(stderr, "vk_device: no physical devices\n");
-        dlclose((*state).lib);
-        free(state);
-        return nullptr;
+        goto fail;
     }
-    VkPhysicalDevice phys[8];
-    if (physCount > 8)
-        physCount = 8;
-    enumPhys((*state).instance, &physCount, phys);
-    (*state).phys = phys[0];
+    uint32_t firstCount = 1;
+    VkResult physResult = enumPhys((*state).instance, &firstCount, &(*state).phys);
+    if ((physResult != VK_SUCCESS && physResult != VK_INCOMPLETE) || firstCount == 0)
+        goto fail;
 
     uint32_t familyCount = 0;
     getFamilies((*state).phys, &familyCount, nullptr);
-    VkQueueFamilyProperties families[16];
-    if (familyCount > 16)
-        familyCount = 16;
+    if (familyCount == 0)
+        goto fail;
+    VkQueueFamilyProperties *families =
+        (VkQueueFamilyProperties*) malloc((size_t) familyCount * sizeof(*families));
+    if (families == nullptr)
+        goto fail;
     getFamilies((*state).phys, &familyCount, families);
     bool found = false;
     for (uint32_t f = 0; f < familyCount; f++) {
-        if (families[f].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        if ((families[f].queueFlags & VK_QUEUE_GRAPHICS_BIT) && families[f].queueCount != 0) {
             (*state).queueFamily = f;
             found = true;
             break;
         }
     }
+    free(families);
     if (!found) {
         fprintf(stderr, "vk_device: no graphics queue family\n");
-        dlclose((*state).lib);
-        free(state);
-        return nullptr;
+        goto fail;
     }
 
-    // 4. logical device + queue.
+    // Logical device and graphics queue; presentation extensions come later.
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qci = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     qci.queueFamilyIndex = (*state).queueFamily;
     qci.queueCount = 1;
     qci.pQueuePriorities = &prio;
 
-    const char *devExts[2];
-    uint32_t nDev = 0;
-    devExts[nDev++] = "VK_KHR_swapchain";
-    devExts[nDev++] = "VK_EXT_metal_objects";
-
     VkDeviceCreateInfo dci = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    dci.enabledExtensionCount = nDev;
-    dci.ppEnabledExtensionNames = devExts;
+    // Presentation extensions belong to the future surface seam, not offscreen boot.
 
     if (createDevice((*state).phys, &dci, nullptr, &(*state).device) != VK_SUCCESS) {
         fprintf(stderr, "vk_device: logical device create failed\n");
-        dlclose((*state).lib);
-        free(state);
-        return nullptr;
+        goto fail;
     }
     PFN_vkGetDeviceQueue getQueue =
         (PFN_vkGetDeviceQueue) (*state).gpa((*state).instance, "vkGetDeviceQueue");
-    if (getQueue != nullptr)
-        getQueue((*state).device, (*state).queueFamily, 0, &(*state).queue);
+    if (getQueue == nullptr)
+        goto fail;
+    getQueue((*state).device, (*state).queueFamily, 0, &(*state).queue);
+    if ((*state).queue == VK_NULL_HANDLE)
+        goto fail;
 
     (*state).ready = true;
     return state;
-}
-
-static void vkDestroyState(void *state) {
-    if (state == nullptr)
-        return;
-    VkDeviceState *s = (VkDeviceState*) state;
-    if ((*s).instance != VK_NULL_HANDLE && (*s).gpa != nullptr) {
-        PFN_vkDestroyDevice destroyDevice =
-            (PFN_vkDestroyDevice) (*s).gpa((*s).instance, "vkDestroyDevice");
-        PFN_vkDestroyInstance destroyInstance =
-            (PFN_vkDestroyInstance) (*s).gpa((*s).instance, "vkDestroyInstance");
-        if (destroyDevice != nullptr && (*s).device != VK_NULL_HANDLE)
-            destroyDevice((*s).device, nullptr);
-        if (destroyInstance != nullptr)
-            destroyInstance((*s).instance, nullptr);
-    }
-    if ((*s).lib != nullptr)
-        dlclose((*s).lib);
-    free(s);
+fail:
+    vkDestroyState(state);
+    return nullptr;
 }
 
 static bool vkPresent(void *state) {
