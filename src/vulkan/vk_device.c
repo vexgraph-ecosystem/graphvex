@@ -26,8 +26,9 @@
  * physical device, and creates one logical device + graphics queue.
  *
  * Windowed devices own a surface but not yet a swapchain or renderer. When
- * both optional present-id/wait extensions and features exist, they are
- * enabled together and the device-private bounded completion seam is armed.
+ * present-id/wait and swapchain-maintenance1 extensions and features all
+ * exist, they are enabled together. Both bounded completion and image release
+ * entry points must resolve before the device can safely present.
  *
  * The state is dialect-private (VkInstance/VkPhysicalDevice/VkDevice/VkQueue);
  * The language contract does not expose Vulkan handles. present remains
@@ -66,6 +67,8 @@
  *     bool ready;
  *     bool windowed;
  *     PFN_vkWaitForPresentKHR waitForPresent; // optional enabled completion entry
+ *     PFN_vkReleaseSwapchainImagesEXT releaseSwapchainImages; // optional release entry
+ *     bool safePresent; // full feature and symbol gate
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
@@ -76,7 +79,8 @@
  *   - vkPresent(state) / vkResize(state, w, h)
  *   - vkWidth(state) / vkHeight(state) / vkIsReady(state) / vkNative(state)
  * Public Getters: VkDevice_borrow(device, physical, native, queue, family, gpa, instance),
- *                 VkDevice_borrowSurface(device), VkDevice_canWaitForPresent(device),
+ *                 VkDevice_borrowSurface(device), VkDevice_canSafelyPresent(device),
+ *                 VkDevice_borrowReleaseSwapchainImages(device), VkDevice_canWaitForPresent(device),
  *                 VkDevice_waitForPresent(device, swapchain, presentId, timeoutNs)
  * ============================================================================
  */
@@ -102,10 +106,12 @@ typedef struct VkDeviceState {
     bool ready;
     bool windowed;
     PFN_vkWaitForPresentKHR waitForPresent;
+    PFN_vkReleaseSwapchainImagesEXT releaseSwapchainImages;
+    bool safePresent;
 } VkDeviceState;
 
 static bool vkDeviceExtensions(VkDeviceState *s, VkPhysicalDevice phys,
-                               bool *presentId, bool *presentWait) {
+                               bool *presentId, bool *presentWait, bool *maintenance) {
     PFN_vkEnumerateDeviceExtensionProperties enumerate =
         (PFN_vkEnumerateDeviceExtensionProperties) (*s).gpa((*s).instance, "vkEnumerateDeviceExtensionProperties");
     if (enumerate == nullptr)
@@ -120,6 +126,7 @@ static bool vkDeviceExtensions(VkDeviceState *s, VkPhysicalDevice phys,
     bool found = false;
     *presentId = false;
     *presentWait = false;
+    *maintenance = false;
     if (result == VK_SUCCESS) {
         for (uint32_t i = 0; i < count; i++) {
             if (strcmp(extensions[i].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0)
@@ -128,6 +135,8 @@ static bool vkDeviceExtensions(VkDeviceState *s, VkPhysicalDevice phys,
                 *presentId = true;
             if (strcmp(extensions[i].extensionName, VK_KHR_PRESENT_WAIT_EXTENSION_NAME) == 0)
                 *presentWait = true;
+            if (strcmp(extensions[i].extensionName, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME) == 0)
+                *maintenance = true;
         }
     }
     free(extensions);
@@ -358,16 +367,16 @@ static void *vkCreateState(const DeviceDesc *desc) {
         goto fail;
     VkResult physResult = enumPhys((*state).instance, &physCount, devices);
     bool found = false;
-    bool presentIdExt = false, presentWaitExt = false;
+    bool presentIdExt = false, presentWaitExt = false, maintenanceExt = false;
     if (physResult == VK_SUCCESS || physResult == VK_INCOMPLETE) {
         PFN_vkGetPhysicalDeviceSurfaceSupportKHR support = nullptr;
         if ((*state).windowed)
             support = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR) (*state).gpa((*state).instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
         for (uint32_t p = 0; p < physCount && !found; p++) {
             VkPhysicalDevice phys = devices[p];
-            bool idExt = false, waitExt = false;
+            bool idExt = false, waitExt = false, maintenance = false;
             if ((*state).windowed && (support == nullptr ||
-                                      !vkDeviceExtensions(state, phys, &idExt, &waitExt) ||
+                                      !vkDeviceExtensions(state, phys, &idExt, &waitExt, &maintenance) ||
                                       !vkSurfaceViable(state, phys)))
                 continue;
             uint32_t familyCount = 0;
@@ -391,6 +400,7 @@ static void *vkCreateState(const DeviceDesc *desc) {
                 (*state).queueFamily = f;
                 presentIdExt = idExt;
                 presentWaitExt = waitExt;
+                maintenanceExt = maintenance;
                 found = true;
                 break;
             }
@@ -411,16 +421,21 @@ static void *vkCreateState(const DeviceDesc *desc) {
     VkPhysicalDevicePresentWaitFeaturesKHR waitFeature = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR
     };
-    bool boundedPresent = false;
-    if ((*state).windowed && presentIdExt && presentWaitExt) {
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenanceFeature = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT
+    };
+    bool safeFeatures = false;
+    if ((*state).windowed && presentIdExt && presentWaitExt && maintenanceExt) {
         PFN_vkGetPhysicalDeviceFeatures2 features2 =
             (PFN_vkGetPhysicalDeviceFeatures2) (*state).gpa((*state).instance, "vkGetPhysicalDeviceFeatures2");
         if (features2 != nullptr) {
             VkPhysicalDeviceFeatures2 features = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
             features.pNext = &idFeature;
             idFeature.pNext = &waitFeature;
+            waitFeature.pNext = &maintenanceFeature;
             features2((*state).phys, &features);
-            boundedPresent = idFeature.presentId == VK_TRUE && waitFeature.presentWait == VK_TRUE;
+            safeFeatures = idFeature.presentId == VK_TRUE && waitFeature.presentWait == VK_TRUE &&
+                           maintenanceFeature.swapchainMaintenance1 == VK_TRUE;
         }
     }
 
@@ -436,10 +451,11 @@ static void *vkCreateState(const DeviceDesc *desc) {
     dci.pQueueCreateInfos = &qci;
     const char *deviceExts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                                  VK_KHR_PRESENT_ID_EXTENSION_NAME,
-                                 VK_KHR_PRESENT_WAIT_EXTENSION_NAME };
-    dci.enabledExtensionCount = (*state).windowed ? (boundedPresent ? 3u : 1u) : 0u;
+                                 VK_KHR_PRESENT_WAIT_EXTENSION_NAME,
+                                 VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME };
+    dci.enabledExtensionCount = (*state).windowed ? (safeFeatures ? 4u : 1u) : 0u;
     dci.ppEnabledExtensionNames = (*state).windowed ? deviceExts : nullptr;
-    if (boundedPresent)
+    if (safeFeatures)
         dci.pNext = &idFeature;
 
     if (createDevice((*state).phys, &dci, nullptr, &(*state).device) != VK_SUCCESS) {
@@ -454,11 +470,15 @@ static void *vkCreateState(const DeviceDesc *desc) {
     if ((*state).queue == VK_NULL_HANDLE)
         goto fail;
 
-    if (boundedPresent) {
+    if (safeFeatures) {
         PFN_vkGetDeviceProcAddr deviceProc =
             (PFN_vkGetDeviceProcAddr) (*state).gpa((*state).instance, "vkGetDeviceProcAddr");
-        if (deviceProc != nullptr)
+        if (deviceProc != nullptr) {
             (*state).waitForPresent = (PFN_vkWaitForPresentKHR) deviceProc((*state).device, "vkWaitForPresentKHR");
+            (*state).releaseSwapchainImages =
+                (PFN_vkReleaseSwapchainImagesEXT) deviceProc((*state).device, "vkReleaseSwapchainImagesEXT");
+        }
+        (*state).safePresent = (*state).waitForPresent != nullptr && (*state).releaseSwapchainImages != nullptr;
     }
 
     (*state).ready = true;
@@ -535,15 +555,24 @@ VkSurfaceKHR VkDevice_borrowSurface(const Device *device) {
     return s ? (*s).surface : VK_NULL_HANDLE;
 }
 
-bool VkDevice_canWaitForPresent(const Device *device) {
+bool VkDevice_canSafelyPresent(const Device *device) {
     VkDeviceState *s = (VkDeviceState*) Device_stateForBackend(device, LANG_BACKEND_VULKAN);
-    return s != nullptr && (*s).ready && (*s).windowed && (*s).waitForPresent != nullptr;
+    return s != nullptr && (*s).ready && (*s).windowed && (*s).safePresent;
+}
+
+PFN_vkReleaseSwapchainImagesEXT VkDevice_borrowReleaseSwapchainImages(const Device *device) {
+    VkDeviceState *s = (VkDeviceState*) Device_stateForBackend(device, LANG_BACKEND_VULKAN);
+    return VkDevice_canSafelyPresent(device) ? (*s).releaseSwapchainImages : nullptr;
+}
+
+bool VkDevice_canWaitForPresent(const Device *device) {
+    return VkDevice_canSafelyPresent(device);
 }
 
 VkResult VkDevice_waitForPresent(const Device *device, VkSwapchainKHR swapchain,
                                  uint64_t presentId, uint64_t timeoutNs) {
     VkDeviceState *s = (VkDeviceState*) Device_stateForBackend(device, LANG_BACKEND_VULKAN);
-    if (s == nullptr || !(*s).ready || !(*s).windowed || (*s).waitForPresent == nullptr)
+    if (!VkDevice_canSafelyPresent(device))
         return VK_ERROR_FEATURE_NOT_PRESENT;
     if (swapchain == VK_NULL_HANDLE || presentId == 0)
         return VK_ERROR_INITIALIZATION_FAILED;

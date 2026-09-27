@@ -36,8 +36,8 @@ static bool wsiAvailable(void) {
     return surface && metal;
 }
 
-// Independent probe: extension names are not sufficient; feature bits must
-// also be true before the device may promise bounded present completion.
+// Independent probe: extension names, feature bits and device symbols must
+// all agree before a first displayed frame may be attempted.
 static bool completionAvailable(const Device *device) {
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice native = VK_NULL_HANDLE;
@@ -50,6 +50,8 @@ static bool completionAvailable(const Device *device) {
         (PFN_vkEnumerateDeviceExtensionProperties) gpa(instance, "vkEnumerateDeviceExtensionProperties");
     PFN_vkGetPhysicalDeviceFeatures2 features2 =
         (PFN_vkGetPhysicalDeviceFeatures2) gpa(instance, "vkGetPhysicalDeviceFeatures2");
+    PFN_vkGetDeviceProcAddr deviceProc =
+        (PFN_vkGetDeviceProcAddr) gpa(instance, "vkGetDeviceProcAddr");
     if (enumerate == nullptr || features2 == nullptr)
         return false;
     uint32_t count = 0;
@@ -57,18 +59,25 @@ static bool completionAvailable(const Device *device) {
         return false;
     VkExtensionProperties *props = (VkExtensionProperties*) malloc((size_t) count * sizeof(*props));
     assert(props != nullptr);
-    bool id = false, wait = false;
+    bool id = false, wait = false, maintenance = false;
     if (enumerate(physical, nullptr, &count, props) == VK_SUCCESS) {
         for (uint32_t i = 0; i < count; i++) {
             id |= strcmp(props[i].extensionName, VK_KHR_PRESENT_ID_EXTENSION_NAME) == 0;
             wait |= strcmp(props[i].extensionName, VK_KHR_PRESENT_WAIT_EXTENSION_NAME) == 0;
+            maintenance |= strcmp(props[i].extensionName, VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME) == 0;
         }
     }
     free(props);
-    if (!id || !wait)
+    if (!id || !wait || !maintenance) {
+        fprintf(stderr, "Mac Vulkan WSI extensions: present_id=%d present_wait=%d maintenance1=%d\n",
+                id, wait, maintenance);
         return false;
+    }
+    VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT maintenanceFeature = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT
+    };
     VkPhysicalDevicePresentWaitFeaturesKHR waitFeature = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, .pNext = &maintenanceFeature
     };
     VkPhysicalDevicePresentIdFeaturesKHR idFeature = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, .pNext = &waitFeature
@@ -77,11 +86,22 @@ static bool completionAvailable(const Device *device) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &idFeature
     };
     features2(physical, &features);
-    return idFeature.presentId == VK_TRUE && waitFeature.presentWait == VK_TRUE;
+    PFN_vkWaitForPresentKHR waitFn = deviceProc ?
+        (PFN_vkWaitForPresentKHR) deviceProc(native, "vkWaitForPresentKHR") : nullptr;
+    PFN_vkReleaseSwapchainImagesEXT releaseFn = deviceProc ?
+        (PFN_vkReleaseSwapchainImagesEXT) deviceProc(native, "vkReleaseSwapchainImagesEXT") : nullptr;
+    fprintf(stderr, "Mac Vulkan WSI features: present_id=%d present_wait=%d maintenance1=%d; symbols: wait=%d release=%d\n",
+            idFeature.presentId == VK_TRUE, waitFeature.presentWait == VK_TRUE,
+            maintenanceFeature.swapchainMaintenance1 == VK_TRUE, waitFn != nullptr, releaseFn != nullptr);
+    return idFeature.presentId == VK_TRUE && waitFeature.presentWait == VK_TRUE &&
+           maintenanceFeature.swapchainMaintenance1 == VK_TRUE && waitFn != nullptr && releaseFn != nullptr;
 }
 
 int main(void) {
     @autoreleasepool {
+        assert(!VkDevice_canSafelyPresent(nullptr));
+        assert(VkDevice_borrowReleaseSwapchainImages(nullptr) == nullptr);
+        assert(VkDevice_waitForPresent(nullptr, VK_NULL_HANDLE, 1, 1000000000ull) == VK_ERROR_FEATURE_NOT_PRESENT);
         if (!Device_registerRow(Vulkan_row()))
             return 1;
         CAMetalLayer *layer = [CAMetalLayer layer];
@@ -99,10 +119,12 @@ int main(void) {
         assert(Device_isReady(windowed));
         assert(!Device_present(windowed)); // no swapchain in this milestone
         bool supported = completionAvailable(windowed);
+        assert(VkDevice_canSafelyPresent(windowed) == supported);
         assert(VkDevice_canWaitForPresent(windowed) == supported);
+        assert((VkDevice_borrowReleaseSwapchainImages(windowed) != nullptr) == supported);
         assert(VkDevice_waitForPresent(windowed, VK_NULL_HANDLE, 1, 1000000000ull) ==
                (supported ? VK_ERROR_INITIALIZATION_FAILED : VK_ERROR_FEATURE_NOT_PRESENT));
-        fprintf(stderr, "Mac Vulkan bounded present wait: %s (Windows unverified)\n",
+        fprintf(stderr, "Mac Vulkan safe presentation: %s (Windows unverified)\n",
                 supported ? "enabled" : "unsupported");
         Device_destroy(windowed);
         desc.window = nullptr;
@@ -110,6 +132,8 @@ int main(void) {
         assert(offscreen != nullptr);
         assert(VkDevice_borrowSurface(offscreen) == VK_NULL_HANDLE);
         assert(!VkDevice_canWaitForPresent(offscreen));
+        assert(!VkDevice_canSafelyPresent(offscreen));
+        assert(VkDevice_borrowReleaseSwapchainImages(offscreen) == nullptr);
         Device_destroy(offscreen);
     }
     return 0;
