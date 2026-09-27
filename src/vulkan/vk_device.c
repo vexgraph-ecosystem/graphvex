@@ -22,12 +22,10 @@
  * ============================================================================
  * The Vulkan dialect of the Device contract — the first real device of the
  * language. It loads the platform Vulkan loader, creates a
- * VkInstance with only the extensions the driver actually exposes, picks the
- * first physical device, and creates one logical device + graphics queue.
+ * VkInstance with only the extensions the driver actually exposes, picks a
+ * physical device, and creates one logical device + graphics queue.
  *
- * This slice is DEVICE-ONLY by design: no surface, no swapchain, no render. The
- * seam Surface and the master renderer (vulkan/vk_render.c) are built on top in
- * the next slices, so the device is provable in isolation first.
+ * Windowed devices own a surface but not yet a swapchain or renderer.
  *
  * The state is dialect-private (VkInstance/VkPhysicalDevice/VkDevice/VkQueue);
  * callers only ever see the opaque Device. present/resize are cold-false until
@@ -45,7 +43,9 @@
  * SUMMARY:
  *   Vulkan DeviceRow. createState loads the loader, then builds instance,
  *   physical device, logical device and queue; destroyState reverses boot.
- *   Offscreen boot requests no WSI extensions; portability is optional.
+ *   Offscreen boot requests no WSI extensions; windowed boot validates WSI,
+ *   present queues, swapchain support and surface viability before device boot.
+ *   Portability is optional in both paths.
  *
  * STRUCT FIELDS: none — the state is the private VkDeviceState helper.
  *
@@ -55,21 +55,25 @@
  *     VkLoaderHandle lib;      // platform loader handle
  *     PFN_vkGetInstanceProcAddr gpa;
  *     VkInstance instance;
+ *     VkSurfaceKHR surface;  // owned, window handle borrowed
  *     VkPhysicalDevice phys;
  *     VkDevice device;
  *     VkQueue queue;
  *     uint32_t queueFamily;
  *     uint32_t width, height;  // requested native px (0 = offscreen)
  *     bool ready;
+ *     bool windowed;
  *
  * FUNCTION REGISTRY:
  * ----------------------------------------------------------------------------
  * Private Core Functions: (.c static)
  *   - vkLoadLib / vkLoadGpa / vkCloseLib : platform loader operations
  *   - vkCreateState(desc) / vkDestroyState(state) (detach VkGraphics first)
+ *   - vkSurfaceViable(state, phys) / vkHasSwapchain(state, phys)
  *   - vkPresent(state) / vkResize(state, w, h)
  *   - vkWidth(state) / vkHeight(state) / vkIsReady(state) / vkNative(state)
- * Public Getters: VkDevice_borrow(device, physical, native, queue, family, gpa, instance)
+ * Public Getters: VkDevice_borrow(device, physical, native, queue, family, gpa, instance),
+ *                 VkDevice_borrowSurface(device)
  * ============================================================================
  */
 
@@ -84,6 +88,7 @@ typedef struct VkDeviceState {
     VkLoaderHandle lib;
     PFN_vkGetInstanceProcAddr gpa;
     VkInstance instance;
+    VkSurfaceKHR surface;
     VkPhysicalDevice phys;
     VkDevice device;
     VkQueue queue;
@@ -91,7 +96,48 @@ typedef struct VkDeviceState {
     uint32_t width;                     // requested native px (0 = offscreen)
     uint32_t height;
     bool ready;
+    bool windowed;
 } VkDeviceState;
+
+static bool vkHasSwapchain(VkDeviceState *s, VkPhysicalDevice phys) {
+    PFN_vkEnumerateDeviceExtensionProperties enumerate =
+        (PFN_vkEnumerateDeviceExtensionProperties) (*s).gpa((*s).instance, "vkEnumerateDeviceExtensionProperties");
+    if (enumerate == nullptr)
+        return false;
+    uint32_t count = 0;
+    if (enumerate(phys, nullptr, &count, nullptr) != VK_SUCCESS || count == 0)
+        return false;
+    VkExtensionProperties *extensions = (VkExtensionProperties*) malloc((size_t) count * sizeof(*extensions));
+    if (extensions == nullptr)
+        return false;
+    VkResult result = enumerate(phys, nullptr, &count, extensions);
+    bool found = false;
+    if (result == VK_SUCCESS) {
+        for (uint32_t i = 0; i < count; i++) {
+            if (strcmp(extensions[i].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0)
+                found = true;
+        }
+    }
+    free(extensions);
+    return found;
+}
+
+static bool vkSurfaceViable(VkDeviceState *s, VkPhysicalDevice phys) {
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR capabilities =
+        (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR) (*s).gpa((*s).instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    PFN_vkGetPhysicalDeviceSurfaceFormatsKHR formats =
+        (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR) (*s).gpa((*s).instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    PFN_vkGetPhysicalDeviceSurfacePresentModesKHR modes =
+        (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR) (*s).gpa((*s).instance, "vkGetPhysicalDeviceSurfacePresentModesKHR");
+    if (capabilities == nullptr || formats == nullptr || modes == nullptr)
+        return false;
+    VkSurfaceCapabilitiesKHR caps;
+    uint32_t formatCount = 0, modeCount = 0;
+    return capabilities(phys, (*s).surface, &caps) == VK_SUCCESS &&
+           caps.minImageCount != 0 &&
+           formats(phys, (*s).surface, &formatCount, nullptr) == VK_SUCCESS && formatCount != 0 &&
+           modes(phys, (*s).surface, &modeCount, nullptr) == VK_SUCCESS && modeCount != 0;
+}
 
 #ifdef _WIN32
 static VkLoaderHandle vkLoadLib(void) {
@@ -145,6 +191,12 @@ static void vkDestroyState(void *state) {
             if (destroyDevice != nullptr)
                 destroyDevice((*s).device, nullptr);
         }
+        if ((*s).surface != VK_NULL_HANDLE) {
+            PFN_vkDestroySurfaceKHR destroySurface =
+                (PFN_vkDestroySurfaceKHR) (*s).gpa((*s).instance, "vkDestroySurfaceKHR");
+            if (destroySurface != nullptr)
+                destroySurface((*s).instance, (*s).surface, nullptr);
+        }
         PFN_vkDestroyInstance destroyInstance =
             (PFN_vkDestroyInstance) (*s).gpa((*s).instance, "vkDestroyInstance");
         if (destroyInstance != nullptr)
@@ -162,7 +214,12 @@ static void *vkCreateState(const DeviceDesc *desc) {
     if (desc != nullptr) {
         (*state).width = (*desc).width;
         (*state).height = (*desc).height;
+        (*state).windowed = (*desc).window != nullptr;
     }
+#if !defined(__APPLE__) && !defined(_WIN32)
+    if ((*state).windowed)
+        goto fail;
+#endif
 
     // 1. loader + gpa
     (*state).lib = vkLoadLib();
@@ -199,12 +256,25 @@ static void *vkCreateState(const DeviceDesc *desc) {
             goto fail;
         }
     }
-    bool portability = false;
+    bool portability = false, surfaceExt = false, platformExt = false;
     for (uint32_t i = 0; i < extCount; i++) {
         if (strcmp(props[i].extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0)
             portability = true;
+        if (strcmp(props[i].extensionName, VK_KHR_SURFACE_EXTENSION_NAME) == 0)
+            surfaceExt = true;
+#ifdef __APPLE__
+        if (strcmp(props[i].extensionName, VK_EXT_METAL_SURFACE_EXTENSION_NAME) == 0)
+            platformExt = true;
+#elif defined(_WIN32)
+        if (strcmp(props[i].extensionName, VK_KHR_WIN32_SURFACE_EXTENSION_NAME) == 0)
+            platformExt = true;
+#endif
     }
     free(props);
+    if ((*state).windowed && (!surfaceExt || !platformExt)) {
+        fprintf(stderr, "vk_device: required WSI instance extensions missing\n");
+        goto fail;
+    }
 
     VkApplicationInfo app = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO };
     app.pApplicationName = "vex";
@@ -212,9 +282,20 @@ static void *vkCreateState(const DeviceDesc *desc) {
 
     VkInstanceCreateInfo ici = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     ici.pApplicationInfo = &app;
-    const char *portabilityExt = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
-    ici.enabledExtensionCount = portability ? 1u : 0u;
-    ici.ppEnabledExtensionNames = portability ? &portabilityExt : nullptr;
+    const char *instanceExts[3];
+    uint32_t enabled = 0;
+    if (portability)
+        instanceExts[enabled++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+    if ((*state).windowed) {
+        instanceExts[enabled++] = VK_KHR_SURFACE_EXTENSION_NAME;
+#ifdef __APPLE__
+        instanceExts[enabled++] = VK_EXT_METAL_SURFACE_EXTENSION_NAME;
+#elif defined(_WIN32)
+        instanceExts[enabled++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#endif
+    }
+    ici.enabledExtensionCount = enabled;
+    ici.ppEnabledExtensionNames = enabled ? instanceExts : nullptr;
     ici.flags = portability ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0;
 
     if (createInstance(&ici, nullptr, &(*state).instance) != VK_SUCCESS) {
@@ -222,7 +303,28 @@ static void *vkCreateState(const DeviceDesc *desc) {
         goto fail;
     }
 
-    // Select the first physical device, then locate its graphics queue family.
+    if ((*state).windowed) {
+#ifdef __APPLE__
+        PFN_vkCreateMetalSurfaceEXT createSurface =
+            (PFN_vkCreateMetalSurfaceEXT) (*state).gpa((*state).instance, "vkCreateMetalSurfaceEXT");
+        VkMetalSurfaceCreateInfoEXT info = { .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT };
+        info.pLayer = (*desc).window;
+#elif defined(_WIN32)
+        PFN_vkCreateWin32SurfaceKHR createSurface =
+            (PFN_vkCreateWin32SurfaceKHR) (*state).gpa((*state).instance, "vkCreateWin32SurfaceKHR");
+        VkWin32SurfaceCreateInfoKHR info = { .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR };
+        info.hwnd = (HWND) (*desc).window;
+        info.hinstance = (HINSTANCE) GetWindowLongPtrW(info.hwnd, GWLP_HINSTANCE);
+        if (info.hinstance == nullptr)
+            goto fail;
+#endif
+#if defined(__APPLE__) || defined(_WIN32)
+        if (createSurface == nullptr || createSurface((*state).instance, &info, nullptr, &(*state).surface) != VK_SUCCESS)
+            goto fail;
+#endif
+    }
+
+    // For WSI choose a device with a graphics+present queue and swapchain support.
     PFN_vkEnumeratePhysicalDevices enumPhys =
         (PFN_vkEnumeratePhysicalDevices) (*state).gpa((*state).instance, "vkEnumeratePhysicalDevices");
     PFN_vkGetPhysicalDeviceQueueFamilyProperties getFamilies =
@@ -239,35 +341,52 @@ static void *vkCreateState(const DeviceDesc *desc) {
         fprintf(stderr, "vk_device: no physical devices\n");
         goto fail;
     }
-    uint32_t firstCount = 1;
-    VkResult physResult = enumPhys((*state).instance, &firstCount, &(*state).phys);
-    if ((physResult != VK_SUCCESS && physResult != VK_INCOMPLETE) || firstCount == 0)
+    VkPhysicalDevice *devices = (VkPhysicalDevice*) malloc((size_t) physCount * sizeof(*devices));
+    if (devices == nullptr)
         goto fail;
-
-    uint32_t familyCount = 0;
-    getFamilies((*state).phys, &familyCount, nullptr);
-    if (familyCount == 0)
-        goto fail;
-    VkQueueFamilyProperties *families =
-        (VkQueueFamilyProperties*) malloc((size_t) familyCount * sizeof(*families));
-    if (families == nullptr)
-        goto fail;
-    getFamilies((*state).phys, &familyCount, families);
+    VkResult physResult = enumPhys((*state).instance, &physCount, devices);
     bool found = false;
-    for (uint32_t f = 0; f < familyCount; f++) {
-        if ((families[f].queueFlags & VK_QUEUE_GRAPHICS_BIT) && families[f].queueCount != 0) {
-            (*state).queueFamily = f;
-            found = true;
-            break;
+    if (physResult == VK_SUCCESS || physResult == VK_INCOMPLETE) {
+        PFN_vkGetPhysicalDeviceSurfaceSupportKHR support = nullptr;
+        if ((*state).windowed)
+            support = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR) (*state).gpa((*state).instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
+        for (uint32_t p = 0; p < physCount && !found; p++) {
+            VkPhysicalDevice phys = devices[p];
+            if ((*state).windowed && (support == nullptr || !vkHasSwapchain(state, phys) ||
+                                      !vkSurfaceViable(state, phys)))
+                continue;
+            uint32_t familyCount = 0;
+            getFamilies(phys, &familyCount, nullptr);
+            if (familyCount == 0)
+                continue;
+            VkQueueFamilyProperties *families =
+                (VkQueueFamilyProperties*) malloc((size_t) familyCount * sizeof(*families));
+            if (families == nullptr)
+                continue;
+            getFamilies(phys, &familyCount, families);
+            for (uint32_t f = 0; f < familyCount; f++) {
+                if (!(families[f].queueFlags & VK_QUEUE_GRAPHICS_BIT) || families[f].queueCount == 0)
+                    continue;
+                if ((*state).windowed) {
+                    VkBool32 present = VK_FALSE;
+                    if (support(phys, f, (*state).surface, &present) != VK_SUCCESS || !present)
+                        continue;
+                }
+                (*state).phys = phys;
+                (*state).queueFamily = f;
+                found = true;
+                break;
+            }
+            free(families);
         }
     }
-    free(families);
+    free(devices);
     if (!found) {
-        fprintf(stderr, "vk_device: no graphics queue family\n");
+        fprintf(stderr, "vk_device: no compatible graphics/present queue or surface\n");
         goto fail;
     }
 
-    // Logical device and graphics queue; presentation extensions come later.
+    // Offscreen has no device extensions; windowed devices require swapchain.
     float prio = 1.0f;
     VkDeviceQueueCreateInfo qci = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     qci.queueFamilyIndex = (*state).queueFamily;
@@ -277,7 +396,9 @@ static void *vkCreateState(const DeviceDesc *desc) {
     VkDeviceCreateInfo dci = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    // Presentation extensions belong to the future surface seam, not offscreen boot.
+    const char *swapchainExt = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    dci.enabledExtensionCount = (*state).windowed ? 1u : 0u;
+    dci.ppEnabledExtensionNames = (*state).windowed ? &swapchainExt : nullptr;
 
     if (createDevice((*state).phys, &dci, nullptr, &(*state).device) != VK_SUCCESS) {
         fprintf(stderr, "vk_device: logical device create failed\n");
@@ -358,4 +479,9 @@ bool VkDevice_borrow(const Device *device, VkPhysicalDevice *physical,
     *gpa = (*s).gpa;
     *instance = (*s).instance;
     return true;
+}
+
+VkSurfaceKHR VkDevice_borrowSurface(const Device *device) {
+    VkDeviceState *s = (VkDeviceState*) Device_stateForBackend(device, LANG_BACKEND_VULKAN);
+    return s ? (*s).surface : VK_NULL_HANDLE;
 }

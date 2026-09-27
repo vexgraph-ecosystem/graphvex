@@ -59,7 +59,7 @@ add_library(graphvex STATIC
     src/filter/blur/box_blur.c
     src/filter/blur/gaussian_blur.c
     src/filter/contrast/contrast.c
-    # vulkan dialect — device only for now (surface/render land next)
+    # vulkan dialect — optional WSI surface; swapchain/render land next
     src/vulkan/vk_device.c
     src/vulkan/vk_graphics.c
     # raster + null dialects — the headless device matrix
@@ -269,4 +269,12 @@ if(NOT TARGET vk_graphics_test)
     target_compile_options(vk_graphics_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
     add_test(NAME vk_graphics_test COMMAND vk_graphics_test)
     set_tests_properties(vk_graphics_test PROPERTIES SKIP_RETURN_CODE 77)
+endif()
+
+if(APPLE AND NOT TARGET vk_surface_test)
+    add_executable(vk_surface_test tests/vk_surface_test.m)
+    target_link_libraries(vk_surface_test PRIVATE graphvex)
+    target_compile_options(vk_surface_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    add_test(NAME vk_surface_test COMMAND vk_surface_test)
+    set_tests_properties(vk_surface_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()

@@ -22,9 +22,8 @@
 //
 // LAYER LAW (the Vertical Integration Law): graphvex is vexspoke-only. The
 // window handle flows DOWN from the window owner (hotcwap R1); graphvex never
-// includes window/window.h and never inspects the handle — the dialect casts
-// it. By value, write-only transit: pass it to the dialect, never dereference,
-// never retain.
+// includes window/window.h. The Vulkan dialect borrows it for surface creation
+// and never owns or retains it. The window owner must outlive the device.
 //
 // NAMING: `Device` (not `GraphicsDevice`) — the old reference's
 // GraphicsDevice/GraphicsFrame/GraphicsDrawable sketch is ported here and
@@ -64,7 +63,7 @@ typedef struct Drawable {
 // error — a device must name its dialect).
 typedef struct DeviceDesc {
     uint32_t backend;    // LANG_BACKEND_* (default NONE = fail-closed)
-    void *window;        // window-owned OS handle (default nullptr = offscreen)
+    void *window;        // borrowed CAMetalLayer* (macOS) or HWND (Windows); null = offscreen
     uint32_t width;      // native px (default 0 = offscreen/unsized)
     uint32_t height;     // native px
 } DeviceDesc;
