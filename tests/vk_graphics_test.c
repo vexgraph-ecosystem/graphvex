@@ -44,6 +44,8 @@ int main(void) {
     assert(device != nullptr);
     assert(VkGraphics_bind(device));
     assert(VkGraphics_bind(device));
+    assert(VkGraphics_getRectCapacity() >= 50000);
+    assert(!VkGraphics_setRectCapacity(0));
     Device *other = Device_new(&desc);
     assert(other != nullptr);
     assert(!VkGraphics_bind(other));
@@ -160,6 +162,34 @@ int main(void) {
     assert((*row).end());
     assert(VkGraphics_readback(16, pixels));
     assert(pixels[0] == 0x12 && pixels[1] == 0x34 && pixels[2] == 0x56 && pixels[3] == 0x78);
+    // Dense, ordered 50k fills: thousands of overlapping translucent quads
+    // with a clip boundary, yet only two draw calls and no instance overflow.
+    assert((*row).resize(100, 100));
+    uint8_t dense[100 * 100 * 4];
+    Brush opaque = { 0x12AB34FFu, 1.0f };
+    Brush translucent = { 0xFF000080u, 1.0f };
+    Rectangle tile = { 0, 0, 1, 1 };
+    Rectangle denseClip = { 0, 0, 50, 100 };
+    assert((*row).begin());
+    assert((*row).clear(0x000000FFu));
+    for (int i = 0; i < 50000; i++) {
+        if (i == 25000)
+            assert((*row).clip(&denseClip));
+        tile.x = (float) (i % 100);
+        tile.y = (float) ((i / 100) % 100);
+        assert((*row).fillRect(&tile, i < 25000 ? &opaque : &translucent));
+    }
+    assert((*row).end());
+    assert(VkGraphics_getDrawCount() == 2);
+    assert(VkGraphics_readback(sizeof(dense), dense));
+    size_t inside = ((size_t) 0 * 100 + 0) * 4;
+    size_t outside = ((size_t) 0 * 100 + 75) * 4;
+    float a = 128.0f / 255.0f;
+    int redTwice = (int) (255.0f * a + (18.0f * a + 255.0f * (1.0f - a)) * (1.0f - a) + 0.5f);
+    int greenTwice = (int) (171.0f * (1.0f - a) * (1.0f - a) + 0.5f);
+    assert(abs((int) dense[inside] - redTwice) <= 1 && abs((int) dense[inside + 1] - greenTwice) <= 1);
+    assert(dense[outside] == 0x12 && dense[outside + 1] == 0xAB && dense[outside + 2] == 0x34);
+    assert(!VkGraphics_setRectCapacity(128)); // only cold before a target exists
     Device_destroy(device);
     assert(VkGraphics_bind(other));
     VkGraphics_unbind();

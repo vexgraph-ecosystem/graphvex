@@ -23,5 +23,7 @@ glslangValidator -V "$DIR/vert/hello_triangle.vert" -o "$DIR/spv/hello_triangle_
 glslangValidator -V "$DIR/frag/hello_triangle.frag" -o "$DIR/spv/hello_triangle_frag.spv"
 glslangValidator -V "$DIR/vert/solid_quad.vert" -o "$DIR/spv/solid_quad_vert.spv"
 glslangValidator -V "$DIR/frag/solid_quad.frag" -o "$DIR/spv/solid_quad_frag.spv"
+glslangValidator -V "$DIR/vert/instanced_quad.vert" -o "$DIR/spv/instanced_quad_vert.spv"
+glslangValidator -V "$DIR/frag/instanced_quad.frag" -o "$DIR/spv/instanced_quad_frag.spv"
 
 echo "shaders: spv refreshed"

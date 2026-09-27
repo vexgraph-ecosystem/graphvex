@@ -14,8 +14,9 @@
 /**
  * CLASS: VkGraphics. A single borrowed Vulkan device backs a retained RGBA8
  * transfer/render image and coherent readback buffer. Resize creates these and
- * one reusable command buffer/fence; begin/clear/clip/fillRect/end record
- * without allocating. Precompiled SPIR-V is read on resize, never per draw.
+ * one reusable command buffer/fence and a mapped coherent rectangle stream.
+ * fillRect appends clipped instances; boundaries draw them in painter order.
+ * Precompiled SPIR-V is read on resize, never per draw.
  * Windowed devices own a single VkSwapchain and borrow the completed image
  * for a GPU-only blit; no CPU map or readback occurs on the present path.
  * A pending fence is waited for at most 100ms per call; timeout preserves all
@@ -32,14 +33,18 @@
  *   VkFence fence; uint32_t width, height; size_t bytes;
  *   VkImageLayout layout; VkRenderPass pass; VkFramebuffer framebuffer;
  *   VkImageView view; VkPipelineLayout pipelineLayout; VkPipeline pipeline;
+ *   VkBuffer instances; VkDeviceMemory instanceMemory; void *instanceMap;
+ *   VkDescriptorSetLayout descriptorLayout; VkDescriptorPool descriptorPool;
+ *   VkDescriptorSet descriptor; uint32_t capacity, used, batchStart, draws;
  *   bool drawing, clipEnabled; Rectangle clipRect;
  *   bool recording, pending, completed, cleared, dirty;
  *   VkSwapchain *chain; // optional windowed presentation owner
  * FUNCTION REGISTRY:
  * Public Core: VkGraphics_bind, VkGraphics_unbind, VkGraphics_unbindIfDevice,
- *              VkGraphics_getRow, VkGraphics_readback, VkGraphics_borrowPresentImage.
+ *              VkGraphics_getRow, VkGraphics_readback, VkGraphics_borrowPresentImage,
+ *              VkGraphics_setRectCapacity, VkGraphics_getRectCapacity, VkGraphics_getDrawCount.
  * Private Core: waitPending, releaseTarget, resize, begin, clear, end, clip,
- *               fillRect, startDrawing, stopDrawing, buildPipeline, loadShader,
+ *               fillRect, flushBatch, startDrawing, stopDrawing, buildPipeline, loadShader,
  *               unsupported drawable verbs, loadFns, chooseMemory.
  */
 
@@ -67,6 +72,16 @@ typedef struct VkGraphics {
     VkImageView view;
     VkPipelineLayout pipelineLayout;
     VkPipeline pipeline;
+    VkBuffer instances;
+    VkDeviceMemory instanceMemory;
+    void *instanceMap;
+    VkDescriptorSetLayout descriptorLayout;
+    VkDescriptorPool descriptorPool;
+    VkDescriptorSet descriptor;
+    uint32_t capacity;
+    uint32_t used;
+    uint32_t batchStart;
+    uint32_t draws;
     bool drawing;
     bool clipEnabled;
     Rectangle clipRect;
@@ -79,6 +94,9 @@ typedef struct VkGraphics {
 } VkGraphics;
 
 static VkGraphics s;
+#define VK_GRAPHICS_DEFAULT_RECT_CAPACITY 65536u
+// std430: two vec4s per row, identical to the former 32-byte push payload.
+#define VK_GRAPHICS_RECT_BYTES (sizeof(float) * 8u)
 #define FN(name) static PFN_##name p_##name
 FN(vkGetPhysicalDeviceMemoryProperties);
 FN(vkGetPhysicalDeviceFormatProperties);
@@ -99,7 +117,10 @@ FN(vkCreatePipelineLayout); FN(vkDestroyPipelineLayout);
 FN(vkCreateGraphicsPipelines); FN(vkDestroyPipeline);
 FN(vkCmdBeginRenderPass); FN(vkCmdEndRenderPass);
 FN(vkCmdBindPipeline); FN(vkCmdSetViewport); FN(vkCmdSetScissor);
-FN(vkCmdPushConstants); FN(vkCmdDraw);
+FN(vkCmdDraw);
+FN(vkCreateDescriptorSetLayout); FN(vkDestroyDescriptorSetLayout);
+FN(vkCreateDescriptorPool); FN(vkDestroyDescriptorPool);
+FN(vkAllocateDescriptorSets); FN(vkUpdateDescriptorSets); FN(vkCmdBindDescriptorSets);
 #undef FN
 
 #define LOAD(name) do { p_##name = (PFN_##name) (*s.gpa)(s.instance, #name); if (p_##name == nullptr) return false; } while (0)
@@ -123,7 +144,10 @@ static bool loadFns(void) {
     LOAD(vkCreateGraphicsPipelines); LOAD(vkDestroyPipeline);
     LOAD(vkCmdBeginRenderPass); LOAD(vkCmdEndRenderPass);
     LOAD(vkCmdBindPipeline); LOAD(vkCmdSetViewport); LOAD(vkCmdSetScissor);
-    LOAD(vkCmdPushConstants); LOAD(vkCmdDraw);
+    LOAD(vkCmdDraw);
+    LOAD(vkCreateDescriptorSetLayout); LOAD(vkDestroyDescriptorSetLayout);
+    LOAD(vkCreateDescriptorPool); LOAD(vkDestroyDescriptorPool);
+    LOAD(vkAllocateDescriptorSets); LOAD(vkUpdateDescriptorSets); LOAD(vkCmdBindDescriptorSets);
     return true;
 }
 #undef LOAD
@@ -153,14 +177,24 @@ static void releaseTarget(void) {
         p_vkDestroyImage(s.device, s.image, nullptr);
     if (s.buffer != VK_NULL_HANDLE)
         p_vkDestroyBuffer(s.device, s.buffer, nullptr);
+    if (s.instanceMap != nullptr)
+        p_vkUnmapMemory(s.device, s.instanceMemory);
+    if (s.instances != VK_NULL_HANDLE)
+        p_vkDestroyBuffer(s.device, s.instances, nullptr);
     if (s.imageMemory != VK_NULL_HANDLE)
         p_vkFreeMemory(s.device, s.imageMemory, nullptr);
     if (s.bufferMemory != VK_NULL_HANDLE)
         p_vkFreeMemory(s.device, s.bufferMemory, nullptr);
+    if (s.instanceMemory != VK_NULL_HANDLE)
+        p_vkFreeMemory(s.device, s.instanceMemory, nullptr);
     s.image = VK_NULL_HANDLE;
     s.buffer = VK_NULL_HANDLE;
     s.imageMemory = VK_NULL_HANDLE;
     s.bufferMemory = VK_NULL_HANDLE;
+    s.instances = VK_NULL_HANDLE;
+    s.instanceMemory = VK_NULL_HANDLE;
+    s.instanceMap = nullptr;
+    s.used = s.batchStart = 0;
     s.width = s.height = 0;
     s.bytes = 0;
     s.layout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -174,8 +208,12 @@ void VkGraphics_unbind(void) {
         return;
     s.chain = nullptr;
     releaseTarget();
+    if (s.descriptorPool != VK_NULL_HANDLE)
+        p_vkDestroyDescriptorPool(s.device, s.descriptorPool, nullptr);
     if (s.pipelineLayout != VK_NULL_HANDLE)
         p_vkDestroyPipelineLayout(s.device, s.pipelineLayout, nullptr);
+    if (s.descriptorLayout != VK_NULL_HANDLE)
+        p_vkDestroyDescriptorSetLayout(s.device, s.descriptorLayout, nullptr);
     if (s.pass != VK_NULL_HANDLE)
         p_vkDestroyRenderPass(s.device, s.pass, nullptr);
     if (s.fence != VK_NULL_HANDLE)
@@ -201,6 +239,7 @@ bool VkGraphics_bind(Device *device) {
                          &candidate.instance))
         return false;
     candidate.owner = device;
+    candidate.capacity = VK_GRAPHICS_DEFAULT_RECT_CAPACITY;
     s = candidate;
     if (!loadFns()) {
         memset(&s, 0, sizeof(s));
@@ -238,10 +277,23 @@ bool VkGraphics_bind(Device *device) {
         .attachmentCount = 1, .pAttachments = &attachment, .subpassCount = 1, .pSubpasses = &sub };
     if (p_vkCreateRenderPass(s.device, &rp, nullptr, &s.pass) != VK_SUCCESS)
         goto fail;
-    VkPushConstantRange push = { .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-        .offset = 0, .size = 32 };
+    VkDescriptorSetLayoutBinding binding = { .binding = 0, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 1, .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT };
+    VkDescriptorSetLayoutCreateInfo dl = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1, .pBindings = &binding };
+    if (p_vkCreateDescriptorSetLayout(s.device, &dl, nullptr, &s.descriptorLayout) != VK_SUCCESS)
+        goto fail;
+    VkDescriptorPoolSize poolSize = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
+    VkDescriptorPoolCreateInfo dp = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &poolSize };
+    if (p_vkCreateDescriptorPool(s.device, &dp, nullptr, &s.descriptorPool) != VK_SUCCESS)
+        goto fail;
+    VkDescriptorSetAllocateInfo da = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = s.descriptorPool, .descriptorSetCount = 1, .pSetLayouts = &s.descriptorLayout };
+    if (p_vkAllocateDescriptorSets(s.device, &da, &s.descriptor) != VK_SUCCESS)
+        goto fail;
     VkPipelineLayoutCreateInfo pl = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pushConstantRangeCount = 1, .pPushConstantRanges = &push };
+        .setLayoutCount = 1, .pSetLayouts = &s.descriptorLayout };
     if (p_vkCreatePipelineLayout(s.device, &pl, nullptr, &s.pipelineLayout) != VK_SUCCESS)
         goto fail;
     return true;
@@ -261,6 +313,18 @@ static bool chooseMemory(uint32_t bits, VkMemoryPropertyFlags flags, uint32_t *d
     }
     return false;
 }
+
+bool VkGraphics_setRectCapacity(uint32_t capacity) {
+    if (capacity == 0 || capacity > UINT32_MAX / VK_GRAPHICS_RECT_BYTES ||
+        s.recording || s.pending || s.image != VK_NULL_HANDLE)
+        return false;
+    s.capacity = capacity;
+    return true;
+}
+uint32_t VkGraphics_getRectCapacity(void) {
+    return s.capacity ? s.capacity : VK_GRAPHICS_DEFAULT_RECT_CAPACITY;
+}
+uint32_t VkGraphics_getDrawCount(void) { return s.draws; }
 
 static void stopDrawing(void);
 static bool startDrawing(void);
@@ -294,8 +358,8 @@ static VkShaderModule loadShader(const char *name) {
 }
 
 static bool buildPipeline(void) {
-    VkShaderModule vert = loadShader("solid_quad_vert.spv");
-    VkShaderModule frag = loadShader("solid_quad_frag.spv");
+    VkShaderModule vert = loadShader("instanced_quad_vert.spv");
+    VkShaderModule frag = loadShader("instanced_quad_frag.spv");
     if (vert == VK_NULL_HANDLE || frag == VK_NULL_HANDLE) {
         if (vert != VK_NULL_HANDLE) p_vkDestroyShaderModule(s.device, vert, nullptr);
         if (frag != VK_NULL_HANDLE) p_vkDestroyShaderModule(s.device, frag, nullptr);
@@ -355,16 +419,29 @@ static bool startDrawing(void) {
         .renderArea = { { 0, 0 }, { s.width, s.height } } };
     p_vkCmdBeginRenderPass(s.cmd, &bi, VK_SUBPASS_CONTENTS_INLINE);
     p_vkCmdBindPipeline(s.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipeline);
+    p_vkCmdBindDescriptorSets(s.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipelineLayout,
+                              0, 1, &s.descriptor, 0, nullptr);
     VkViewport viewport = { .x = 0, .y = 0, .width = (float) s.width, .height = (float) s.height,
         .minDepth = 0, .maxDepth = 1 };
     p_vkCmdSetViewport(s.cmd, 0, 1, &viewport);
+    VkRect2D scissor = { .offset = { 0, 0 }, .extent = { s.width, s.height } };
+    p_vkCmdSetScissor(s.cmd, 0, 1, &scissor);
     s.drawing = true;
     return true;
+}
+
+static void flushBatch(void) {
+    if (s.used == s.batchStart)
+        return;
+    p_vkCmdDraw(s.cmd, 6, s.used - s.batchStart, 0, s.batchStart);
+    s.batchStart = s.used;
+    s.draws++;
 }
 
 static void stopDrawing(void) {
     if (!s.drawing)
         return;
+    flushBatch();
     p_vkCmdEndRenderPass(s.cmd);
     VkImageMemoryBarrier b = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -425,6 +502,25 @@ static bool resize(uint32_t width, uint32_t height) {
     if (p_vkAllocateMemory(s.device, &mai, nullptr, &s.bufferMemory) != VK_SUCCESS ||
         p_vkBindBufferMemory(s.device, s.buffer, s.bufferMemory, 0) != VK_SUCCESS)
         goto fail;
+    VkDeviceSize instanceBytes = (VkDeviceSize) s.capacity * VK_GRAPHICS_RECT_BYTES;
+    bci.size = instanceBytes;
+    bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    if (p_vkCreateBuffer(s.device, &bci, nullptr, &s.instances) != VK_SUCCESS)
+        goto fail;
+    p_vkGetBufferMemoryRequirements(s.device, s.instances, &req);
+    if (!chooseMemory(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &type))
+        goto fail;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = type;
+    if (p_vkAllocateMemory(s.device, &mai, nullptr, &s.instanceMemory) != VK_SUCCESS ||
+        p_vkBindBufferMemory(s.device, s.instances, s.instanceMemory, 0) != VK_SUCCESS ||
+        p_vkMapMemory(s.device, s.instanceMemory, 0, instanceBytes, 0, &s.instanceMap) != VK_SUCCESS)
+        goto fail;
+    VkDescriptorBufferInfo db = { .buffer = s.instances, .offset = 0, .range = instanceBytes };
+    VkWriteDescriptorSet write = { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = s.descriptor, .dstBinding = 0, .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &db };
+    p_vkUpdateDescriptorSets(s.device, 1, &write, 0, nullptr);
     s.width = width;
     s.height = height;
     s.bytes = (size_t) bytes;
@@ -461,6 +557,7 @@ static bool begin(void) {
     s.cleared = false;
     s.clipEnabled = false;
     s.drawing = false;
+    s.used = s.batchStart = s.draws = 0;
     s.completed = false;
     VkImageMemoryBarrier barrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .oldLayout = s.layout, .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -571,6 +668,8 @@ static bool present(void) {
 static bool clip(const Rectangle *rect) {
     if (!s.recording && rect != nullptr)
         return false;
+    if (s.recording)
+        flushBatch();
     s.clipEnabled = rect != nullptr;
     if (rect != nullptr)
         s.clipRect = *rect;
@@ -596,14 +695,11 @@ static bool fillRect(const Rectangle *rect, const Brush *brush) {
     x1 = fminf(right, x1); y1 = fminf(bottom, y1);
     if (x0 >= x1 || y0 >= y1)
         return true;
-    if (!startDrawing())
+    if (s.used == s.capacity || !startDrawing())
         return false;
-    VkRect2D scissor = { .offset = { (int32_t) x0, (int32_t) y0 },
-        .extent = { (uint32_t) (x1 - x0), (uint32_t) (y1 - y0) } };
-    p_vkCmdSetScissor(s.cmd, 0, 1, &scissor);
     uint32_t color = Brush_getColor(brush);
     float opacity = fmaxf(0.0f, fminf(1.0f, Brush_getOpacity(brush)));
-    float push[8] = { 2.0f * x0 / (float) s.width - 1.0f,
+    float instance[8] = { 2.0f * x0 / (float) s.width - 1.0f,
         2.0f * y0 / (float) s.height - 1.0f,
         2.0f * (x1 - x0) / (float) s.width,
         2.0f * (y1 - y0) / (float) s.height,
@@ -611,9 +707,8 @@ static bool fillRect(const Rectangle *rect, const Brush *brush) {
         (float) ((color >> 16) & 255u) / 255.0f,
         (float) ((color >> 8) & 255u) / 255.0f,
         (float) (color & 255u) / 255.0f * opacity };
-    p_vkCmdPushConstants(s.cmd, s.pipelineLayout,
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), push);
-    p_vkCmdDraw(s.cmd, 6, 1, 0, 0);
+    memcpy((uint8_t*) s.instanceMap + (size_t) s.used * VK_GRAPHICS_RECT_BYTES, instance, sizeof(instance));
+    s.used++;
     return true;
 }
 static bool drawRect(const Rectangle *rect, const Stroke *stroke) { (void) rect; (void) stroke; return false; }

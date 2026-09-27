@@ -20,5 +20,9 @@ bool VkGraphics_readback(size_t capacity, uint8_t *dest);
 // Backend-private loan: only a completed, dirty transfer-src frame for this Device.
 // The image remains owned by VkGraphics and valid until the next begin/resize/unbind.
 bool VkGraphics_borrowPresentImage(const Device *device, VkImage *image, VkExtent2D *extent);
+// Cold configuration before resize; a frame exceeding capacity fails rather than overwriting GPU data.
+bool VkGraphics_setRectCapacity(uint32_t capacity);
+uint32_t VkGraphics_getRectCapacity(void);
+uint32_t VkGraphics_getDrawCount(void);
 
 #endif
