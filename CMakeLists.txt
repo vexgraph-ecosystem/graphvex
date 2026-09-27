@@ -1,4 +1,13 @@
 cmake_minimum_required(VERSION 3.28)
+
+# Platform Support Floor Law: Apple Silicon only (arm64), macOS 14.0+.
+# Cache entries set before project() so a standalone build enforces the same
+# floor as the umbrella. A user -D override is preserved.
+if(APPLE)
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Platform Support Floor Law: Apple Silicon only (arm64)")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Platform Support Floor Law: macOS 14.0+")
+endif()
+
 project(graphvex C)
 
 set(CMAKE_C_STANDARD 23)
@@ -91,7 +100,7 @@ add_library(graphvex STATIC
 )
 
 target_include_directories(graphvex PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_compile_options(graphvex PRIVATE -Wall -Wextra -Werror -mcpu=native)
+target_compile_options(graphvex PRIVATE -Wall -Wextra -Werror -mcpu=apple-m1)
 # Stage precompiled SPIR-V at build time; no compiler subprocess during rendering.
 set(GRAPHVEX_SPV_STAGE "${CMAKE_CURRENT_BINARY_DIR}/spv")
 file(MAKE_DIRECTORY "${GRAPHVEX_SPV_STAGE}")
@@ -260,14 +269,14 @@ endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/raster_opaque_rect_test.c" AND NOT TARGET raster_opaque_rect_test)
     add_executable(raster_opaque_rect_test tests/raster_opaque_rect_test.c)
     target_link_libraries(raster_opaque_rect_test PRIVATE graphvex)
-    target_compile_options(raster_opaque_rect_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    target_compile_options(raster_opaque_rect_test PRIVATE -Wall -Wextra -Werror -mcpu=apple-m1 -UNDEBUG)
     add_test(NAME raster_opaque_rect_test COMMAND raster_opaque_rect_test)
 endif()
 
 if(NOT TARGET vk_graphics_test)
     add_executable(vk_graphics_test tests/vk_graphics_test.c)
     target_link_libraries(vk_graphics_test PRIVATE graphvex)
-    target_compile_options(vk_graphics_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    target_compile_options(vk_graphics_test PRIVATE -Wall -Wextra -Werror -mcpu=apple-m1 -UNDEBUG)
     add_test(NAME vk_graphics_test COMMAND vk_graphics_test)
     set_tests_properties(vk_graphics_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()
@@ -275,7 +284,7 @@ endif()
 if(APPLE AND NOT TARGET vk_surface_test)
     add_executable(vk_surface_test tests/vk_surface_test.m)
     target_link_libraries(vk_surface_test PRIVATE graphvex)
-    target_compile_options(vk_surface_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    target_compile_options(vk_surface_test PRIVATE -Wall -Wextra -Werror -mcpu=apple-m1 -UNDEBUG)
     add_test(NAME vk_surface_test COMMAND vk_surface_test)
     set_tests_properties(vk_surface_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()
@@ -283,7 +292,7 @@ endif()
 if(APPLE AND NOT TARGET vk_swapchain_test)
     add_executable(vk_swapchain_test tests/vk_swapchain_test.m)
     target_link_libraries(vk_swapchain_test PRIVATE graphvex)
-    target_compile_options(vk_swapchain_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    target_compile_options(vk_swapchain_test PRIVATE -Wall -Wextra -Werror -mcpu=apple-m1 -UNDEBUG)
     add_test(NAME vk_swapchain_test COMMAND vk_swapchain_test)
     set_tests_properties(vk_swapchain_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()
