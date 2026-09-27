@@ -62,6 +62,7 @@ add_library(graphvex STATIC
     # vulkan dialect — optional WSI surface; swapchain/render land next
     src/vulkan/vk_device.c
     src/vulkan/vk_graphics.c
+    src/vulkan/vk_swapchain.c
     # raster + null dialects — the headless device matrix
     src/raster/raster_device.c
     src/null/null_device.c
@@ -277,4 +278,12 @@ if(APPLE AND NOT TARGET vk_surface_test)
     target_compile_options(vk_surface_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
     add_test(NAME vk_surface_test COMMAND vk_surface_test)
     set_tests_properties(vk_surface_test PROPERTIES SKIP_RETURN_CODE 77)
+endif()
+
+if(APPLE AND NOT TARGET vk_swapchain_test)
+    add_executable(vk_swapchain_test tests/vk_swapchain_test.m)
+    target_link_libraries(vk_swapchain_test PRIVATE graphvex)
+    target_compile_options(vk_swapchain_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    add_test(NAME vk_swapchain_test COMMAND vk_swapchain_test)
+    set_tests_properties(vk_swapchain_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()
