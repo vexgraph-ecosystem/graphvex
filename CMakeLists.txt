@@ -91,6 +91,15 @@ add_library(graphvex STATIC
 
 target_include_directories(graphvex PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_options(graphvex PRIVATE -Wall -Wextra -Werror -mcpu=native)
+# Stage precompiled SPIR-V at build time; no compiler subprocess during rendering.
+set(GRAPHVEX_SPV_STAGE "${CMAKE_CURRENT_BINARY_DIR}/spv")
+file(MAKE_DIRECTORY "${GRAPHVEX_SPV_STAGE}")
+file(GLOB GRAPHVEX_SPV_BLOBS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shader/spv/*.spv")
+foreach(blob IN LISTS GRAPHVEX_SPV_BLOBS)
+    get_filename_component(blob_name "${blob}" NAME)
+    configure_file("${blob}" "${GRAPHVEX_SPV_STAGE}/${blob_name}" COPYONLY)
+endforeach()
+target_compile_definitions(graphvex PRIVATE GRAPHVEX_SPV_DIR="${GRAPHVEX_SPV_STAGE}")
 
 # DEBUG macro gates Vulkan validation layers + debug messenger.
 target_compile_definitions(graphvex PRIVATE

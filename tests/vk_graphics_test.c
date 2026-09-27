@@ -2,6 +2,7 @@
 #include "vulkan/vk_graphics.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -72,6 +73,87 @@ int main(void) {
     assert((*row).end());
     assert(VkGraphics_readback(sizeof(pixels), pixels));
     assert(pixels[0] == 0x10 && pixels[1] == 0x20 && pixels[2] == 0x30 && pixels[3] == 0x40);
+    // Ordered fills, straight-alpha RGB over and source-over output alpha.
+    assert(Graphics_resize(4, 3));
+    Rectangle full = { 0, 0, 4, 3 };
+    Rectangle mid = { 1, 0, 2, 3 };
+    Rectangle clipped = { 0, 0, 4, 3 };
+    Rectangle clip = { 2, 1, 1, 1 };
+    Brush red = { 0xFF0000FFu, 1.0f };
+    Brush blue = { 0x0000FF80u, 0.5f };
+    Brush green = { 0x00FF00FFu, 1.0f };
+    assert(Graphics_begin());
+    assert(Graphics_clear(0x00000000u));
+    assert(Graphics_fillRect(&full, &red));
+    assert(Graphics_fillRect(&mid, &blue));
+    assert(Graphics_clip(&clip));
+    Rectangle savedClip;
+    assert(Graphics_getClip(&savedClip));
+    Rectangle innerClip = { 2, 1, 0.5f, 0.5f };
+    assert(Graphics_clip(&innerClip));
+    assert(Graphics_fillRect(&clipped, &green));
+    assert(Graphics_clip(&savedClip));
+    assert(Graphics_clip(nullptr));
+    Rectangle corner = { 3, 2, 1, 1 };
+    assert(Graphics_fillRect(&corner, &blue));
+    assert(Graphics_end());
+    uint8_t composite[48];
+    assert(VkGraphics_readback(sizeof(composite), composite));
+    // color at (1,0) = red overlaid by blue with alpha 128/255 * .5.
+    float alpha = (128.0f / 255.0f) * 0.5f;
+    int expectRed = (int) (255.0f * (1.0f - alpha) + 0.5f);
+    int expectBlue = (int) (255.0f * alpha + 0.5f);
+    for (uint32_t y = 0; y < 3; y++)
+        for (uint32_t x = 0; x < 4; x++) {
+            const uint8_t *px = composite + ((size_t) y * 4 + x) * 4;
+            if (x == 2 && y == 1) {
+                assert(px[0] == 0 && px[1] == 255 && px[2] == 0 && px[3] == 255);
+            } else if (x == 1 || x == 2 || (x == 3 && y == 2)) {
+                assert(abs((int) px[0] - expectRed) <= 1 && px[1] == 0);
+                assert(abs((int) px[2] - expectBlue) <= 1 && px[3] == 255);
+            } else {
+                assert(px[0] == 255 && px[1] == 0 && px[2] == 0 && px[3] == 255);
+            }
+        }
+    // Oversized and offscreen rects clamp before integer conversion; rounded edges.
+    assert(Graphics_begin());
+    assert(Graphics_clear(0x12345678u));
+    Rectangle huge = { -100000000.0f, -100000000.0f, 200000000.0f, 200000000.0f };
+    Rectangle fractional = { 0.49f, 0.49f, 1.01f, 1.01f };
+    Rectangle offscreen = { 100000000.0f, 0, 10, 10 };
+    assert(Graphics_fillRect(&huge, &green));
+    assert(Graphics_fillRect(&fractional, &red));
+    assert(Graphics_fillRect(&offscreen, &red));
+    assert(Graphics_end());
+    assert(VkGraphics_readback(sizeof(composite), composite));
+    assert(composite[0] == 255 && composite[1] == 0 && composite[2] == 0);
+    assert(composite[4] == 255 && composite[5] == 0 && composite[6] == 0);
+    assert(composite[8] == 0 && composite[9] == 255 && composite[10] == 0);
+    // Translucent source over a translucent clear preserves the straight RGB
+    // blend contract and updates destination alpha independently.
+    assert(Graphics_begin());
+    assert(Graphics_clear(0x20406080u));
+    Rectangle one = { 0, 0, 1, 1 };
+    assert(Graphics_fillRect(&one, &blue));
+    assert(Graphics_clear(0x12345678u)); // clear after a draw preserves order
+    assert(Graphics_fillRect(&one, &blue));
+    assert(Graphics_end());
+    assert(VkGraphics_readback(sizeof(composite), composite));
+    float source = (128.0f / 255.0f) * 0.5f;
+    assert(abs((int) composite[0] - (int) (0x12 * (1.0f - source) + 0.5f)) <= 1);
+    assert(abs((int) composite[1] - (int) (0x34 * (1.0f - source) + 0.5f)) <= 1);
+    assert(abs((int) composite[2] - (int) (0x56 * (1.0f - source) + 255.0f * source + 0.5f)) <= 1);
+    assert(abs((int) composite[3] - (int) (0x78 + (255.0f - 0x78) * source + 0.5f)) <= 1);
+    assert(Graphics_begin());
+    assert(Graphics_clear(0x00000000u));
+    assert(Graphics_fillRect(&one, &blue));
+    assert(Graphics_fillRect(&one, &blue));
+    assert(Graphics_end());
+    assert(VkGraphics_readback(sizeof(composite), composite));
+    float twice = source + source * (1.0f - source);
+    assert(composite[0] == 0 && composite[1] == 0);
+    assert(abs((int) composite[2] - (int) (255.0f * twice + 0.5f)) <= 1);
+    assert(abs((int) composite[3] - (int) (255.0f * twice + 0.5f)) <= 1);
     assert((*row).resize(2, 2));
     assert((*row).begin());
     assert((*row).clear(0x12345678u));

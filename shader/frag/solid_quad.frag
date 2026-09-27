@@ -1,7 +1,7 @@
 #version 450
 
 // Solid panel fill: color arrives as the second push-constant slot (offset 16,
-// fragment stage) — straight 0xAARRGGBB decoded to RGBA on the CPU.
+// fragment stage) — straight 0xRRGGBBAA decoded to RGBA on the CPU.
 
 layout(push_constant) uniform Push {
     layout(offset = 16) vec4 u_color;
