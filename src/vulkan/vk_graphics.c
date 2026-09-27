@@ -1,5 +1,6 @@
 #include "vulkan/vk_graphics.h"
 #include "vulkan/vk_device.h"
+#include "vulkan/vk_swapchain.h"
 
 #include <limits.h>
 #include <math.h>
@@ -15,7 +16,8 @@
  * transfer/render image and coherent readback buffer. Resize creates these and
  * one reusable command buffer/fence; begin/clear/clip/fillRect/end record
  * without allocating. Precompiled SPIR-V is read on resize, never per draw.
- * No surface or window presentation exists.
+ * Windowed devices own a single VkSwapchain and borrow the completed image
+ * for a GPU-only blit; no CPU map or readback occurs on the present path.
  * A pending fence is waited for at most 100ms per call; timeout preserves all
  * resources until retry. The caller serializes access to this process row.
  */
@@ -31,10 +33,11 @@
  *   VkImageLayout layout; VkRenderPass pass; VkFramebuffer framebuffer;
  *   VkImageView view; VkPipelineLayout pipelineLayout; VkPipeline pipeline;
  *   bool drawing, clipEnabled; Rectangle clipRect;
- *   bool recording, pending, completed, cleared;
+ *   bool recording, pending, completed, cleared, dirty;
+ *   VkSwapchain *chain; // optional windowed presentation owner
  * FUNCTION REGISTRY:
  * Public Core: VkGraphics_bind, VkGraphics_unbind, VkGraphics_unbindIfDevice,
- *              VkGraphics_getRow, VkGraphics_readback.
+ *              VkGraphics_getRow, VkGraphics_readback, VkGraphics_borrowPresentImage.
  * Private Core: waitPending, releaseTarget, resize, begin, clear, end, clip,
  *               fillRect, startDrawing, stopDrawing, buildPipeline, loadShader,
  *               unsupported drawable verbs, loadFns, chooseMemory.
@@ -71,6 +74,8 @@ typedef struct VkGraphics {
     bool pending;
     bool completed;
     bool cleared;
+    bool dirty;
+    VkSwapchain *chain;
 } VkGraphics;
 
 static VkGraphics s;
@@ -165,6 +170,9 @@ static void releaseTarget(void) {
 void VkGraphics_unbind(void) {
     if (s.device == VK_NULL_HANDLE || s.recording || !waitPending())
         return; // keep borrowed resources alive while GPU work can still use them
+    if (s.chain && !VkSwapchain_destroy(s.chain))
+        return;
+    s.chain = nullptr;
     releaseTarget();
     if (s.pipelineLayout != VK_NULL_HANDLE)
         p_vkDestroyPipelineLayout(s.device, s.pipelineLayout, nullptr);
@@ -372,6 +380,17 @@ static bool resize(uint32_t width, uint32_t height) {
     if (s.device == VK_NULL_HANDLE || s.recording || !waitPending() || width == 0 || height == 0 ||
         (uint64_t) width * height > SIZE_MAX / 4u)
         return false;
+    if (VkDevice_canSafelyPresent(s.owner)) {
+        if (s.chain) {
+            if (!VkSwapchain_resize(s.chain, width, height))
+                return false;
+        } else {
+            s.chain = VkSwapchain_new(s.owner, width, height);
+            if (!s.chain)
+                return false;
+        }
+        s.dirty = false; // an explicit resize discards an unpresented old frame
+    }
     if (s.width == width && s.height == height)
         return true;
     releaseTarget();
@@ -431,7 +450,7 @@ fail:
 }
 
 static bool begin(void) {
-    if (s.image == VK_NULL_HANDLE || s.recording || !waitPending() ||
+    if (s.image == VK_NULL_HANDLE || s.recording || (s.chain && s.dirty) || !waitPending() ||
         p_vkResetCommandBuffer(s.cmd, 0) != VK_SUCCESS)
         return false;
     VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -477,18 +496,22 @@ static bool end(void) {
     stopDrawing();
     if (s.cleared) {
         VkImageMemoryBarrier barrier = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
             .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = s.image, .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
-        p_vkCmdPipelineBarrier(s.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        p_vkCmdPipelineBarrier(s.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                               VK_PIPELINE_STAGE_TRANSFER_BIT,
                                0, 0, nullptr, 0, nullptr, 1, &barrier);
-        VkBufferImageCopy region = { .bufferOffset = 0,
-            .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .imageExtent = { s.width, s.height, 1 } };
-        p_vkCmdCopyImageToBuffer(s.cmd, s.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                 s.buffer, 1, &region);
+        if (!s.chain) {
+            VkBufferImageCopy region = { .bufferOffset = 0,
+                .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                .imageExtent = { s.width, s.height, 1 } };
+            p_vkCmdCopyImageToBuffer(s.cmd, s.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                     s.buffer, 1, &region);
+        }
     }
     s.recording = false;
     if (p_vkEndCommandBuffer(s.cmd) != VK_SUCCESS)
@@ -508,11 +531,24 @@ static bool end(void) {
     }
     s.pending = true;
     s.layout = s.cleared ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    s.dirty = s.cleared;
+    return true;
+}
+
+bool VkGraphics_borrowPresentImage(const Device *device, VkImage *image, VkExtent2D *extent) {
+    if (image) *image = VK_NULL_HANDLE;
+    if (extent) *extent = (VkExtent2D) { 0, 0 };
+    if (!device || !image || !extent || device != s.owner || s.recording ||
+        !s.dirty || !waitPending() || !s.completed ||
+        s.layout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+        return false;
+    *image = s.image;
+    *extent = (VkExtent2D) { s.width, s.height };
     return true;
 }
 
 bool VkGraphics_readback(size_t capacity, uint8_t *dest) {
-    if (dest == nullptr || s.image == VK_NULL_HANDLE || s.recording ||
+    if (dest == nullptr || s.chain || s.image == VK_NULL_HANDLE || s.recording ||
         capacity < s.bytes || !waitPending() || !s.completed)
         return false;
     void *mapped = nullptr;
@@ -523,7 +559,15 @@ bool VkGraphics_readback(size_t capacity, uint8_t *dest) {
     return true;
 }
 
-static bool present(void) { return false; }
+static bool present(void) {
+    VkImage image = VK_NULL_HANDLE;
+    VkExtent2D extent = { 0, 0 };
+    if (!s.chain || !VkGraphics_borrowPresentImage(s.owner, &image, &extent) ||
+        !VkSwapchain_present(s.chain, image, extent))
+        return false;
+    s.dirty = false;
+    return true;
+}
 static bool clip(const Rectangle *rect) {
     if (!s.recording && rect != nullptr)
         return false;

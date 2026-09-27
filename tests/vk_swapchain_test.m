@@ -1,4 +1,5 @@
 #include "vulkan/vk_swapchain.h"
+#include "vulkan/vk_graphics.h"
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <assert.h>
@@ -61,10 +62,41 @@ int main(void) {
         assert(VkSwapchain_acquire(chain, &image, &format, &index));
         assert(VkSwapchain_release(chain));
         assert(VkSwapchain_destroy(chain));
+        assert(VkGraphics_bind(device));
+        assert(Graphics_registerRow(VkGraphics_getRow()));
+        assert(Graphics_setGraphics(LANG_BACKEND_VULKAN));
+        assert(Graphics_resize(32, 32));
+        assert(Graphics_begin());
+        assert(Graphics_clear(0x203040FFu));
+        Rectangle rect = { 4, 4, 20, 20 };
+        Brush brush = { 0xFF0000FFu, 1.0f };
+        assert(Graphics_fillRect(&rect, &brush));
+        assert(Graphics_end());
+        uint8_t forbiddenReadback[32 * 32 * 4];
+        assert(!VkGraphics_readback(sizeof(forbiddenReadback), forbiddenReadback));
+        assert(Graphics_present());
+        assert(!Graphics_present());
+        assert(Graphics_begin());
+        assert(Graphics_clear(0x304050FFu));
+        assert(Graphics_fillRect(&rect, &brush));
+        assert(Graphics_end());
+        assert(Graphics_present()); // reuse command buffer, semaphore and fences
+        assert(!Graphics_present());
+        [window setContentSize:NSMakeSize(48, 48)];
+        layer.drawableSize = CGSizeMake(48, 48);
+        assert(Graphics_resize(48, 48));
+        assert(Graphics_begin());
+        assert(Graphics_clear(0x204080FFu));
+        assert(Graphics_fillRect(&rect, &brush));
+        assert(Graphics_end());
+        assert(Graphics_present());
+        assert(!Graphics_present());
+        VkGraphics_unbind();
+        assert(VkGraphics_unbindIfDevice((VkDevice) Device_native(device)));
         Device_destroy(device);
         [window orderOut:nil];
         [window close];
-        fprintf(stderr, "VkSwapchain Mac window create/acquire/release/resize/destroy OK\n");
+        fprintf(stderr, "VkSwapchain Mac window GPU blit/present/idle/resize/destroy OK\n");
     }
     return 0;
 }

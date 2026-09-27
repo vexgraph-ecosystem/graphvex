@@ -17,5 +17,8 @@ const Graphics *VkGraphics_getRow(void);
 // Cold RGBA8 copy, tightly packed native pixels. Requires a completed frame.
 // A failed bounded wait leaves the submitted frame pending for a later retry.
 bool VkGraphics_readback(size_t capacity, uint8_t *dest);
+// Backend-private loan: only a completed, dirty transfer-src frame for this Device.
+// The image remains owned by VkGraphics and valid until the next begin/resize/unbind.
+bool VkGraphics_borrowPresentImage(const Device *device, VkImage *image, VkExtent2D *extent);
 
 #endif
