@@ -49,6 +49,8 @@ bool Device_registerRow(const DeviceRow *row);
 // The row for a backend id, or nullptr when that dialect is not linked/registered.
 const DeviceRow *Device_findRow(uint32_t backend);
 uint32_t Device_rowCount(void);
+// Dialect-internal borrowing only; null unless the wrapper has the requested row.
+void *Device_stateForBackend(const Device *device, uint32_t backend);
 
 // --- Getters ---
 const char *Device_backendName(uint32_t backend); // "vulkan"/... or "none"

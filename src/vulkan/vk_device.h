@@ -2,6 +2,7 @@
 #define VULKAN_VK_DEVICE_H
 
 #include "device/device.h"
+#include <vulkan/vulkan.h>
 
 // vulkan/vk_device.h — the Vulkan dialect of the Device contract.
 //
@@ -14,5 +15,9 @@
 //   Device_registerRow(Vulkan_row());
 
 const DeviceRow *Vulkan_row(void);
+// Internal borrowing seam: handles remain owned by Device, never destroy them here.
+bool VkDevice_borrow(const Device *device, VkPhysicalDevice *physical,
+                     VkDevice *native, VkQueue *queue, uint32_t *family,
+                     PFN_vkGetInstanceProcAddr *gpa, VkInstance *instance);
 
 #endif // VULKAN_VK_DEVICE_H

@@ -87,7 +87,9 @@ Device *Device_new(const DeviceDesc *desc);
 )(__VA_ARGS__)
 
 // Destroy the device and every resource it owns. Null-safe. Top-down per the
-// Teardown Order Law (surfaces/images/buffers die before the device).
+// Teardown Order Law (surfaces/images/buffers die before the device). On a
+// bound Vulkan graphics fence timeout (100ms), the device remains alive;
+// the owner must retry destruction after GPU progress.
 void Device_destroy(Device *device);
 
 // --- Core functions ---

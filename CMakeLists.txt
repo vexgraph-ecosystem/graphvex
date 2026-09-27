@@ -61,6 +61,7 @@ add_library(graphvex STATIC
     src/filter/contrast/contrast.c
     # vulkan dialect — device only for now (surface/render land next)
     src/vulkan/vk_device.c
+    src/vulkan/vk_graphics.c
     # raster + null dialects — the headless device matrix
     src/raster/raster_device.c
     src/null/null_device.c
@@ -251,4 +252,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/raster_opaque_rect_test.c" AND NOT 
     target_link_libraries(raster_opaque_rect_test PRIVATE graphvex)
     target_compile_options(raster_opaque_rect_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
     add_test(NAME raster_opaque_rect_test COMMAND raster_opaque_rect_test)
+endif()
+
+if(NOT TARGET vk_graphics_test)
+    add_executable(vk_graphics_test tests/vk_graphics_test.c)
+    target_link_libraries(vk_graphics_test PRIVATE graphvex)
+    target_compile_options(vk_graphics_test PRIVATE -Wall -Wextra -Werror -mcpu=native -UNDEBUG)
+    add_test(NAME vk_graphics_test COMMAND vk_graphics_test)
+    set_tests_properties(vk_graphics_test PROPERTIES SKIP_RETURN_CODE 77)
 endif()

@@ -1,4 +1,5 @@
 #include "device/device.h"
+#include "vulkan/vk_graphics.h"
 
 #include <stdlib.h>
 
@@ -25,7 +26,8 @@
  * Lifetime: the wrapper is heap-allocated once (cold path, the Cold-Strict,
  * Hot-Minimal Validation Law); the dialect state is created by the dialect's
  * createState and destroyed by its destroyState, top-down per the Teardown
- * Order Law. Zero steady-state allocation.
+ * Order Law. Vulkan graphics detaches first; a bounded fence timeout leaves
+ * the wrapper alive for retry. Zero steady-state allocation.
  * ============================================================================
  */
 
@@ -39,7 +41,7 @@
  *   Backend-agnostic device wrapper over a dialect row. Device_create resolves
  *   the row by LANG_BACKEND_* id, asks the dialect to create its state, and
  *   stores both. Every Device_* verb forwards through the row — the wrapper
- *   itself holds no backend logic.
+ *   Vulkan destruction first detaches its borrowed offscreen graphics row.
  *
  * STRUCT FIELDS (Mirroring lang/device.h incomplete tag — completed here):
  * ----------------------------------------------------------------------------
@@ -78,6 +80,7 @@
  *   - Device_width(device)
  *   - Device_height(device)
  *   - Device_native(device)
+ *   - Device_stateForBackend(device, backend)
  *   - Device_backendName(backend)
  *
  * Private Getters: (.c static)
@@ -179,6 +182,9 @@ Device *Device_2(uint32_t backend, void *window) {
 void Device_destroy(Device *device) {
     if (device == nullptr)
         return;
+    if (Device_backend(device) == LANG_BACKEND_VULKAN &&
+        !VkGraphics_unbindIfDevice((VkDevice) Device_native(device)))
+        return; // bounded wait timed out: retry destruction with owner still live
     if ((*device).row != nullptr && (*device).state != nullptr)
         (*device).row->destroyState((*device).state);
     free(device);
@@ -252,4 +258,10 @@ const char *Device_backendName(uint32_t backend) {
     if (row == nullptr || (*row).name == nullptr)
         return "none";
     return (*row).name;
+}
+
+void *Device_stateForBackend(const Device *device, uint32_t backend) {
+    if (Device_backend(device) != backend || !Device_isReady(device))
+        return nullptr;
+    return (*device).state;
 }

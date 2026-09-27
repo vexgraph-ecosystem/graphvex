@@ -1,4 +1,5 @@
 #include "vulkan/vk_device.h"
+#include "vulkan/vk_graphics.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -31,6 +32,7 @@
  * The state is dialect-private (VkInstance/VkPhysicalDevice/VkDevice/VkQueue);
  * callers only ever see the opaque Device. present/resize are cold-false until
  * the surface lands (the Cold-Strict, Hot-Minimal Validation Law).
+ * VkGraphics borrows native handles and detaches before teardown.
  * ============================================================================
  */
 
@@ -64,9 +66,10 @@
  * ----------------------------------------------------------------------------
  * Private Core Functions: (.c static)
  *   - vkLoadLib / vkLoadGpa / vkCloseLib : platform loader operations
- *   - vkCreateState(desc) / vkDestroyState(state)
+ *   - vkCreateState(desc) / vkDestroyState(state) (detach VkGraphics first)
  *   - vkPresent(state) / vkResize(state, w, h)
  *   - vkWidth(state) / vkHeight(state) / vkIsReady(state) / vkNative(state)
+ * Public Getters: VkDevice_borrow(device, physical, native, queue, family, gpa, instance)
  * ============================================================================
  */
 
@@ -134,6 +137,7 @@ static void vkDestroyState(void *state) {
     if (state == nullptr)
         return;
     VkDeviceState *s = (VkDeviceState*) state;
+    (void) VkGraphics_unbindIfDevice((*s).device);
     if ((*s).instance != VK_NULL_HANDLE && (*s).gpa != nullptr) {
         if ((*s).device != VK_NULL_HANDLE) {
             PFN_vkDestroyDevice destroyDevice =
@@ -338,4 +342,20 @@ static const DeviceRow kVulkanRow = {
 
 const DeviceRow *Vulkan_row(void) {
     return &kVulkanRow;
+}
+
+bool VkDevice_borrow(const Device *device, VkPhysicalDevice *physical,
+                     VkDevice *native, VkQueue *queue, uint32_t *family,
+                     PFN_vkGetInstanceProcAddr *gpa, VkInstance *instance) {
+    VkDeviceState *s = (VkDeviceState*) Device_stateForBackend(device, LANG_BACKEND_VULKAN);
+    if (s == nullptr || physical == nullptr || native == nullptr || queue == nullptr ||
+        family == nullptr || gpa == nullptr || instance == nullptr)
+        return false;
+    *physical = (*s).phys;
+    *native = (*s).device;
+    *queue = (*s).queue;
+    *family = (*s).queueFamily;
+    *gpa = (*s).gpa;
+    *instance = (*s).instance;
+    return true;
 }
