@@ -96,6 +96,24 @@ Device *Device_create(bool enableValidation) {
     dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
+
+    // MoltenVK advertises VK_KHR_portability_subset; the spec requires enabling
+    // it when present.
+    uint32_t extN = 0;
+    vkEnumerateDeviceExtensionProperties(c->physical, NULL, &extN, NULL);
+    VkExtensionProperties *devExts = calloc(extN ? extN : 1, sizeof *devExts);
+    const char *want[1];
+    uint32_t wantN = 0;
+    if (devExts) {
+        vkEnumerateDeviceExtensionProperties(c->physical, NULL, &extN, devExts);
+        for (uint32_t i = 0; i < extN; i++)
+            if (!strcmp(devExts[i].extensionName, "VK_KHR_portability_subset"))
+                want[wantN++] = "VK_KHR_portability_subset";
+        free(devExts);
+    }
+    dci.enabledExtensionCount = wantN;
+    dci.ppEnabledExtensionNames = wantN ? want : NULL;
+
     if (vkCreateDevice(c->physical, &dci, NULL, &c->device) != VK_SUCCESS) {
         set_err(c, "vkCreateDevice failed");
         Device_destroy(c);
@@ -116,3 +134,7 @@ bool Device_isValid(const Device *c) { return c && c->device != VK_NULL_HANDLE; 
 const char *Device_lastError(const Device *c) { return c ? c->error : "null device"; }
 const char *Device_name(const Device *c) { return c ? c->deviceName : ""; }
 void *Device_native(const Device *c) { return c ? (void *)c->device : NULL; }
+void *Device_instance(const Device *c) { return c ? (void *)c->instance : NULL; }
+void *Device_physical(const Device *c) { return c ? (void *)c->physical : NULL; }
+void *Device_queue(const Device *c) { return c ? (void *)c->queue : NULL; }
+uint32_t Device_queueFamily(const Device *c) { return c ? c->queueFamily : 0u; }

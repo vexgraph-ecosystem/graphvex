@@ -9,6 +9,8 @@
 struct Image {
     uint32_t width;
     uint32_t height;
+    uint32_t capW;         // allocation width (grow-only); row stride is capW*4
+    uint32_t capH;         // allocation height
     uint32_t format;
     uint32_t usage;
     uint8_t *pixels;       // CPU shadow (RGBA8)
@@ -52,11 +54,22 @@ void Image_destroy(Image *image) {
 bool Image_ensureShadow(Image *image, uint32_t width, uint32_t height) {
     if (!image) return false;
     clamp_dims(&width, &height);
-    if (image->pixels && image->width == width && image->height == height) return true;
-    uint8_t *grown = realloc(image->pixels, (size_t)width * height * 4u);
+    // GROW-ONLY: reuse the existing allocation whenever it already fits, so a
+    // shrinking viewport (or a resize wobble) never reallocs and never refills.
+    if (image->pixels && width <= image->capW && height <= image->capH) {
+        image->width = width;
+        image->height = height;
+        return true;
+    }
+    uint32_t nw = image->capW > width ? image->capW : width;
+    uint32_t nh = image->capH > height ? image->capH : height;
+    while (nw < width) nw += nw / 2 + 64;
+    while (nh < height) nh += nh / 2 + 64;
+    uint8_t *grown = realloc(image->pixels, (size_t)nw * (size_t)nh * 4u);
     if (!grown) return false;
-    memset(grown, 0, (size_t)width * height * 4u);
     image->pixels = grown;
+    image->capW = nw;
+    image->capH = nh;
     image->width = width;
     image->height = height;
     return true;
@@ -69,7 +82,10 @@ bool Image_resize(Image *image, uint32_t width, uint32_t height) {
 bool Image_upload(const uint8_t *rgba, uint32_t width, uint32_t height, Image *dest) {
     if (!dest || !rgba) return false;
     if (!Image_ensureShadow(dest, width, height)) return false;
-    memcpy(dest->pixels, rgba, (size_t)width * height * 4u);
+    size_t stride = (size_t)dest->capW * 4u;
+    for (uint32_t y = 0; y < height; y++) {
+        memcpy(dest->pixels + (size_t)y * stride, rgba + (size_t)y * width * 4u, (size_t)width * 4u);
+    }
     return true;
 }
 
@@ -80,11 +96,15 @@ void Image_fill(Image *image, Color color) {
     uint8_t g = (uint8_t)Color_green(color);
     uint8_t b = (uint8_t)Color_blue(color);
     uint8_t a = (uint8_t)Color_alpha(color);
-    uint8_t *p = image->pixels;
-    size_t n = (size_t)image->width * image->height;
-    for (size_t i = 0; i < n; i++) {
-        p[0] = r; p[1] = g; p[2] = b; p[3] = a;
-        p += 4;
+    size_t stride = (size_t)image->capW * 4u;
+    for (uint32_t y = 0; y < image->height; y++) {
+        uint8_t *row = image->pixels + (size_t)y * stride;
+        for (uint32_t x = 0; x < image->width; x++) {
+            row[x * 4 + 0] = r;
+            row[x * 4 + 1] = g;
+            row[x * 4 + 2] = b;
+            row[x * 4 + 3] = a;
+        }
     }
 }
 
@@ -92,7 +112,7 @@ uint32_t Image_width(const Image *image) { return image ? image->width : 0u; }
 uint32_t Image_height(const Image *image) { return image ? image->height : 0u; }
 uint32_t Image_format(const Image *image) { return image ? image->format : IMAGE_FORMAT_RGBA8; }
 uint32_t Image_usage(const Image *image) { return image ? image->usage : IMAGE_USAGE_NONE; }
-size_t Image_stride(const Image *image) { return image ? (size_t)image->width * 4u : 0u; }
+size_t Image_stride(const Image *image) { return image ? (size_t)image->capW * 4u : 0u; }
 uint8_t *Image_pixels(const Image *image) { return image ? image->pixels : NULL; }
 bool Image_isValid(const Image *image) { return image && image->width > 0 && image->height > 0; }
 

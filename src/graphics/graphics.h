@@ -114,6 +114,7 @@ typedef struct Backend {
     bool (*fillRect)(const Rect *rect, const Brush *brush);
     bool (*drawImage)(const Image *image, const Rect *dst);
     bool (*drawText)(const Rect *rect, const char *text, const Brush *brush);
+    bool (*capture)(Image *dest);   // screenshot: copy the current target into dest
 } Backend;
 
 // ── core ────────────────────────────────────────────────────────────────────
@@ -131,6 +132,15 @@ bool Graphics_clip(const Rect *rect);
 bool Graphics_fillRect(const Rect *rect, const Brush *brush);
 bool Graphics_drawImage(const Image *image, const Rect *dst);
 bool Graphics_drawText(const Rect *rect, const char *text, const Brush *brush);
+
+// Screenshot: copy the current render target's pixels (RGBA8, 0xRRGGBBAA byte
+// order) into `dest`, sizing it to the target. Backend-agnostic — the raster
+// backend copies its framebuffer; a GPU backend does a readback. This is what
+// a CAPTURE() test uses to grab a frame for a human or an agent to inspect.
+bool Graphics_capture(Image *dest);
+
+// CAPTURE(&image) — screenshot shortcut for tests/harnesses.
+#define CAPTURE(dest) Graphics_capture(dest)
 
 // Stream an entire list through the active backend (the One Paint Path).
 bool Graphics_submit(DisplayList *dl);

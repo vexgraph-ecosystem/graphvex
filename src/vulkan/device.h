@@ -22,5 +22,9 @@ bool Device_isValid(const Device *device);
 const char *Device_lastError(const Device *device);
 const char *Device_name(const Device *device);
 void *Device_native(const Device *device);   // opaque VkDevice (transit only)
+void *Device_instance(const Device *device);
+void *Device_physical(const Device *device);
+void *Device_queue(const Device *device);
+uint32_t Device_queueFamily(const Device *device);
 
 #endif // GRAPHICS_DEVICE_H

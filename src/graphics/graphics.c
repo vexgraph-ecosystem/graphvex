@@ -1,5 +1,7 @@
 #include "graphics/graphics.h"
 
+#include "image.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -63,6 +65,9 @@ bool Graphics_drawImage(const Image *image, const Rect *dst) {
 }
 bool Graphics_drawText(const Rect *rect, const char *text, const Brush *brush) {
     return s_current && s_current->drawText ? s_current->drawText(rect, text, brush) : false;
+}
+bool Graphics_capture(Image *dest) {
+    return s_current && s_current->capture ? s_current->capture(dest) : false;
 }
 
 // ── the display list ────────────────────────────────────────────────────────
@@ -183,7 +188,8 @@ bool Graphics_submit(DisplayList *dl) {
 
 // ── headless CPU (raster) backend ───────────────────────────────────────────
 static uint32_t *s_px = NULL;
-static int32_t s_w = 0, s_h = 0;
+static int32_t s_capW = 0, s_capH = 0;   // allocation; row stride == s_capW
+static int32_t s_w = 0, s_h = 0;         // logical viewport (the scissor region)
 static Rect s_clip = {0, 0, 0, 0};
 
 static uint32_t blend_over(uint32_t dst, uint32_t src) {
@@ -199,21 +205,41 @@ static uint32_t blend_over(uint32_t dst, uint32_t src) {
 }
 
 bool Raster_configure(uint32_t width, uint32_t height) {
-    free(s_px);
-    s_px = NULL;
+    // GROW-ONLY. The framebuffer is allocated once and only ever grows, so a
+    // resize is pure scissoring: no realloc, no refill, ever. The row stride is
+    // the allocation width (s_capW), independent of the logical width (s_w).
+    if (width == 0 || height == 0) {
+        s_w = 0;
+        s_h = 0;
+        s_clip = (Rect){0, 0, 0, 0};
+        return true;
+    }
+    if (s_px && width <= (uint32_t)s_capW && height <= (uint32_t)s_capH) {
+        s_w = (int32_t)width;
+        s_h = (int32_t)height;
+        s_clip = (Rect){0, 0, (float)width, (float)height};
+        return true;
+    }
+    uint32_t nw = s_capW > 0 ? (uint32_t)s_capW : width;
+    uint32_t nh = s_capH > 0 ? (uint32_t)s_capH : height;
+    while (nw < width) nw += nw / 2 + 64;   // amortized growth
+    while (nh < height) nh += nh / 2 + 64;
+    uint32_t *grown = realloc(s_px, (size_t)nw * (size_t)nh * sizeof *grown);
+    if (!grown) return false;
+    s_px = grown;
+    s_capW = (int32_t)nw;
+    s_capH = (int32_t)nh;
     s_w = (int32_t)width;
     s_h = (int32_t)height;
-    if (width == 0 || height == 0) return true;
-    s_px = calloc((size_t)width * height, sizeof *s_px);
     s_clip = (Rect){0, 0, (float)width, (float)height};
-    return s_px != NULL;
+    return true;
 }
 
 const uint32_t *Raster_pixels(void) { return s_px; }
 
 uint32_t Raster_pixelAt(uint32_t x, uint32_t y) {
     if (!s_px || (int32_t)x >= s_w || (int32_t)y >= s_h) return 0u;
-    return s_px[(size_t)y * (size_t)s_w + (size_t)x];
+    return s_px[(size_t)y * (size_t)s_capW + (size_t)x];
 }
 
 static bool raster_begin(void) { return s_px != NULL; }
@@ -224,7 +250,10 @@ static bool raster_resize(uint32_t w, uint32_t h) { return Raster_configure(w, h
 
 static bool raster_clear(Color color) {
     if (!s_px) return false;
-    for (size_t i = 0; i < (size_t)s_w * (size_t)s_h; i++) s_px[i] = color;
+    for (int y = 0; y < s_h; y++) {
+        uint32_t *row = s_px + (size_t)y * (size_t)s_capW;
+        for (int x = 0; x < s_w; x++) row[x] = color;
+    }
     return true;
 }
 
@@ -263,7 +292,7 @@ static bool raster_fillRect(const Rect *rect, const Brush *brush) {
     for (int y = y0; y < y1; y++) {
         for (int x = x0; x < x1; x++) {
             if (!corner_inside(rect, brush->radius, (float)x, (float)y)) continue;
-            size_t i = (size_t)y * (size_t)s_w + (size_t)x;
+            size_t i = (size_t)y * (size_t)s_capW + (size_t)x;
             s_px[i] = blend_over(s_px[i], brush->color);
         }
     }
@@ -287,11 +316,32 @@ static bool raster_drawText(const Rect *rect, const char *text, const Brush *bru
     return true;
 }
 
+// screenshot: copy the framebuffer into an Image (RGBA8, 0xRRGGBBAA bytes)
+static bool raster_capture(Image *dest) {
+    if (!dest || !s_px) return false;
+    if (!Image_ensureShadow(dest, (uint32_t)s_w, (uint32_t)s_h)) return false;
+    uint8_t *out = Image_pixels(dest);
+    if (!out) return false;
+    size_t outStride = Image_stride(dest);
+    for (int y = 0; y < s_h; y++) {
+        const uint32_t *row = s_px + (size_t)y * (size_t)s_capW;
+        uint8_t *orow = out + (size_t)y * outStride;
+        for (int x = 0; x < s_w; x++) {
+            uint32_t c = row[x];
+            orow[x * 4 + 0] = (uint8_t)((c >> 24) & 0xFFu);
+            orow[x * 4 + 1] = (uint8_t)((c >> 16) & 0xFFu);
+            orow[x * 4 + 2] = (uint8_t)((c >> 8) & 0xFFu);
+            orow[x * 4 + 3] = (uint8_t)(c & 0xFFu);
+        }
+    }
+    return true;
+}
+
 const Backend *RasterGraphics_row(void) {
     static const Backend row = {
-        BACKEND_RASTER, raster_begin,   raster_end,   raster_present,
-        raster_resize,     raster_clear,   raster_clip,  raster_fillRect,
-        raster_drawImage,  raster_drawText,
+        BACKEND_RASTER, raster_begin,   raster_end,     raster_present,
+        raster_resize,  raster_clear,   raster_clip,    raster_fillRect,
+        raster_drawImage, raster_drawText, raster_capture,
     };
     return &row;
 }

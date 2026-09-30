@@ -22,8 +22,9 @@ layout(location = 4) out vec2 vLocal;   // px within the quad
 layout(location = 5) out vec2 vSize;
 
 void main() {
+    // native px, Y-down (top-left) -> Vulkan NDC (Y-up); NDC lives ONLY here.
     vec2 ndc = vec2(inPos.x / pc.viewport.x * 2.0 - 1.0,
-                    1.0 - inPos.y / pc.viewport.y * 2.0);
+                    inPos.y / pc.viewport.y * 2.0 - 1.0);
     gl_Position = vec4(ndc, 0.0, 1.0);
     vUV = inUV;
     vFill = inFill;
