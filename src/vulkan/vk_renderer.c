@@ -265,18 +265,19 @@ static bool create_pipeline(void) {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main", NULL},
     };
     VkVertexInputBindingDescription bind = {0, sizeof(VkVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attrs[6] = {
+    VkVertexInputAttributeDescription attrs[7] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, x)},
         {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, u)},
         {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, r)},
         {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, br)},
         {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, radius)},
         {5, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, qw)},
+        {6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, c0)},
     };
     VkPipelineVertexInputStateCreateInfo vi = {0}; vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vi.vertexBindingDescriptionCount = 1;
     vi.pVertexBindingDescriptions = &bind;
-    vi.vertexAttributeDescriptionCount = 6;
+    vi.vertexAttributeDescriptionCount = 7;
     vi.pVertexAttributeDescriptions = attrs;
     VkPipelineInputAssemblyStateCreateInfo ia = {0}; ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -444,6 +445,7 @@ static bool vk_begin(void) {
     if (!s_batch) s_batch = VkBatch_0();
     if (!s_batch) return false;
     VkBatch_clear(s_batch);
+    VkBatch_setClip(s_batch, s_clip);   // the window clip (or an explicit one)
     s_rendered = false;
     return true;
 }
@@ -459,12 +461,14 @@ static bool vk_resize(uint32_t w, uint32_t h) {
 static bool vk_clear(Color color) { s_clear = color; return true; }
 static bool vk_clip(const Rect *rect) {
     s_clip = rect ? *rect : (Rect){0, 0, (float)s_w, (float)s_h};
+    if (s_batch) VkBatch_setClip(s_batch, s_clip);
     return true;
 }
 static bool vk_fillRect(const Rect *rect, const Brush *brush) {
     if (!s_batch || !rect || !brush) return false;
-    Rect clipped = Rect_intersect(*rect, s_clip);
-    VkBatch_rect(s_batch, clipped, brush);
+    // NEVER intersect the geometry: that would resize the box and recompute the
+    // corner. The quad keeps its size; the clip cuts fragments (in the shader).
+    VkBatch_rect(s_batch, *rect, brush);
     return true;
 }
 static bool vk_drawImage(const Image *image, const Rect *dst) {

@@ -13,6 +13,7 @@ layout(location = 2) in vec4 inFill;    // 0xRRGGBBAA -> linear 0..1
 layout(location = 3) in vec4 inBorder;
 layout(location = 4) in vec4 inParams;  // x=radius px, y=stroke px, z=mode, w=layer
 layout(location = 5) in vec2 inSize;    // quad size px
+layout(location = 6) in vec4 inClip;    // local clip bounds (x0,y0,x1,y1)
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) out vec4 vFill;
@@ -20,6 +21,7 @@ layout(location = 2) out vec4 vBorder;
 layout(location = 3) out vec4 vParams;
 layout(location = 4) out vec2 vLocal;   // px within the quad
 layout(location = 5) out vec2 vSize;
+layout(location = 6) out vec4 vClip;
 
 void main() {
     // native px, Y-down (top-left) -> Vulkan NDC (Y-up); NDC lives ONLY here.
@@ -31,5 +33,6 @@ void main() {
     vBorder = inBorder;
     vParams = inParams;
     vSize = inSize;
+    vClip = inClip;
     vLocal = inUV * inSize;   // uv runs 0..1 across the quad
 }

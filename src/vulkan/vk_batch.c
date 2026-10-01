@@ -8,6 +8,7 @@
 
 VkBatch *VkBatch_0(void) {
     VkBatch *b = calloc(1, sizeof *b);
+    if (b) b->clip = (Rect){-1.0e7f, -1.0e7f, 2.0e7f, 2.0e7f};   // unbounded
     return b;
 }
 
@@ -18,7 +19,22 @@ void VkBatch_free(VkBatch *b) {
 }
 
 void VkBatch_clear(VkBatch *b) {
-    if (b) b->count = 0;
+    if (b) {
+        b->count = 0;
+        b->clip = (Rect){-1.0e7f, -1.0e7f, 2.0e7f, 2.0e7f};
+    }
+}
+
+void VkBatch_setClip(VkBatch *b, Rect clip) {
+    if (b) b->clip = clip;
+}
+
+// bake the batch clip into a quad's LOCAL space (the shape is untouched)
+static void clip_quad(VkQuad *q, Rect clip) {
+    q->cx0 = clip.x - q->x;
+    q->cy0 = clip.y - q->y;
+    q->cx1 = clip.x + clip.w - q->x;
+    q->cy1 = clip.y + clip.h - q->y;
 }
 
 static VkQuad *batch_push(VkBatch *b) {
@@ -45,6 +61,7 @@ void VkBatch_rect(VkBatch *b, Rect dst, const Brush *brush) {
     q->stroke = brush->borderWidth;
     q->mode = 0.0f;
     q->texture = 0u;
+    clip_quad(q, b->clip);
 }
 
 void VkBatch_image(VkBatch *b, const Image *image, Rect src, Rect dst) {
@@ -59,6 +76,7 @@ void VkBatch_image(VkBatch *b, const Image *image, Rect src, Rect dst) {
     q->fill = COLOR_WHITE;
     q->mode = 1.0f;
     q->texture = Image_layer(image);
+    clip_quad(q, b->clip);
 }
 
 void VkBatch_glyph(VkBatch *b, Rect dst, uint32_t atlasLayer, Color color) {
@@ -69,6 +87,7 @@ void VkBatch_glyph(VkBatch *b, Rect dst, uint32_t atlasLayer, Color color) {
     q->fill = color;
     q->mode = 2.0f;
     q->texture = atlasLayer;
+    clip_quad(q, b->clip);
 }
 
 static void put(VkVertex *v, const VkQuad *q, float x, float y, float u, float vv) {
@@ -88,6 +107,10 @@ static void put(VkVertex *v, const VkQuad *q, float x, float y, float u, float v
     v->layer = (float)q->texture;
     v->qw = q->w;
     v->qh = q->h;
+    v->c0 = q->cx0;
+    v->c1 = q->cy0;
+    v->c2 = q->cx1;
+    v->c3 = q->cy1;
 }
 
 size_t VkBatch_vertices(const VkBatch *b, VkVertex *out, size_t capacity) {

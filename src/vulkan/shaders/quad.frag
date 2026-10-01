@@ -13,6 +13,7 @@ layout(location = 2) in vec4 vBorder;
 layout(location = 3) in vec4 vParams;   // x=radius, y=stroke, z=mode, w=layer
 layout(location = 4) in vec2 vLocal;
 layout(location = 5) in vec2 vSize;
+layout(location = 6) in vec4 vClip;     // local clip bounds (x0,y0,x1,y1)
 
 layout(location = 0) out vec4 outColor;
 
@@ -25,6 +26,12 @@ float sdRoundBox(vec2 p, vec2 hs, float r) {
 }
 
 void main() {
+    // CLIP = DISCARD. The quad always keeps its true size, so the corner is
+    // computed for the full box; pixels past the clip window are simply cut.
+    if (vLocal.x < vClip.x || vLocal.y < vClip.y ||
+        vLocal.x > vClip.z || vLocal.y > vClip.w)
+        discard;
+
     vec2 p = vLocal - vSize * 0.5;          // centred
     vec2 hs = vSize * 0.5;
     float radius = min(vParams.x, min(hs.x, hs.y));
