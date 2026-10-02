@@ -36,9 +36,22 @@ static VkImageView s_imgView = VK_NULL_HANDLE;
 static VkFramebuffer s_fb = VK_NULL_HANDLE;
 static VkRenderPass s_rp = VK_NULL_HANDLE;          // private target (readback)
 static VkRenderPass s_rpPresent = VK_NULL_HANDLE;   // imported IOSurface (present)
-static bool s_presentTarget = false;                // s_img is a host IOSurface
-static void *s_surface = NULL;                      // borrowed IOSurfaceRef
 static VkExtent2D s_ext = {0, 0};
+
+// A small pool of imported IOSurface targets. The seam is double-buffered, so
+// two slots are live (render the back, publish it, swap); the rest is headroom.
+#define VK_SURFACE_MAX 16
+typedef struct VkSurfaceSlot {
+    void *surface;         // borrowed IOSurfaceRef
+    VkImage image;
+    VkImageView view;
+    VkFramebuffer fb;
+    uint32_t w, h;
+    bool used;
+} VkSurfaceSlot;
+static VkSurfaceSlot s_surfaces[VK_SURFACE_MAX];
+static int s_surfaceCurrent = -1;   // -1 => the private readback target
+static int s_boundSlot = -1;        // slot owned by VulkanBackend_bindSurface
 
 static VkDescriptorSetLayout s_dsl = VK_NULL_HANDLE;
 static VkPipelineLayout s_pl = VK_NULL_HANDLE;
@@ -158,14 +171,27 @@ static bool create_target(uint32_t w, uint32_t h) {
     return true;
 }
 
-// ── imported IOSurface target (the zero-copy seam) ──────────────────────────
+// ── imported IOSurface targets (the zero-copy seam pool) ────────────────────
 // Import the host's IOSurface as a VkImage (VK_EXT_metal_objects). MoltenVK
 // backs the image with that IOSurface's Metal texture, so rendering into it
 // writes the very bytes CoreAnimation composites — no readback, no copy. The
 // host owns the IOSurface's lifetime; we never free it.
-static bool create_imported_target(void *iosurface, uint32_t w, uint32_t h) {
-    destroy_target();
-    if (!s_device || !s_rpPresent || !iosurface || w == 0 || h == 0) return false;
+static void surface_slot_destroy(int i) {
+    if (i < 0 || i >= VK_SURFACE_MAX) return;
+    VkSurfaceSlot *slot = &s_surfaces[i];
+    if ((*slot).fb) { vkDestroyFramebuffer(s_device, (*slot).fb, NULL); (*slot).fb = VK_NULL_HANDLE; }
+    if ((*slot).view) { vkDestroyImageView(s_device, (*slot).view, NULL); (*slot).view = VK_NULL_HANDLE; }
+    if ((*slot).image) { vkDestroyImage(s_device, (*slot).image, NULL); (*slot).image = VK_NULL_HANDLE; }
+    *slot = (VkSurfaceSlot){0};
+}
+
+static int surface_slot_add(void *iosurface, uint32_t w, uint32_t h) {
+    if (!s_device || !s_rpPresent || !iosurface || w == 0 || h == 0) return -1;
+    int i = -1;
+    for (int k = 0; k < VK_SURFACE_MAX; k++)
+        if (!s_surfaces[k].used) { i = k; break; }
+    if (i < 0) return -1;
+    VkSurfaceSlot *slot = &s_surfaces[i];
     VkImportMetalIOSurfaceInfoEXT imp = {0};
     imp.sType = VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT;
     imp.ioSurface = (IOSurfaceRef) iosurface;
@@ -182,27 +208,34 @@ static bool create_imported_target(void *iosurface, uint32_t w, uint32_t h) {
     ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                VK_IMAGE_USAGE_SAMPLED_BIT;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VK_ERR(vkCreateImage(s_device, &ii, NULL, &s_img));
+    VK_ERR(vkCreateImage(s_device, &ii, NULL, &(*slot).image));
     // No vkBindImageMemory: the imported IOSurface already backs this image.
     VkImageViewCreateInfo vi = {0}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vi.image = s_img;
+    vi.image = (*slot).image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = VK_FORMAT_R8G8B8A8_UNORM;
     vi.subresourceRange = (VkImageSubresourceRange){VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VK_ERR(vkCreateImageView(s_device, &vi, NULL, &s_imgView));
+    VK_ERR(vkCreateImageView(s_device, &vi, NULL, &(*slot).view));
     VkFramebufferCreateInfo fi = {0}; fi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fi.renderPass = s_rpPresent;
     fi.attachmentCount = 1;
-    fi.pAttachments = &s_imgView;
+    fi.pAttachments = &(*slot).view;
     fi.width = w;
     fi.height = h;
     fi.layers = 1;
-    VK_ERR(vkCreateFramebuffer(s_device, &fi, NULL, &s_fb));
-    s_ext = (VkExtent2D){w, h};
-    s_surface = iosurface;
-    s_presentTarget = true;
-    s_rendered = false;
-    return true;
+    VK_ERR(vkCreateFramebuffer(s_device, &fi, NULL, &(*slot).fb));
+    (*slot).surface = iosurface;
+    (*slot).w = w;
+    (*slot).h = h;
+    (*slot).used = true;
+    return i;
+}
+
+static void surface_slots_destroy_all(void) {
+    for (int k = 0; k < VK_SURFACE_MAX; k++)
+        if (s_surfaces[k].used) surface_slot_destroy(k);
+    s_surfaceCurrent = -1;
+    s_boundSlot = -1;
 }
 
 // ── pipeline ────────────────────────────────────────────────────────────────
@@ -427,11 +460,35 @@ static float cf(Color c) { return (float)((c >> 24) & 0xFFu) / 255.0f; }
 
 static bool render(void) {
     if (!s_device) return false;
-    if (s_w <= 0 || s_h <= 0) return false;
-    if (!s_presentTarget && (!s_fb || s_ext.width != (uint32_t)s_w || s_ext.height != (uint32_t)s_h)) {
-        if (!create_target((uint32_t)s_w, (uint32_t)s_h)) return false;
+    // Resolve the target: the current imported IOSurface slot, else the private
+    // readback target.
+    VkSurfaceSlot *slot = NULL;
+    if (s_surfaceCurrent >= 0 && s_surfaceCurrent < VK_SURFACE_MAX &&
+        s_surfaces[s_surfaceCurrent].used)
+        slot = &s_surfaces[s_surfaceCurrent];
+
+    VkFramebuffer fb;
+    VkRenderPass rp;
+    uint32_t rw, rh;
+    bool imported;
+    if (slot) {
+        fb = (*slot).fb;
+        rp = s_rpPresent;
+        rw = (*slot).w;
+        rh = (*slot).h;
+        imported = true;
+    } else {
+        if (s_w <= 0 || s_h <= 0) return false;
+        if (!s_fb || s_ext.width != (uint32_t)s_w || s_ext.height != (uint32_t)s_h) {
+            if (!create_target((uint32_t)s_w, (uint32_t)s_h)) return false;
+        }
+        if (!s_fb) return false;
+        fb = s_fb;
+        rp = s_rp;
+        rw = (uint32_t)s_w;
+        rh = (uint32_t)s_h;
+        imported = false;
     }
-    if (!s_fb) return false;
     size_t vcount = VkBatch_vertices(s_batch, NULL, 0);
     if (vcount == 0) vcount = 6;   // need at least something; draw 0 anyway
     VkDeviceSize vbytes = (VkDeviceSize)vcount * sizeof(VkVertex);
@@ -461,32 +518,32 @@ static bool render(void) {
     clear.color.float32[1] = cf(s_clear << 8);
     clear.color.float32[2] = cf(s_clear << 16);
     clear.color.float32[3] = (float)(s_clear & 0xFFu) / 255.0f;
-    VkRenderPassBeginInfo rp = {0}; rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp.renderPass = s_presentTarget ? s_rpPresent : s_rp;
-    rp.framebuffer = s_fb;
-    rp.renderArea = (VkRect2D){{0, 0}, {(uint32_t)s_w, (uint32_t)s_h}};
-    rp.clearValueCount = 1;
-    rp.pClearValues = &clear;
-    vkCmdBeginRenderPass(s_cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
-    VkViewport viewport = {0, 0, (float)s_w, (float)s_h, 0.0f, 1.0f};
-    VkRect2D scissor = {{0, 0}, {(uint32_t)s_w, (uint32_t)s_h}};
+    VkRenderPassBeginInfo rpBegin = {0}; rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpBegin.renderPass = rp;
+    rpBegin.framebuffer = fb;
+    rpBegin.renderArea = (VkRect2D){{0, 0}, {rw, rh}};
+    rpBegin.clearValueCount = 1;
+    rpBegin.pClearValues = &clear;
+    vkCmdBeginRenderPass(s_cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+    VkViewport viewport = {0, 0, (float)rw, (float)rh, 0.0f, 1.0f};
+    VkRect2D scissor = {{0, 0}, {rw, rh}};
     vkCmdSetViewport(s_cmd, 0, 1, &viewport);
     vkCmdSetScissor(s_cmd, 0, 1, &scissor);
     if (written > 0) {
         vkCmdBindPipeline(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pipe);
         vkCmdBindDescriptorSets(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pl, 0, 1, &s_ds, 0, NULL);
-        float push[2] = {(float)s_w, (float)s_h};
+        float push[2] = {(float)rw, (float)rh};
         vkCmdPushConstants(s_cmd, s_pl, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
         VkDeviceSize off = 0;
         vkCmdBindVertexBuffers(s_cmd, 0, 1, &s_vbo, &off);
         vkCmdDraw(s_cmd, (uint32_t)written, 1, 0, 0);
     }
     vkCmdEndRenderPass(s_cmd);
-    if (!s_presentTarget) {
+    if (!imported) {
         // private target: copy out for capture/readback
         VkBufferImageCopy region = {0};
         region.imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.imageExtent = (VkExtent3D){(uint32_t)s_w, (uint32_t)s_h, 1};
+        region.imageExtent = (VkExtent3D){rw, rh, 1};
         vkCmdCopyImageToBuffer(s_cmd, s_img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s_rbo, 1, &region);
     }
     VK_ERR(vkEndCommandBuffer(s_cmd));
@@ -546,7 +603,7 @@ static bool vk_drawText(const Rect *rect, const char *text, const Brush *brush) 
 
 static bool vk_capture(Image *dest) {
     if (!dest) return false;
-    if (s_presentTarget) return false;   // an imported surface is read by the host
+    if (s_surfaceCurrent >= 0) return false;   // an imported surface is read by the host
     if (!s_rendered && !render()) return false;
     if (!Image_ensureShadow(dest, (uint32_t)s_w, (uint32_t)s_h)) return false;
     void *map = NULL;
@@ -584,26 +641,62 @@ bool VulkanBackend_bindSurface(void *iosurface, uint32_t widthPx, uint32_t heigh
         snprintf(s_err, sizeof s_err, "VK_EXT_metal_objects unavailable");
         return false;
     }
-    if (!create_imported_target(iosurface, widthPx, heightPx)) return false;
+    int i = surface_slot_add(iosurface, widthPx, heightPx);
+    if (i < 0) return false;
+    s_boundSlot = i;
+    s_surfaceCurrent = i;
     s_w = (int)widthPx;
     s_h = (int)heightPx;
     s_clip = (Rect){0, 0, (float)widthPx, (float)heightPx};
+    s_rendered = false;
     return true;
 }
 
 // Leave the imported target and return to the private (readback) target.
 void VulkanBackend_unbindSurface(void) {
-    if (!s_presentTarget) return;
+    if (s_boundSlot < 0) return;
     if (s_device) vkDeviceWaitIdle(s_device);
-    destroy_target();
-    s_presentTarget = false;
-    s_surface = NULL;
+    s_surfaceCurrent = -1;
+    surface_slot_destroy(s_boundSlot);
+    s_boundSlot = -1;
+}
+
+// ── surface-target pool (double buffering; the seam swaps slots) ────────────
+int VulkanBackend_addSurface(void *iosurface, uint32_t widthPx, uint32_t heightPx) {
+    if (!init_vulkan() || !Device_hasMetalObjects(s_dev)) return -1;
+    return surface_slot_add(iosurface, widthPx, heightPx);
+}
+
+bool VulkanBackend_useSurface(int slot) {
+    if (slot < 0) { s_surfaceCurrent = -1; return true; }
+    if (slot >= VK_SURFACE_MAX || !s_surfaces[slot].used) return false;
+    s_surfaceCurrent = slot;
+    s_w = (int)s_surfaces[slot].w;
+    s_h = (int)s_surfaces[slot].h;
+    s_clip = (Rect){0, 0, (float)s_surfaces[slot].w, (float)s_surfaces[slot].h};
+    s_rendered = false;
+    return true;
+}
+
+void VulkanBackend_cleanupSurfaces(void) {
+    if (!s_device) return;
+    vkDeviceWaitIdle(s_device);
+    surface_slots_destroy_all();
+}
+
+void VulkanBackend_removeSurface(int slot) {
+    if (slot < 0 || slot >= VK_SURFACE_MAX || !s_surfaces[slot].used) return;
+    if (s_device) vkDeviceWaitIdle(s_device);
+    if (s_surfaceCurrent == slot) s_surfaceCurrent = -1;
+    if (s_boundSlot == slot) s_boundSlot = -1;
+    surface_slot_destroy(slot);
 }
 
 void VulkanBackend_unbind(void) {
     if (s_device) {
         vkDeviceWaitIdle(s_device);
         destroy_target();
+        surface_slots_destroy_all();
         if (s_vbo) vkDestroyBuffer(s_device, s_vbo, NULL);
         if (s_vboMem) vkFreeMemory(s_device, s_vboMem, NULL);
         if (s_rbo) vkDestroyBuffer(s_device, s_rbo, NULL);

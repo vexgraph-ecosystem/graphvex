@@ -30,6 +30,14 @@ const Backend *VulkanBackend_row(void);
 bool VulkanBackend_bindSurface(void *iosurface, uint32_t widthPx, uint32_t heightPx);
 void VulkanBackend_unbindSurface(void);
 
+// A pool of imported surface targets (double buffering): add a surface once,
+// then select which one present renders into. add returns a slot (>=0) or -1.
+// use(-1) returns to the private readback target. cleanup releases them all.
+int  VulkanBackend_addSurface(void *iosurface, uint32_t widthPx, uint32_t heightPx);
+bool VulkanBackend_useSurface(int slot);
+void VulkanBackend_removeSurface(int slot);
+void VulkanBackend_cleanupSurfaces(void);
+
 // The live quad batch (tests/debug); valid between begin() and present().
 const VkBatch *VulkanBackend_batch(void);
 const char *VulkanBackend_lastError(void);
