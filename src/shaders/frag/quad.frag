@@ -15,6 +15,7 @@ layout(location = 4) in vec2 vLocal;
 layout(location = 5) in vec2 vSize;
 layout(location = 6) in vec4 vClip;     // local clip bounds (x0,y0,x1,y1)
 layout(location = 7) in float vBlur;    // soft-edge falloff, px
+layout(location = 8) in float vClipRadius;  // clip corner radius (0 = rect)
 
 layout(location = 0) out vec4 outColor;
 
@@ -32,6 +33,16 @@ void main() {
     if (vLocal.x < vClip.x || vLocal.y < vClip.y ||
         vLocal.x > vClip.z || vLocal.y > vClip.w)
         discard;
+
+    // ROUNDED MASK: a parent's corner radius clips its children for real. The
+    // clip's rect + radius are in this quad's local space, so one SDF discards
+    // the corner pixels the rect scissor would have kept.
+    if (vClipRadius > 0.0) {
+        vec2 ccenter = vec2((vClip.x + vClip.z) * 0.5, (vClip.y + vClip.w) * 0.5);
+        vec2 chs = vec2((vClip.z - vClip.x) * 0.5, (vClip.w - vClip.y) * 0.5);
+        float cr = min(vClipRadius, min(chs.x, chs.y));
+        if (sdRoundBox(vLocal - ccenter, chs, cr) > 0.0) discard;
+    }
 
     vec2 p = vLocal - vSize * 0.5;          // centred
     // The quad already carries the blur margin, so the SHAPE is inset by it.

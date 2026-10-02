@@ -22,6 +22,7 @@ void VkBatch_clear(VkBatch *b) {
     if (b) {
         (*b).count = 0;
         (*b).clip = (Rect){-1.0e7f, -1.0e7f, 2.0e7f, 2.0e7f};
+        (*b).clipRadius = 0.0f;
     }
 }
 
@@ -29,12 +30,17 @@ void VkBatch_setClip(VkBatch *b, Rect clip) {
     if (b) (*b).clip = clip;
 }
 
+void VkBatch_setClipRadius(VkBatch *b, float radius) {
+    if (b) (*b).clipRadius = radius > 0.0f ? radius : 0.0f;
+}
+
 // bake the batch clip into a quad's LOCAL space (the shape is untouched)
-static void clip_quad(VkQuad *q, Rect clip) {
+static void clip_quad(VkQuad *q, Rect clip, float radius) {
     (*q).cx0 = clip.x - (*q).x;
     (*q).cy0 = clip.y - (*q).y;
     (*q).cx1 = clip.x + clip.w - (*q).x;
     (*q).cy1 = clip.y + clip.h - (*q).y;
+    (*q).clipRadius = radius > 0.0f ? radius : 0.0f;
 }
 
 static VkQuad *batch_push(VkBatch *b) {
@@ -62,7 +68,7 @@ void VkBatch_rect(VkBatch *b, Rect dst, const Brush *brush) {
     (*q).blur = (*brush).blur;
     (*q).mode = 0.0f;
     (*q).texture = 0u;
-    clip_quad(q, (*b).clip);
+    clip_quad(q, (*b).clip, (*b).clipRadius);
 }
 
 void VkBatch_image(VkBatch *b, const Image *image, Rect src, Rect dst) {
@@ -77,7 +83,7 @@ void VkBatch_image(VkBatch *b, const Image *image, Rect src, Rect dst) {
     (*q).fill = COLOR_WHITE;
     (*q).mode = 1.0f;
     (*q).texture = Image_layer(image);
-    clip_quad(q, (*b).clip);
+    clip_quad(q, (*b).clip, (*b).clipRadius);
 }
 
 void VkBatch_glyph(VkBatch *b, Rect dst, uint32_t atlasLayer, Color color) {
@@ -88,7 +94,7 @@ void VkBatch_glyph(VkBatch *b, Rect dst, uint32_t atlasLayer, Color color) {
     (*q).fill = color;
     (*q).mode = 2.0f;
     (*q).texture = atlasLayer;
-    clip_quad(q, (*b).clip);
+    clip_quad(q, (*b).clip, (*b).clipRadius);
 }
 
 static void put(VkVertex *v, const VkQuad *q, float x, float y, float u, float vv) {
@@ -112,6 +118,7 @@ static void put(VkVertex *v, const VkQuad *q, float x, float y, float u, float v
     (*v).c1 = (*q).cy0;
     (*v).c2 = (*q).cx1;
     (*v).c3 = (*q).cy1;
+    (*v).clipRadius = (*q).clipRadius;
     (*v).blur = (*q).blur;
 }
 

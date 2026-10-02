@@ -352,7 +352,7 @@ static bool create_pipeline(void) {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main", NULL},
     };
     VkVertexInputBindingDescription bind = {0, sizeof(VkVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attrs[8] = {
+    VkVertexInputAttributeDescription attrs[9] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, x)},
         {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, u)},
         {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, r)},
@@ -361,11 +361,12 @@ static bool create_pipeline(void) {
         {5, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, qw)},
         {6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, c0)},
         {7, 0, VK_FORMAT_R32_SFLOAT, offsetof(VkVertex, blur)},
+        {8, 0, VK_FORMAT_R32_SFLOAT, offsetof(VkVertex, clipRadius)},
     };
     VkPipelineVertexInputStateCreateInfo vi = {0}; vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vi.vertexBindingDescriptionCount = 1;
     vi.pVertexBindingDescriptions = &bind;
-    vi.vertexAttributeDescriptionCount = 8;
+    vi.vertexAttributeDescriptionCount = 9;
     vi.pVertexAttributeDescriptions = attrs;
     VkPipelineInputAssemblyStateCreateInfo ia = {0}; ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -577,12 +578,11 @@ static bool vk_resize(uint32_t w, uint32_t h) {
 }
 static bool vk_clear(Color color) { s_clear = color; return true; }
 static bool vk_clip(const Rect *rect, float radius) {
-    // Rectangular scissor today; a rounded mask (radius > 0) needs the clip's
-    // rect + radius in the fragment shader, which is the next slice. The rect
-    // already prevents overflow; the corner rounding is pending.
-    (void)radius;
     s_clip = rect ? *rect : (Rect){0, 0, (float)s_w, (float)s_h};
-    if (s_batch) VkBatch_setClip(s_batch, s_clip);
+    if (s_batch) {
+        VkBatch_setClip(s_batch, s_clip);
+        VkBatch_setClipRadius(s_batch, radius);   // rounded mask in the shader
+    }
     return true;
 }
 static bool vk_fillRect(const Rect *rect, const Brush *brush) {
