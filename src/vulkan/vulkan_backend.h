@@ -23,6 +23,13 @@ bool VulkanBackend_bind(void *nativeLayer, uint32_t widthPx, uint32_t heightPx);
 void VulkanBackend_unbind(void);
 const Backend *VulkanBackend_row(void);
 
+// Zero-copy seam (Apple, VK_EXT_metal_objects): import a host IOSurface as the
+// render target. `iosurface` is a borrowed IOSurfaceRef (RGBA8, native px); we
+// never free it. Present renders straight into it — no readback. Unbind returns
+// to the private (readback) target. False when unsupported (non-Apple/driver).
+bool VulkanBackend_bindSurface(void *iosurface, uint32_t widthPx, uint32_t heightPx);
+void VulkanBackend_unbindSurface(void);
+
 // The live quad batch (tests/debug); valid between begin() and present().
 const VkBatch *VulkanBackend_batch(void);
 const char *VulkanBackend_lastError(void);

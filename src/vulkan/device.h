@@ -26,5 +26,6 @@ void *Device_instance(const Device *device);
 void *Device_physical(const Device *device);
 void *Device_queue(const Device *device);
 uint32_t Device_queueFamily(const Device *device);
+bool Device_hasMetalObjects(const Device *device);   // VK_EXT_metal_objects enabled
 
 #endif // GRAPHICS_DEVICE_H

@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// VK_EXT_metal_objects: import a host IOSurface as a render target (the
+// zero-copy seam). Must precede <vulkan/vulkan.h> so the platform header loads.
+#define VK_USE_PLATFORM_METAL_EXT 1
 #include <vulkan/vulkan.h>
 
 #include "image.h"
@@ -30,7 +34,10 @@ static VkImage s_img = VK_NULL_HANDLE;
 static VkDeviceMemory s_imgMem = VK_NULL_HANDLE;
 static VkImageView s_imgView = VK_NULL_HANDLE;
 static VkFramebuffer s_fb = VK_NULL_HANDLE;
-static VkRenderPass s_rp = VK_NULL_HANDLE;
+static VkRenderPass s_rp = VK_NULL_HANDLE;          // private target (readback)
+static VkRenderPass s_rpPresent = VK_NULL_HANDLE;   // imported IOSurface (present)
+static bool s_presentTarget = false;                // s_img is a host IOSurface
+static void *s_surface = NULL;                      // borrowed IOSurfaceRef
 static VkExtent2D s_ext = {0, 0};
 
 static VkDescriptorSetLayout s_dsl = VK_NULL_HANDLE;
@@ -151,17 +158,64 @@ static bool create_target(uint32_t w, uint32_t h) {
     return true;
 }
 
+// ── imported IOSurface target (the zero-copy seam) ──────────────────────────
+// Import the host's IOSurface as a VkImage (VK_EXT_metal_objects). MoltenVK
+// backs the image with that IOSurface's Metal texture, so rendering into it
+// writes the very bytes CoreAnimation composites — no readback, no copy. The
+// host owns the IOSurface's lifetime; we never free it.
+static bool create_imported_target(void *iosurface, uint32_t w, uint32_t h) {
+    destroy_target();
+    if (!s_device || !s_rpPresent || !iosurface || w == 0 || h == 0) return false;
+    VkImportMetalIOSurfaceInfoEXT imp = {0};
+    imp.sType = VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT;
+    imp.ioSurface = (IOSurfaceRef) iosurface;
+    VkImageCreateInfo ii = {0};
+    ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ii.pNext = &imp;
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_R8G8B8A8_UNORM;
+    ii.extent = (VkExtent3D){w, h, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VK_ERR(vkCreateImage(s_device, &ii, NULL, &s_img));
+    // No vkBindImageMemory: the imported IOSurface already backs this image.
+    VkImageViewCreateInfo vi = {0}; vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vi.image = s_img;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = VK_FORMAT_R8G8B8A8_UNORM;
+    vi.subresourceRange = (VkImageSubresourceRange){VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    VK_ERR(vkCreateImageView(s_device, &vi, NULL, &s_imgView));
+    VkFramebufferCreateInfo fi = {0}; fi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fi.renderPass = s_rpPresent;
+    fi.attachmentCount = 1;
+    fi.pAttachments = &s_imgView;
+    fi.width = w;
+    fi.height = h;
+    fi.layers = 1;
+    VK_ERR(vkCreateFramebuffer(s_device, &fi, NULL, &s_fb));
+    s_ext = (VkExtent2D){w, h};
+    s_surface = iosurface;
+    s_presentTarget = true;
+    s_rendered = false;
+    return true;
+}
+
 // ── pipeline ────────────────────────────────────────────────────────────────
-static bool create_render_pass(void) {
+static bool create_render_pass_ex(VkRenderPass *out, VkFormat format, VkImageLayout finalLayout) {
     VkAttachmentDescription color = {0};
-    color.format = VK_FORMAT_R8G8B8A8_UNORM;
+    color.format = format;
     color.samples = VK_SAMPLE_COUNT_1_BIT;
     color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    color.finalLayout = finalLayout;
     VkAttachmentReference ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkSubpassDescription sub = {0};
     sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -180,7 +234,7 @@ static bool create_render_pass(void) {
     rp.pSubpasses = &sub;
     rp.dependencyCount = 1;
     rp.pDependencies = &dep;
-    VK_ERR(vkCreateRenderPass(s_device, &rp, NULL, &s_rp));
+    VK_ERR(vkCreateRenderPass(s_device, &rp, NULL, out));
     return true;
 }
 
@@ -350,7 +404,8 @@ static bool init_vulkan(void) {
     s_device = (VkDevice)Device_native(s_dev);
     s_queue = (VkQueue)Device_queue(s_dev);
     s_qfam = Device_queueFamily(s_dev);
-    if (!create_render_pass()) return false;
+    if (!create_render_pass_ex(&s_rp, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)) return false;
+    if (!create_render_pass_ex(&s_rpPresent, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_LAYOUT_GENERAL)) return false;
     if (!create_texture()) return false;
     if (!create_pipeline()) return false;
     VkCommandPoolCreateInfo cp = {0}; cp.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -373,9 +428,10 @@ static float cf(Color c) { return (float)((c >> 24) & 0xFFu) / 255.0f; }
 static bool render(void) {
     if (!s_device) return false;
     if (s_w <= 0 || s_h <= 0) return false;
-    if (!s_fb || s_ext.width != (uint32_t)s_w || s_ext.height != (uint32_t)s_h) {
+    if (!s_presentTarget && (!s_fb || s_ext.width != (uint32_t)s_w || s_ext.height != (uint32_t)s_h)) {
         if (!create_target((uint32_t)s_w, (uint32_t)s_h)) return false;
     }
+    if (!s_fb) return false;
     size_t vcount = VkBatch_vertices(s_batch, NULL, 0);
     if (vcount == 0) vcount = 6;   // need at least something; draw 0 anyway
     VkDeviceSize vbytes = (VkDeviceSize)vcount * sizeof(VkVertex);
@@ -406,7 +462,7 @@ static bool render(void) {
     clear.color.float32[2] = cf(s_clear << 16);
     clear.color.float32[3] = (float)(s_clear & 0xFFu) / 255.0f;
     VkRenderPassBeginInfo rp = {0}; rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp.renderPass = s_rp;
+    rp.renderPass = s_presentTarget ? s_rpPresent : s_rp;
     rp.framebuffer = s_fb;
     rp.renderArea = (VkRect2D){{0, 0}, {(uint32_t)s_w, (uint32_t)s_h}};
     rp.clearValueCount = 1;
@@ -426,10 +482,13 @@ static bool render(void) {
         vkCmdDraw(s_cmd, (uint32_t)written, 1, 0, 0);
     }
     vkCmdEndRenderPass(s_cmd);
-    VkBufferImageCopy region = {0};
-    region.imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.imageExtent = (VkExtent3D){(uint32_t)s_w, (uint32_t)s_h, 1};
-    vkCmdCopyImageToBuffer(s_cmd, s_img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s_rbo, 1, &region);
+    if (!s_presentTarget) {
+        // private target: copy out for capture/readback
+        VkBufferImageCopy region = {0};
+        region.imageSubresource = (VkImageSubresourceLayers){VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageExtent = (VkExtent3D){(uint32_t)s_w, (uint32_t)s_h, 1};
+        vkCmdCopyImageToBuffer(s_cmd, s_img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s_rbo, 1, &region);
+    }
     VK_ERR(vkEndCommandBuffer(s_cmd));
     VkSubmitInfo si = {0}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
@@ -487,6 +546,7 @@ static bool vk_drawText(const Rect *rect, const char *text, const Brush *brush) 
 
 static bool vk_capture(Image *dest) {
     if (!dest) return false;
+    if (s_presentTarget) return false;   // an imported surface is read by the host
     if (!s_rendered && !render()) return false;
     if (!Image_ensureShadow(dest, (uint32_t)s_w, (uint32_t)s_h)) return false;
     void *map = NULL;
@@ -515,6 +575,31 @@ bool VulkanBackend_bind(void *nativeLayer, uint32_t widthPx, uint32_t heightPx) 
     return vk_resize(widthPx, heightPx);
 }
 
+// Import a host IOSurface (native px, RGBA8) as the render target. Present then
+// renders straight into it — the host's layer composites those very bytes, no
+// readback. Apple only (VK_EXT_metal_objects); false elsewhere or if absent.
+bool VulkanBackend_bindSurface(void *iosurface, uint32_t widthPx, uint32_t heightPx) {
+    if (!init_vulkan()) return false;
+    if (!Device_hasMetalObjects(s_dev)) {
+        snprintf(s_err, sizeof s_err, "VK_EXT_metal_objects unavailable");
+        return false;
+    }
+    if (!create_imported_target(iosurface, widthPx, heightPx)) return false;
+    s_w = (int)widthPx;
+    s_h = (int)heightPx;
+    s_clip = (Rect){0, 0, (float)widthPx, (float)heightPx};
+    return true;
+}
+
+// Leave the imported target and return to the private (readback) target.
+void VulkanBackend_unbindSurface(void) {
+    if (!s_presentTarget) return;
+    if (s_device) vkDeviceWaitIdle(s_device);
+    destroy_target();
+    s_presentTarget = false;
+    s_surface = NULL;
+}
+
 void VulkanBackend_unbind(void) {
     if (s_device) {
         vkDeviceWaitIdle(s_device);
@@ -528,6 +613,7 @@ void VulkanBackend_unbind(void) {
         if (s_dpool) vkDestroyDescriptorPool(s_device, s_dpool, NULL);
         if (s_dsl) vkDestroyDescriptorSetLayout(s_device, s_dsl, NULL);
         if (s_rp) vkDestroyRenderPass(s_device, s_rp, NULL);
+        if (s_rpPresent) vkDestroyRenderPass(s_device, s_rpPresent, NULL);
     }
     VkBatch_free(s_batch);
     s_batch = NULL;

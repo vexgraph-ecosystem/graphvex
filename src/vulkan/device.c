@@ -13,6 +13,7 @@ struct Device {
     VkDevice device;
     VkQueue queue;
     uint32_t queueFamily;
+    bool metalObjects;      // VK_EXT_metal_objects enabled (IOSurface/MTL interop)
     char deviceName[256];
     char error[256];
 };
@@ -98,17 +99,23 @@ Device *Device_create(bool enableValidation) {
     dci.pQueueCreateInfos = &qci;
 
     // MoltenVK advertises VK_KHR_portability_subset; the spec requires enabling
-    // it when present.
+    // it when present. VK_EXT_metal_objects (Apple) lets us import an IOSurface
+    // as a render target — the zero-copy seam. Both are enabled only if present.
     uint32_t extN = 0;
     vkEnumerateDeviceExtensionProperties((*c).physical, NULL, &extN, NULL);
     VkExtensionProperties *devExts = calloc(extN ? extN : 1, sizeof *devExts);
-    const char *want[1];
+    const char *want[2];
     uint32_t wantN = 0;
     if (devExts) {
         vkEnumerateDeviceExtensionProperties((*c).physical, NULL, &extN, devExts);
-        for (uint32_t i = 0; i < extN; i++)
+        for (uint32_t i = 0; i < extN; i++) {
             if (!strcmp(devExts[i].extensionName, "VK_KHR_portability_subset"))
                 want[wantN++] = "VK_KHR_portability_subset";
+            else if (!strcmp(devExts[i].extensionName, "VK_EXT_metal_objects")) {
+                want[wantN++] = "VK_EXT_metal_objects";
+                (*c).metalObjects = true;
+            }
+        }
         free(devExts);
     }
     dci.enabledExtensionCount = wantN;
@@ -138,3 +145,4 @@ void *Device_instance(const Device *c) { return c ? (void *)((*c).instance) : NU
 void *Device_physical(const Device *c) { return c ? (void *)((*c).physical) : NULL; }
 void *Device_queue(const Device *c) { return c ? (void *)((*c).queue) : NULL; }
 uint32_t Device_queueFamily(const Device *c) { return c ? (*c).queueFamily : 0u; }
+bool Device_hasMetalObjects(const Device *c) { return c && (*c).metalObjects; }
