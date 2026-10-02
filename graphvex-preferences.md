@@ -181,6 +181,13 @@ preserved — R4 may `#include` graphvex; graphvex never includes R4.
    `GraphicsComponent_setMeasuredSize` so the declared sentinel survives and
    re-resolves every render. AUTO is the **default** for every element. The
    sentinel is never clamped by min/max.
+6. **`Property` is the placement bound.** `ui/property.h` owns the rectangle
+   every element carries (x/y/w/h plus radius/background/border/shadow/blur):
+   placement data, never a widget. Records live in `nio/property_pool` (blocks
+   from vexspoke's ForeignMemory, stable addresses), so an element borrows one
+   and may share it — aliasing the address is the bind, and `revalidate`
+   reflects a shared record everywhere. A `radius > 0` clips children to the
+   rounded shape. Widgets, input, and focus remain R4.
 
 ---
 
