@@ -322,9 +322,8 @@ void Element_paint(const Element *e, Rect absolute, DisplayList *dl) {
     }
 
     // A rounded parent MASKS its children: the corner radius means what it says.
-    // (Rectangular clip today; the rounded SDF clip is the next slice.)
     bool clips = (*p).radius > 0.0f && (*e).count > 0;
-    if (clips) DisplayList_clip(dl, absolute);
+    if (clips) DisplayList_clipRounded(dl, absolute, (*p).radius);
     for (int i = 0; i < (*e).count; i++) {
         Element *c = (*e).children[i];
         Element_paint(c, Element_resolve(c, absolute), dl);

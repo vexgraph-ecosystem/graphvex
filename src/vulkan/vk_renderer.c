@@ -576,7 +576,11 @@ static bool vk_resize(uint32_t w, uint32_t h) {
     return true;
 }
 static bool vk_clear(Color color) { s_clear = color; return true; }
-static bool vk_clip(const Rect *rect) {
+static bool vk_clip(const Rect *rect, float radius) {
+    // Rectangular scissor today; a rounded mask (radius > 0) needs the clip's
+    // rect + radius in the fragment shader, which is the next slice. The rect
+    // already prevents overflow; the corner rounding is pending.
+    (void)radius;
     s_clip = rect ? *rect : (Rect){0, 0, (float)s_w, (float)s_h};
     if (s_batch) VkBatch_setClip(s_batch, s_clip);
     return true;

@@ -56,7 +56,10 @@ bool Graphics_clear(Color color) {
     return s_current && (*s_current).clear ? (*s_current).clear(color) : false;
 }
 bool Graphics_clip(const Rect *rect) {
-    return s_current && (*s_current).clip ? (*s_current).clip(rect) : false;
+    return s_current && (*s_current).clip ? (*s_current).clip(rect, 0.0f) : false;
+}
+bool Graphics_clipRounded(const Rect *rect, float radius) {
+    return s_current && (*s_current).clip ? (*s_current).clip(rect, radius) : false;
 }
 bool Graphics_fillRect(const Rect *rect, const Brush *brush) {
     return s_current && (*s_current).fillRect ? (*s_current).fillRect(rect, brush) : false;
@@ -138,11 +141,16 @@ void DisplayList_text(DisplayList *dl, Rect dst, const char *text, Color color) 
 }
 
 void DisplayList_clip(DisplayList *dl, Rect rect) {
+    DisplayList_clipRounded(dl, rect, 0.0f);
+}
+
+void DisplayList_clipRounded(DisplayList *dl, Rect rect, float radius) {
     if (!dl) return;
     DrawCmd *c = dl_push(dl);
     if (!c) return;
     (*c).kind = CMD_CLIP_PUSH;
     (*c).dst = rect;
+    (*c).radius = radius > 0.0f ? radius : 0.0f;   // 0 = rectangular scissor
 }
 
 void DisplayList_unclip(DisplayList *dl) {
@@ -176,7 +184,7 @@ bool Graphics_submit(DisplayList *dl) {
                 break;
             }
             case CMD_CLIP_PUSH:
-                if (!Graphics_clip(&(*k).dst)) return false;
+                if (!Graphics_clipRounded(&(*k).dst, (*k).radius)) return false;
                 break;
             case CMD_CLIP_POP:
                 if (!Graphics_clip(NULL)) return false;
@@ -193,6 +201,7 @@ static uint32_t *s_px = NULL;
 static int32_t s_capW = 0, s_capH = 0;   // allocation; row stride == s_capW
 static int32_t s_w = 0, s_h = 0;         // logical viewport (the scissor region)
 static Rect s_clip = {0, 0, 0, 0};
+static float s_clipRadius = 0.0f;   // > 0 = rounded mask on the clip rect
 
 static uint32_t blend_over(uint32_t dst, uint32_t src) {
     uint32_t sa = src & 0xFFu;
@@ -259,12 +268,14 @@ static bool raster_clear(Color color) {
     return true;
 }
 
-static bool raster_clip(const Rect *rect) {
+static bool raster_clip(const Rect *rect, float radius) {
     if (!rect) {
         s_clip = (Rect){0, 0, (float)s_w, (float)s_h};
+        s_clipRadius = 0.0f;
         return true;
     }
     s_clip = *rect;
+    s_clipRadius = radius > 0.0f ? radius : 0.0f;
     return true;
 }
 
@@ -306,6 +317,17 @@ static bool raster_fillRect(const Rect *rect, const Brush *brush) {
 
     for (int y = y0; y < y1; y++) {
         for (int x = x0; x < x1; x++) {
+            if (s_clipRadius > 0.0f) {
+                // the active clip may be a rounded mask (a parent's corner radius)
+                float ccx = s_clip.x + s_clip.w * 0.5f;
+                float ccy = s_clip.y + s_clip.h * 0.5f;
+                float chw = s_clip.w * 0.5f, chh = s_clip.h * 0.5f;
+                float cr = s_clipRadius;
+                float cmax = chw < chh ? chw : chh;
+                if (cr > cmax) cr = cmax;
+                if (sd_round_box((float)x + 0.5f - ccx, (float)y + 0.5f - ccy, chw, chh, cr) > 0.0f)
+                    continue;
+            }
             float d = sd_round_box((float)x + 0.5f - cx, (float)y + 0.5f - cy, hw, hh, r);
             float a;
             if (blur > 0.0f) {

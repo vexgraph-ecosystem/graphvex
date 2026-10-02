@@ -100,6 +100,7 @@ void DisplayList_rect(DisplayList *dl, Rect dst, const Brush *brush);
 void DisplayList_image(DisplayList *dl, const Image *image, Rect src, Rect dst);
 void DisplayList_text(DisplayList *dl, Rect dst, const char *text, Color color);
 void DisplayList_clip(DisplayList *dl, Rect rect);
+void DisplayList_clipRounded(DisplayList *dl, Rect rect, float radius);   // rounded mask
 void DisplayList_unclip(DisplayList *dl);
 size_t DisplayList_count(const DisplayList *dl);
 const DrawCmd *DisplayList_cmds(const DisplayList *dl);
@@ -112,7 +113,7 @@ typedef struct Backend {
     bool (*present)(void);
     bool (*resize)(uint32_t width, uint32_t height);
     bool (*clear)(Color color);
-    bool (*clip)(const Rect *rect);   // null = reset
+    bool (*clip)(const Rect *rect, float radius);   // null = reset; radius 0 = rect
     bool (*fillRect)(const Rect *rect, const Brush *brush);
     bool (*drawImage)(const Image *image, const Rect *dst);
     bool (*drawText)(const Rect *rect, const char *text, const Brush *brush);
@@ -131,6 +132,7 @@ bool Graphics_present(void);
 bool Graphics_resize(uint32_t width, uint32_t height);
 bool Graphics_clear(Color color);
 bool Graphics_clip(const Rect *rect);
+bool Graphics_clipRounded(const Rect *rect, float radius);   // rectangular clip when radius <= 0
 bool Graphics_fillRect(const Rect *rect, const Brush *brush);
 bool Graphics_drawImage(const Image *image, const Rect *dst);
 bool Graphics_drawText(const Rect *rect, const char *text, const Brush *brush);
