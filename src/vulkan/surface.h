@@ -17,6 +17,14 @@
 
 typedef struct Surface Surface;
 
+// The host present seam. graphvex owns no platform code and never includes
+// Metal/CoreAnimation, so the layer that owns the borrowed native destination
+// (an R1 window / R4 frame) installs a blit that copies the retained present
+// Image into it — a CAMetalLayer contents update on Apple. The callback reads
+// Surface_handle and Surface_presentImage, writes the destination, and returns
+// true only when a frame was actually handed over.
+typedef bool (*SurfacePresentFn)(Surface *surface, void *userdata);
+
 Surface *Surface_0(void);
 Surface *Surface_2(void *native, uint32_t width, uint32_t height);
 void Surface_destroy(Surface *surface);
@@ -28,9 +36,14 @@ bool Surface_isValid(const Surface *surface);
 void *Surface_handle(const Surface *surface);      // borrowed native destination
 Image *Surface_presentImage(Surface *surface);     // retained target to render into
 
-// Hand the completed present image to the host seam. False until the platform
-// blit lands (CAMetalLayer on Apple, WSI-free copy elsewhere) or when the
-// device is lost. Never a swapchain present.
+// Register the host blit. The callback + userdata are borrowed, never owned;
+// passing NULL clears the seam. Idempotent (re-register replaces).
+void Surface_onPresent(Surface *surface, SurfacePresentFn fn, void *userdata);
+
+// Hand the completed present image to the host seam: invoke the registered
+// blit. Returns false when no seam is installed (an offscreen surface has
+// nowhere to present) or when the blit reports failure. Never a swapchain
+// present — the host owns the drawable.
 bool Surface_present(Surface *surface);
 
 #endif // GRAPHICS_SURFACE_H

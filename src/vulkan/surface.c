@@ -12,6 +12,8 @@ struct Surface {
     uint32_t height;
     Image *present;    // the retained target we render into
     bool presented;    // diagnostic
+    SurfacePresentFn presentFn;   // borrowed host blit (nullable = offscreen)
+    void *presentUser;            // passed to presentFn
 };
 
 Surface *Surface_0(void) { return Surface_2(NULL, 0, 0); }
@@ -51,10 +53,18 @@ bool Surface_isValid(const Surface *surface) { return surface && (*surface).pres
 void *Surface_handle(const Surface *surface) { return surface ? (*surface).native : NULL; }
 Image *Surface_presentImage(Surface *surface) { return surface ? (*surface).present : NULL; }
 
+void Surface_onPresent(Surface *surface, SurfacePresentFn fn, void *userdata) {
+    if (!surface) return;
+    (*surface).presentFn = fn;
+    (*surface).presentUser = userdata;
+}
+
 bool Surface_present(Surface *surface) {
     if (!surface || !(*surface).present) return false;
-    // TODO(seam): blit (*surface).present into the borrowed native destination
-    // (CAMetalLayer on Apple). NO swapchain present — the host owns the drawable.
-    (*surface).presented = false;
-    return false;
+    // The host owns the drawable; we only hand it the finished image. With no
+    // blit installed (an offscreen surface) there is nowhere to present.
+    (*surface).presented = (*surface).presentFn
+        ? (*surface).presentFn(surface, (*surface).presentUser)
+        : false;
+    return (*surface).presented;
 }
