@@ -102,6 +102,7 @@ Element *Element_setShadow(Element *element, float offsetX, float offsetY, float
 Element *Element_setShadowColor(Element *element, Color color);
 // Blur the element ITSELF (soft edges). The layout/hit rect is unchanged.
 Element *Element_setBlur(Element *element, float blur);
+Element *Element_setClip(Element *element, bool clip);   // clip children to the bound
 Element *Element_setPressed(Element *element, bool pressed);
 Element *Element_setVisible(Element *element, bool visible);
 

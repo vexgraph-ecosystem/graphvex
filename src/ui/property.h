@@ -1,6 +1,8 @@
 #ifndef GRAPHICS_UI_PROPERTY_H
 #define GRAPHICS_UI_PROPERTY_H
 
+#include <stdbool.h>
+
 #include "graphics/graphics.h"   // Color
 
 // graphvex R3 — ui/property.h
@@ -15,6 +17,7 @@
 typedef struct Property {
     float x, y, w, h;
     float radius;
+    bool clip;             // clip children to this rect (a scroll viewport)
     Color background, border;
     float borderWidth;
     Color shadow;

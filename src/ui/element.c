@@ -272,6 +272,10 @@ Element *Element_setBlur(Element *e, float blur) {
     if (e && (*e).property) { (*e).property->blur = blur < 0.0f ? 0.0f : blur; Element_markDirty(e); }
     return e;
 }
+Element *Element_setClip(Element *e, bool clip) {
+    if (e && (*e).property) { (*e).property->clip = clip; Element_markDirty(e); }
+    return e;
+}
 Element *Element_setPressed(Element *e, bool pressed) {
     if (e) (*e).pressed = pressed;
     return e;
@@ -321,8 +325,9 @@ void Element_paint(const Element *e, Rect absolute, DisplayList *dl) {
         }
     }
 
-    // A rounded parent MASKS its children: the corner radius means what it says.
-    bool clips = (*p).radius > 0.0f && (*e).count > 0;
+    // A clipping / rounded parent MASKS its children: the radius means what it
+    // says, and a scroll viewport clips to its rect.
+    bool clips = ((*p).clip || (*p).radius > 0.0f) && (*e).count > 0;
     if (clips) DisplayList_clipRounded(dl, absolute, (*p).radius);
     for (int i = 0; i < (*e).count; i++) {
         Element *c = (*e).children[i];
