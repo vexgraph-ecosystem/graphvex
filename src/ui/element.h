@@ -5,20 +5,22 @@
 #include <stdint.h>
 
 #include "graphics/graphics.h"
+#include "ui/property.h"
 
 // graphvex R3 — element.h
 //
 // THE UI NODE. Everything visible is an Element: a Frame's content, a Panel, a
-// container. One type, one tree, one paint/hit path — no subclass zoo. That is
-// the whole point: Frame, Panel and containers are the SAME thing wearing
-// different clothes.
+// container. Placement is the anchor/pivot model; the rectangle + style live in
+// a `Property` the Element carries as a POINTER (pooled in nio/, stable, and
+// shareable — two Elements may point at one bound, so a write through either is
+// seen by both).
 //
-// Placement is the anchor/pivot model, drawing is rounded rects, and the tree
-// is children. Verbs are ARITY-based where it reads better:
+//   Element *e = Element(&(ElementDesc){ .width = 200, .height = 80 });
+//   Element_add(parent, e);
 //
-//   Element_add(parent, child)            append
-//   Element_addAt(parent, child, index)   insert
-//   Element_find(root, tag)               by tag
+// Revalidation is explicit: a change marks a node dirty (walking up), and
+// Element_revalidate(root) reflects only the dirty branches. A parent with
+// radius > 0 clips its children to the rounded shape.
 
 // The 9 parts of a rectangle, row-major.
 enum {
@@ -40,7 +42,7 @@ typedef struct ElementDesc {
     float offsetX, offsetY;   // added to the anchor point
     int   anchor;             // PART_* on the PARENT (default TOP_LEFT)
     int   pivot;              // PART_* on the ELEMENT (default TOP_LEFT)
-    float radius;             // corner radius
+    float radius;             // corner radius (also clips children when > 0)
     Color background;
     Color border;
     float borderWidth;
@@ -59,6 +61,16 @@ Element *Element_1(const ElementDesc *desc);
 #define Element(...) ELEMENT_CHOOSER(dummy __VA_OPT__(,) __VA_ARGS__, Element_1, Element_0)(__VA_ARGS__)
 
 void Element_destroy(Element *element);      // frees the subtree
+
+// ── the bound (a pooled, shareable Property) ────────────────────────────────
+Property *Element_property(const Element *element);         // borrowed view
+Element  *Element_setProperty(Element *element, Property *property);  // bind: borrow (no ownership)
+Element  *Element_ownProperty(Element *element);            // re-own: allocate a private copy
+
+// ── revalidation (dirty subtree) ────────────────────────────────────────────
+void Element_markDirty(Element *element);    // this node + its ancestors
+void Element_revalidate(Element *root);      // reflect the dirty branches; prunes clean ones
+bool Element_isDirty(const Element *element);
 
 // ── tree ────────────────────────────────────────────────────────────────────
 Element *Element_add(Element *parent, Element *child);
@@ -111,7 +123,8 @@ bool  Element_isPressed(const Element *element);
 const char *Element_tag(const Element *element);
 
 // Paint this element at an ABSOLUTE rect, then its children (resolved against
-// that rect). A fully transparent element paints nothing but still walks.
+// that rect). A parent with radius > 0 clips its children to the rounded shape.
+// A fully transparent element paints nothing but still walks.
 void Element_paint(const Element *element, Rect absolute, DisplayList *dl);
 
 #endif // GRAPHICS_ELEMENT_H

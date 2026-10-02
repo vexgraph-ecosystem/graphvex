@@ -13,6 +13,7 @@
 typedef struct PropertyPool PropertyPool;
 
 PropertyPool *PropertyPool_0(void);
+PropertyPool *PropertyPool_default(void);   // process-global, for Element-owned bounds
 void PropertyPool_destroy(PropertyPool *pool);
 
 // A zeroed, defaulted Property (init NULL => Property_default()), or NULL on OOM.

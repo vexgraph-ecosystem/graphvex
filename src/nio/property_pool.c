@@ -22,6 +22,14 @@ PropertyPool *PropertyPool_0(void) {
     return pp;
 }
 
+// The process-global pool Element-owned bounds come from (like Memory's default
+// arena). Borrowed, never destroyed by callers.
+static PropertyPool *s_default = NULL;
+PropertyPool *PropertyPool_default(void) {
+    if (!s_default) s_default = PropertyPool_0();
+    return s_default;
+}
+
 void PropertyPool_destroy(PropertyPool *pool) {
     if (!pool) return;
     Pool_destroy((*pool).slots);
