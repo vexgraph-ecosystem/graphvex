@@ -27,11 +27,11 @@ static void clamp_dims(uint32_t *w, uint32_t *h) {
 Image *Image_new(const ImageDesc *desc) {
     Image *img = calloc(1, sizeof *img);
     if (!img) return NULL;
-    img->width = desc ? desc->width : 1;
-    img->height = desc ? desc->height : 1;
-    img->format = desc ? desc->format : IMAGE_FORMAT_RGBA8;
-    img->usage = desc ? desc->usage : IMAGE_USAGE_NONE;
-    clamp_dims(&img->width, &img->height);
+    (*img).width = desc ? (*desc).width : 1;
+    (*img).height = desc ? (*desc).height : 1;
+    (*img).format = desc ? (*desc).format : IMAGE_FORMAT_RGBA8;
+    (*img).usage = desc ? (*desc).usage : IMAGE_USAGE_NONE;
+    clamp_dims(&(*img).width, &(*img).height);
     return img;
 }
 
@@ -47,7 +47,7 @@ Image *Image_4(uint32_t width, uint32_t height, uint32_t format, uint32_t usage)
 
 void Image_destroy(Image *image) {
     if (!image) return;
-    free(image->pixels);
+    free((*image).pixels);
     free(image);
 }
 
@@ -56,22 +56,22 @@ bool Image_ensureShadow(Image *image, uint32_t width, uint32_t height) {
     clamp_dims(&width, &height);
     // GROW-ONLY: reuse the existing allocation whenever it already fits, so a
     // shrinking viewport (or a resize wobble) never reallocs and never refills.
-    if (image->pixels && width <= image->capW && height <= image->capH) {
-        image->width = width;
-        image->height = height;
+    if ((*image).pixels && width <= (*image).capW && height <= (*image).capH) {
+        (*image).width = width;
+        (*image).height = height;
         return true;
     }
-    uint32_t nw = image->capW > width ? image->capW : width;
-    uint32_t nh = image->capH > height ? image->capH : height;
+    uint32_t nw = (*image).capW > width ? (*image).capW : width;
+    uint32_t nh = (*image).capH > height ? (*image).capH : height;
     while (nw < width) nw += nw / 2 + 64;
     while (nh < height) nh += nh / 2 + 64;
-    uint8_t *grown = realloc(image->pixels, (size_t)nw * (size_t)nh * 4u);
+    uint8_t *grown = realloc((*image).pixels, (size_t)nw * (size_t)nh * 4u);
     if (!grown) return false;
-    image->pixels = grown;
-    image->capW = nw;
-    image->capH = nh;
-    image->width = width;
-    image->height = height;
+    (*image).pixels = grown;
+    (*image).capW = nw;
+    (*image).capH = nh;
+    (*image).width = width;
+    (*image).height = height;
     return true;
 }
 
@@ -82,24 +82,24 @@ bool Image_resize(Image *image, uint32_t width, uint32_t height) {
 bool Image_upload(const uint8_t *rgba, uint32_t width, uint32_t height, Image *dest) {
     if (!dest || !rgba) return false;
     if (!Image_ensureShadow(dest, width, height)) return false;
-    size_t stride = (size_t)dest->capW * 4u;
+    size_t stride = (size_t)((*dest).capW) * 4u;
     for (uint32_t y = 0; y < height; y++) {
-        memcpy(dest->pixels + (size_t)y * stride, rgba + (size_t)y * width * 4u, (size_t)width * 4u);
+        memcpy((*dest).pixels + (size_t)y * stride, rgba + (size_t)y * width * 4u, (size_t)width * 4u);
     }
     return true;
 }
 
 void Image_fill(Image *image, Color color) {
     if (!image) return;
-    if (!image->pixels && !Image_ensureShadow(image, image->width, image->height)) return;
+    if (!(*image).pixels && !Image_ensureShadow(image, (*image).width, (*image).height)) return;
     uint8_t r = (uint8_t)Color_red(color);
     uint8_t g = (uint8_t)Color_green(color);
     uint8_t b = (uint8_t)Color_blue(color);
     uint8_t a = (uint8_t)Color_alpha(color);
-    size_t stride = (size_t)image->capW * 4u;
-    for (uint32_t y = 0; y < image->height; y++) {
-        uint8_t *row = image->pixels + (size_t)y * stride;
-        for (uint32_t x = 0; x < image->width; x++) {
+    size_t stride = (size_t)((*image).capW) * 4u;
+    for (uint32_t y = 0; y < (*image).height; y++) {
+        uint8_t *row = (*image).pixels + (size_t)y * stride;
+        for (uint32_t x = 0; x < (*image).width; x++) {
             row[x * 4 + 0] = r;
             row[x * 4 + 1] = g;
             row[x * 4 + 2] = b;
@@ -108,17 +108,17 @@ void Image_fill(Image *image, Color color) {
     }
 }
 
-uint32_t Image_width(const Image *image) { return image ? image->width : 0u; }
-uint32_t Image_height(const Image *image) { return image ? image->height : 0u; }
-uint32_t Image_format(const Image *image) { return image ? image->format : IMAGE_FORMAT_RGBA8; }
-uint32_t Image_usage(const Image *image) { return image ? image->usage : IMAGE_USAGE_NONE; }
-size_t Image_stride(const Image *image) { return image ? (size_t)image->capW * 4u : 0u; }
-uint8_t *Image_pixels(const Image *image) { return image ? image->pixels : NULL; }
-bool Image_isValid(const Image *image) { return image && image->width > 0 && image->height > 0; }
+uint32_t Image_width(const Image *image) { return image ? (*image).width : 0u; }
+uint32_t Image_height(const Image *image) { return image ? (*image).height : 0u; }
+uint32_t Image_format(const Image *image) { return image ? (*image).format : IMAGE_FORMAT_RGBA8; }
+uint32_t Image_usage(const Image *image) { return image ? (*image).usage : IMAGE_USAGE_NONE; }
+size_t Image_stride(const Image *image) { return image ? (size_t)((*image).capW) * 4u : 0u; }
+uint8_t *Image_pixels(const Image *image) { return image ? (*image).pixels : NULL; }
+bool Image_isValid(const Image *image) { return image && (*image).width > 0 && (*image).height > 0; }
 
-void *Image_native(const Image *image) { return image ? image->native : NULL; }
-void *Image_iosurface(const Image *image) { return image ? image->ioSurface : NULL; }
-void Image_setNative(Image *image, void *native) { if (image) image->native = native; }
-void Image_setIOSurface(Image *image, void *ioSurface) { if (image) image->ioSurface = ioSurface; }
-uint32_t Image_layer(const Image *image) { return image ? image->layer : 0u; }
-void Image_setLayer(Image *image, uint32_t layer) { if (image) image->layer = layer; }
+void *Image_native(const Image *image) { return image ? (*image).native : NULL; }
+void *Image_iosurface(const Image *image) { return image ? (*image).ioSurface : NULL; }
+void Image_setNative(Image *image, void *native) { if (image) (*image).native = native; }
+void Image_setIOSurface(Image *image, void *ioSurface) { if (image) (*image).ioSurface = ioSurface; }
+uint32_t Image_layer(const Image *image) { return image ? (*image).layer : 0u; }
+void Image_setLayer(Image *image, uint32_t layer) { if (image) (*image).layer = layer; }

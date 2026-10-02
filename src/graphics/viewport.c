@@ -11,13 +11,13 @@ Viewport Viewport_0(void) {
 void Viewport_resize(Viewport *v, float framebufferWidthPx, float framebufferHeightPx,
                      float backingScale) {
     if (!v) return;
-    v->width = framebufferWidthPx;
-    v->height = framebufferHeightPx;
-    v->scale = backingScale > 0.0f ? backingScale : 1.0f;
-    v->scissor = (Rect){0, 0, framebufferWidthPx, framebufferHeightPx};
+    (*v).width = framebufferWidthPx;
+    (*v).height = framebufferHeightPx;
+    (*v).scale = backingScale > 0.0f ? backingScale : 1.0f;
+    (*v).scissor = (Rect){0, 0, framebufferWidthPx, framebufferHeightPx};
 }
 
-static float s(const Viewport *v) { return (v && v->scale > 0.0f) ? v->scale : 1.0f; }
+static float s(const Viewport *v) { return (v && (*v).scale > 0.0f) ? (*v).scale : 1.0f; }
 
 float Viewport_x(const Viewport *v, float pointX) { return pointX * s(v); }
 float Viewport_y(const Viewport *v, float pointY) { return pointY * s(v); }
@@ -36,8 +36,8 @@ void Viewport_toPoints(const Viewport *v, float px, float py, float *outX, float
 
 void Viewport_logicalSize(const Viewport *v, float *outW, float *outH) {
     float sc = s(v);
-    if (outW) *outW = (v ? v->width : 0.0f) / sc;
-    if (outH) *outH = (v ? v->height : 0.0f) / sc;
+    if (outW) *outW = (v ? (*v).width : 0.0f) / sc;
+    if (outH) *outH = (v ? (*v).height : 0.0f) / sc;
 }
 
-bool Viewport_isEmpty(const Viewport *v) { return !v || v->width <= 0.0f || v->height <= 0.0f; }
+bool Viewport_isEmpty(const Viewport *v) { return !v || (*v).width <= 0.0f || (*v).height <= 0.0f; }

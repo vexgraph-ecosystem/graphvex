@@ -5,7 +5,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
-#include "graphics/graphics.h"   // Color
+#include "graphics/graphics.h"
 #include "image.h"
 
 // graphvex R3 — board.h

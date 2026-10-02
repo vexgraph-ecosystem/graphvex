@@ -28,6 +28,7 @@ typedef struct VkQuad {
     Color border;
     float radius;    // corner radius, px
     float stroke;    // border width, px (0 = none)
+    float blur;      // soft-edge falloff, px (0 = hard)
     float mode;      // 0 = solid, 1 = image, 2 = glyph mask
     uint32_t texture; // atlas/layer id (0 = white)
     // clip window in the quad's LOCAL space (0..w, 0..h). The shape keeps its
@@ -43,8 +44,8 @@ typedef struct VkBatch {
 } VkBatch;
 
 // One interleaved vertex: pos(2) uv(2) fill(4) border(4) params(4) quadSize(2)
-//                        + clipLocal(4)
-#define VK_VERTEX_FLOATS 22u
+//                        + clipLocal(4) + blur(1)
+#define VK_VERTEX_FLOATS 23u
 
 typedef struct VkVertex {
     float x, y;
@@ -54,6 +55,7 @@ typedef struct VkVertex {
     float radius, stroke, mode, layer;
     float qw, qh;             // quad size in px (for the rounded-rect SDF)
     float c0, c1, c2, c3;     // local-space clip bounds (x0,y0,x1,y1)
+    float blur;               // soft-edge falloff, px
 } VkVertex;
 
 VkBatch *VkBatch_0(void);

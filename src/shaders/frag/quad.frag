@@ -14,6 +14,7 @@ layout(location = 3) in vec4 vParams;   // x=radius, y=stroke, z=mode, w=layer
 layout(location = 4) in vec2 vLocal;
 layout(location = 5) in vec2 vSize;
 layout(location = 6) in vec4 vClip;     // local clip bounds (x0,y0,x1,y1)
+layout(location = 7) in float vBlur;    // soft-edge falloff, px
 
 layout(location = 0) out vec4 outColor;
 
@@ -33,13 +34,23 @@ void main() {
         discard;
 
     vec2 p = vLocal - vSize * 0.5;          // centred
-    vec2 hs = vSize * 0.5;
+    // The quad already carries the blur margin, so the SHAPE is inset by it.
+    float blur = max(vBlur, 0.0);
+    vec2 hs = max(vSize * 0.5 - vec2(blur), vec2(0.0));
     float radius = min(vParams.x, min(hs.x, hs.y));
     float d = sdRoundBox(p, hs, radius);
 
-    // one-pixel AA in screen space — smooth curve, sharp straight edge
+    // coverage: a soft falloff CENTRED on the shape edge (1 inside, 0.5 at the
+    // edge, 0 at +blur). A WIDER blur spreads the same panel over more pixels,
+    // so its colour gets weaker — the higher the blur, the fainter.
     float aa = max(fwidth(d), 0.0001);
-    float coverage = 1.0 - smoothstep(-aa, aa, d);
+    float coverage;
+    if (blur > 0.0) {
+        coverage = 1.0 - smoothstep(-blur, blur, d);
+        coverage *= 24.0 / (24.0 + blur);   // energy spread thin
+    } else {
+        coverage = 1.0 - smoothstep(-aa, aa, d);
+    }
     if (coverage <= 0.0) discard;
 
     float stroke = vParams.y;

@@ -20,7 +20,7 @@
 typedef struct Viewport {
     float width;    // framebuffer width  in native px
     float height;   // framebuffer height in native px
-    float scale;    // backingScale: points -> px (2.0 retina, else 1.0)
+    float scale;    // backingScale: points → px (2.0 retina, else 1.0)
     Rect  scissor;  // visible rect in native px (usually the full framebuffer)
 } Viewport;
 
@@ -29,14 +29,14 @@ Viewport Viewport_0(void);   // 0x0, scale 1
 void Viewport_resize(Viewport *v, float framebufferWidthPx, float framebufferHeightPx,
                      float backingScale);
 
-// logical points (top-left, Y-down) -> native px
+// logical points (top-left, Y-down) → native px
 float Viewport_x(const Viewport *v, float pointX);
 float Viewport_y(const Viewport *v, float pointY);
 float Viewport_w(const Viewport *v, float pointW);
 float Viewport_h(const Viewport *v, float pointH);
 Rect  Viewport_rect(const Viewport *v, float xPoints, float yPoints, float wPoints, float hPoints);
 
-// native px -> logical points
+// native px → logical points
 void Viewport_toPoints(const Viewport *v, float px, float py, float *outX, float *outY);
 
 // the framebuffer's logical size, in points

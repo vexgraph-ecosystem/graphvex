@@ -26,15 +26,15 @@ RenderLoop *RenderLoop_0(void) { return RenderLoop_fps(0); }
 RenderLoop *RenderLoop_fps(uint32_t targetFps) {
     RenderLoop *l = calloc(1, sizeof *l);
     if (l) {
-        l->targetFps = targetFps;
-        l->lastSeconds = now_seconds();
+        (*l).targetFps = targetFps;
+        (*l).lastSeconds = now_seconds();
     }
     return l;
 }
 
 void RenderLoop_free(RenderLoop *loop) {
     if (!loop) return;
-    free(loop->clients);
+    free((*loop).clients);
     free(loop);
 }
 
@@ -46,28 +46,28 @@ RenderLoop *RenderLoop_default(void) {
 
 bool RenderLoop_addClient(RenderLoop *loop, const Client *client) {
     if (!loop || !client) return false;
-    for (int i = 0; i < loop->count; i++) {
-        if (loop->clients[i].window == client->window) {
-            loop->clients[i] = *client;
+    for (int i = 0; i < (*loop).count; i++) {
+        if ((*loop).clients[i].window == (*client).window) {
+            (*loop).clients[i] = *client;
             return true;
         }
     }
-    if (loop->count == loop->cap) {
-        loop->cap = loop->cap ? loop->cap * 2 : 8;
-        Client *grown = realloc(loop->clients, (size_t)loop->cap * sizeof *grown);
-        if (!grown) { loop->cap = 0; loop->count = 0; return false; }
-        loop->clients = grown;
+    if ((*loop).count == (*loop).cap) {
+        (*loop).cap = (*loop).cap ? (*loop).cap * 2 : 8;
+        Client *grown = realloc((*loop).clients, (size_t)((*loop).cap) * sizeof *grown);
+        if (!grown) { (*loop).cap = 0; (*loop).count = 0; return false; }
+        (*loop).clients = grown;
     }
-    loop->clients[loop->count++] = *client;
+    (*loop).clients[(*loop).count++] = *client;
     return true;
 }
 
 bool RenderLoop_removeClient(RenderLoop *loop, void *window) {
     if (!loop) return false;
-    for (int i = 0; i < loop->count; i++) {
-        if (loop->clients[i].window == window) {
-            loop->clients[i] = loop->clients[loop->count - 1];
-            loop->count--;
+    for (int i = 0; i < (*loop).count; i++) {
+        if ((*loop).clients[i].window == window) {
+            (*loop).clients[i] = (*loop).clients[(*loop).count - 1];
+            (*loop).count--;
             return true;
         }
     }
@@ -76,45 +76,45 @@ bool RenderLoop_removeClient(RenderLoop *loop, void *window) {
 
 Client *RenderLoop_findClient(RenderLoop *loop, const void *window) {
     if (!loop) return NULL;
-    for (int i = 0; i < loop->count; i++)
-        if (loop->clients[i].window == window) return &loop->clients[i];
+    for (int i = 0; i < (*loop).count; i++)
+        if ((*loop).clients[i].window == window) return &(*loop).clients[i];
     return NULL;
 }
 
 void RenderLoop_markDirty(RenderLoop *loop, void *window) {
     Client *c = RenderLoop_findClient(loop, window);
-    if (c) c->dirty = true;
+    if (c) (*c).dirty = true;
 }
 
 void RenderLoop_setContentGen(RenderLoop *loop, void *window, uint64_t gen) {
     Client *c = RenderLoop_findClient(loop, window);
-    if (c) c->contentGen = gen;
+    if (c) (*c).contentGen = gen;
 }
 
 void RenderLoop_notify(RenderLoop *loop) {
-    if (loop) loop->wake = true;
+    if (loop) (*loop).wake = true;
 }
 
 bool RenderLoop_step(RenderLoop *loop) {
     if (!loop) return false;
     double t = now_seconds();
-    double dt = t - loop->lastSeconds;
-    loop->lastSeconds = t;
+    double dt = t - (*loop).lastSeconds;
+    (*loop).lastSeconds = t;
 
     bool presented = false;
-    for (int i = 0; i < loop->count; i++) {
-        Client *c = &loop->clients[i];
-        if (c->frameFn) c->frameFn(c->userdata, dt);
-        bool demand = (bool)c->dirty || (c->contentGen != c->lastContentGen);
+    for (int i = 0; i < (*loop).count; i++) {
+        Client *c = &(*loop).clients[i];
+        if ((*c).frameFn) (*c).frameFn((*c).userdata, dt);
+        bool demand = (bool)((*c).dirty) || ((*c).contentGen != (*c).lastContentGen);
         if (!demand) continue;
-        bool ok = c->presentFn ? c->presentFn(c->window, dt, c->userdata) : false;
+        bool ok = (*c).presentFn ? (*c).presentFn((*c).window, dt, (*c).userdata) : false;
         if (ok) {
-            c->hasPresented = true;
-            c->lastContentGen = c->contentGen;
-            c->dirty = false;
+            (*c).hasPresented = true;
+            (*c).lastContentGen = (*c).contentGen;
+            (*c).dirty = false;
             presented = true;
         }
     }
-    loop->wake = false;
+    (*loop).wake = false;
     return presented;
 }

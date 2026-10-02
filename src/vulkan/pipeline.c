@@ -36,21 +36,21 @@ static void *slurp(const char *path, uint32_t *outSize) {
 }
 
 Pipeline *Pipeline_new(const PipelineDesc *desc) {
-    if (!desc || !desc->vertSpirv || !desc->fragSpirv) return NULL;
+    if (!desc || !(*desc).vertSpirv || !(*desc).fragSpirv) return NULL;
     Pipeline *p = calloc(1, sizeof *p);
     if (!p) return NULL;
-    p->vert = malloc(desc->vertSize);
-    p->frag = malloc(desc->fragSize);
-    if (!p->vert || !p->frag) {
+    (*p).vert = malloc((*desc).vertSize);
+    (*p).frag = malloc((*desc).fragSize);
+    if (!(*p).vert || !(*p).frag) {
         Pipeline_destroy(p);
         return NULL;
     }
-    memcpy(p->vert, desc->vertSpirv, desc->vertSize);
-    memcpy(p->frag, desc->fragSpirv, desc->fragSize);
-    p->vertSize = desc->vertSize;
-    p->fragSize = desc->fragSize;
-    p->vertexStride = desc->vertexStride;
-    p->pushConstantSize = desc->pushConstantSize;
+    memcpy((*p).vert, (*desc).vertSpirv, (*desc).vertSize);
+    memcpy((*p).frag, (*desc).fragSpirv, (*desc).fragSize);
+    (*p).vertSize = (*desc).vertSize;
+    (*p).fragSize = (*desc).fragSize;
+    (*p).vertexStride = (*desc).vertexStride;
+    (*p).pushConstantSize = (*desc).pushConstantSize;
     return p;
 }
 
@@ -73,17 +73,17 @@ Pipeline *Pipeline_fromFiles(const char *vertSpvPath, const char *fragSpvPath,
 
 void Pipeline_destroy(Pipeline *pipeline) {
     if (!pipeline) return;
-    free(pipeline->vert);
-    free(pipeline->frag);
+    free((*pipeline).vert);
+    free((*pipeline).frag);
     free(pipeline);
 }
 
 bool Pipeline_isValid(const Pipeline *pipeline) {
-    return pipeline && pipeline->vert && pipeline->frag && pipeline->vertexStride > 0;
+    return pipeline && (*pipeline).vert && (*pipeline).frag && (*pipeline).vertexStride > 0;
 }
 
 uint32_t Pipeline_vertexStride(const Pipeline *pipeline) {
-    return pipeline ? pipeline->vertexStride : 0u;
+    return pipeline ? (*pipeline).vertexStride : 0u;
 }
 
-void *Pipeline_native(const Pipeline *pipeline) { return pipeline ? pipeline->native : NULL; }
+void *Pipeline_native(const Pipeline *pipeline) { return pipeline ? (*pipeline).native : NULL; }

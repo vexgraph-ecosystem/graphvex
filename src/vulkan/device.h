@@ -6,7 +6,7 @@
 
 // graphvex R3 — vulkan/device.h
 //
-// The Vulkan session: instance -> physical device -> logical device -> queue.
+// The Vulkan session: instance → physical device → logical device → queue.
 // On Apple this runs over MoltenVK; on Windows/Linux it is the native loader.
 //
 // *** NO SWAPCHAIN, EVER. *** We never touch VK_KHR_swapchain. The on-screen

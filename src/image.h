@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "graphics/graphics.h"   // Color
+#include "graphics/graphics.h"
 
 // graphvex R3 — image.h
 //

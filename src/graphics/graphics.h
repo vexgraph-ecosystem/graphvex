@@ -69,6 +69,7 @@ typedef struct Brush {
     float radius;       // corner radius in native px; 0 = square
     Color border;     // border color (alpha 0 = none)
     float borderWidth;  // native px; 0 = none
+    float blur;         // soft-edge falloff in px; 0 = hard (AA only)
 } Brush;
 
 // ── the drawable Image (pixel buffer; defined in image.h) ───────────────────
@@ -85,6 +86,7 @@ typedef struct DrawCmd {
     float radius;
     float border;
     Color borderColor;
+    float blur;       // soft-edge falloff (px); 0 = hard
     const Image *image;   // borrowed drawable image (null for rects/text)
     const char *text;   // borrowed; NUL-terminated (never freed by the list)
 } DrawCmd;

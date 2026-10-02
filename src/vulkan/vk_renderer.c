@@ -17,7 +17,7 @@
 // capture. No swapchain; the target is ours. Presentation via the borrowed
 // CAMetalLayer is the next slice — the pixels are already GPU-produced here.
 
-#define VK_ERR(call) do { VkResult _r = (call); if (_r != VK_SUCCESS) { snprintf(s_err, sizeof s_err, #call " -> VkResult %d", (int)_r); return false; } } while (0)
+#define VK_ERR(call) do { VkResult _r = (call); if (_r != VK_SUCCESS) { snprintf(s_err, sizeof s_err, #call " failed: VkResult %d", (int)_r); return false; } } while (0)
 
 static Device *s_dev = NULL;
 static VkInstance s_inst = VK_NULL_HANDLE;
@@ -265,7 +265,7 @@ static bool create_pipeline(void) {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main", NULL},
     };
     VkVertexInputBindingDescription bind = {0, sizeof(VkVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attrs[7] = {
+    VkVertexInputAttributeDescription attrs[8] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, x)},
         {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, u)},
         {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, r)},
@@ -273,11 +273,12 @@ static bool create_pipeline(void) {
         {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, radius)},
         {5, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(VkVertex, qw)},
         {6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(VkVertex, c0)},
+        {7, 0, VK_FORMAT_R32_SFLOAT, offsetof(VkVertex, blur)},
     };
     VkPipelineVertexInputStateCreateInfo vi = {0}; vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vi.vertexBindingDescriptionCount = 1;
     vi.pVertexBindingDescriptions = &bind;
-    vi.vertexAttributeDescriptionCount = 7;
+    vi.vertexAttributeDescriptionCount = 8;
     vi.pVertexAttributeDescriptions = attrs;
     VkPipelineInputAssemblyStateCreateInfo ia = {0}; ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -333,7 +334,7 @@ static bool create_pipeline(void) {
     VkResult r = vkCreateGraphicsPipelines(s_device, VK_NULL_HANDLE, 1, &gp, NULL, &s_pipe);
     vkDestroyShaderModule(s_device, vs, NULL);
     vkDestroyShaderModule(s_device, fs, NULL);
-    if (r != VK_SUCCESS) { snprintf(s_err, sizeof s_err, "vkCreateGraphicsPipelines -> %d", (int)r); return false; }
+    if (r != VK_SUCCESS) { snprintf(s_err, sizeof s_err, "vkCreateGraphicsPipelines failed: %d", (int)r); return false; }
     return true;
 }
 
@@ -479,7 +480,7 @@ static bool vk_drawImage(const Image *image, const Rect *dst) {
 }
 static bool vk_drawText(const Rect *rect, const char *text, const Brush *brush) {
     if (!s_batch || !rect) return false;
-    VkBatch_glyph(s_batch, *rect, 0u, brush ? brush->color : COLOR_WHITE);
+    VkBatch_glyph(s_batch, *rect, 0u, brush ? (*brush).color : COLOR_WHITE);
     (void)text;
     return true;
 }

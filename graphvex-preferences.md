@@ -6,7 +6,7 @@
 
 ## 0. Constitution Link (supreme)
 - [preferences.md](https://github.com/vexgraph-dev/vexspoke/blob/main/preferences.md) (canonical, vexspoke) — accessible locally at ../../preferences.md
-- All universal laws in `preferences.md` are mandatory and binding across the ecosystem.
+- All universal laws in `../../../preferences.md` are mandatory and binding across the ecosystem.
 - This document codifies **exclusive** preferences that apply uniquely to `graphvex` (R3 GPU Driver).
 
 ## 1. Exclusive Preferences Binding Matrix
@@ -70,7 +70,7 @@ Fragmented color channel encodings (`0xAARRGGBB` vs `0xRRGGBBAA` vs `0xBBGGRRAA`
 
 ### SPIR-V Shader Deployment Law
 
-SPIR-V shaders (`.spv`) are centralized under `../graphvex/shader/` — the single source of truth, laid out by stage:
+SPIR-V shaders (`.spv`) are centralized under `/shader/` — the single source of truth, laid out by stage:
 - `shader/frag/`, `shader/vert/`, `shader/comp/` — GLSL sources (base: `hello_triangle`, `solid_quad`; UI: `texture_quad`, `text_sdf`; compute: `sdf_jfa`, `sdf_combine`).
 - `shader/spv/` — compiled blobs (`<name>_<stage>.spv`, bare `<name>.spv` for compute), rebuilt via `shader/build_shaders.sh` (requires `glslangValidator`).
 - (Legacy note: sources lived in `hotcwap/vulkan/shaders/` + `darling/vulkan/shaders/`, blobs in per-subsystem `spv/` mirrors — all stale, pending deletion.)
@@ -78,12 +78,12 @@ SPIR-V shaders (`.spv`) are centralized under `../graphvex/shader/` — the sing
 
 **Runtime Shader Resolution Protocol**:
 The runtime loader (`loadSpvAny`) must search in this exact precedence order:
-1. `ANTI_SPV_DIR` / `VEX_SPV_DIR` (build-time staging directory `${CMAKE_BINARY_DIR}/spv/`, populated from `../graphvex/shader/spv/`)
+1. `ANTI_SPV_DIR` / `VEX_SPV_DIR` (build-time staging directory `${CMAKE_BINARY_DIR}/spv/`, populated from `/shader/spv/`)
 2. `<exe_dir>/spv/<name>` (adjacent deployment)
 3. `<exe_dir>/../Resources/spv/<name>` (macOS `.app` bundle)
 4. CWD-relative paths (`spv/<name>`, `src/_old/vulkan/spv/<name>`)
 
-The top-level `vexgraph` CMake build staging copies all `.spv` blobs from `../graphvex/shader/spv/` into `${CMAKE_BINARY_DIR}/spv/` so all subsystems discover their shaders seamlessly.
+The top-level `vexgraph` CMake build staging copies all `.spv` blobs from `/shader/spv/` into `${CMAKE_BINARY_DIR}/spv/` so all subsystems discover their shaders seamlessly.
 
 ---
 
@@ -196,4 +196,4 @@ preserved — R4 may `#include` graphvex; graphvex never includes R4.
 
 ### UI Graphics Source Placement Law
 
-Graphical panel and label implementations live under `src/ui/<kind>/`; their public vocabulary remains under `src/lang/`. The `ui/` directory owns graphics presentation primitives only. Editing, focus, widget composition, and application behavior remain in Darling (R4); Graphvex still includes only vexspoke.
+Graphical panel and label implementations live under `src/ui/<kind>/`; their public vocabulary remains under `src/lang`. The `ui/` directory owns graphics presentation primitives only. Editing, focus, widget composition, and application behavior remain in Darling (R4); Graphvex still includes only vexspoke.
