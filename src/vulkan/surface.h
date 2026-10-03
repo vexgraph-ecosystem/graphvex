@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "image.h"
+#include "board.h"
 
 // graphvex R3 — vulkan/surface.h
 //
@@ -45,5 +46,14 @@ void Surface_onPresent(Surface *surface, SurfacePresentFn fn, void *userdata);
 // nowhere to present) or when the blit reports failure. Never a swapchain
 // present — the host owns the drawable.
 bool Surface_present(Surface *surface);
+
+// ── revalidation (the render cascade) ───────────────────────────────────────
+// A surface may own several boards (scene + content). Surface_revalidate is the
+// one call a Frame makes: revalidate every attached board (which renders its
+// scene/content into the board), then hand the completed present image to the
+// host. Boards are BORROWED — the surface never frees one.
+void Surface_addBoard(Surface *surface, Board *board);
+void Surface_removeBoard(Surface *surface, Board *board);
+void Surface_revalidate(Surface *surface);   // Boards_revalidate, then present
 
 #endif // GRAPHICS_SURFACE_H

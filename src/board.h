@@ -44,4 +44,16 @@ bool     Board_isValid(const Board *board);
 Image   *Board_image(const Board *board);      // the retained target (borrowed)
 void    *Board_native(const Board *board);     // opaque dialect handle (VkImage)
 
+// ── revalidation (the render cascade, R4 registers, R3 invokes) ─────────────
+// A board owns a generation but no scene: the layer that DOES own the scene
+// (an R4 scene/content panel) registers a revalidate step here, so the chain
+// Frame -> Surface -> Board -> panel stays top-down without R3 learning R4
+// types. A step renders what the board holds; Board_revalidate runs every step
+// in registration order, then publishes so the demand loop wakes.
+typedef void (*BoardRevalidateFn)(Board *board, void *userdata);
+
+void Board_addRevalidator(Board *board, BoardRevalidateFn fn, void *userdata); // borrowed; replace not deduped
+void Board_clearRevalidators(Board *board);
+void Board_revalidate(Board *board);   // run every step, then Board_publish
+
 #endif // GRAPHICS_BOARD_H

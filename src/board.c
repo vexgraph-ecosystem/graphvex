@@ -2,13 +2,65 @@
 
 #include <stdlib.h>
 
-// graphvex R3 — board.c
-// Retained offscreen target. Owns its Image; publishes a generation.
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Board (board.c)
+ * ============================================================================
+ * A RETAINED offscreen render target — NOT a swapchain and never a window
+ * surface. You render into its Image, then composite it into the current
+ * target. The board owns its pixels across frames; a resize recreates them only
+ * when the extent actually changes.
+ *
+ * Board_publish() bumps an atomic generation, and that newer generation is what
+ * wakes the present-on-demand loop, so a board that did not change costs zero
+ * frames. To keep R3 free of R4 types, the board owns no scene: the layer that
+ * DOES own the scene registers a revalidate step (BoardRevalidateFn), and
+ * Board_revalidate runs them in order and then publishes. This is the middle of
+ * the Frame -> Surface -> Board -> panel render cascade.
+ * ============================================================================
+ */
+
+;;OVERVIEW
+/**
+ * ============================================================================
+ * CLASS: Board (board.c)
+ * ============================================================================
+ * Retained offscreen Image + atomic generation + borrowed revalidate steps.
+ *
+ * STRUCT FIELDS:
+ * ----------------------------------------------------------------------------
+ *   Image    *image;         // owned target (RGBA8)
+ *   _Atomic uint64_t generation; // publishes so far (0 = never)
+ *   void     *native;        // opaque dialect handle (the backend's VkImage)
+ *   BoardRevalidateFn *revalidators; // borrowed steps (R4 scene/content)
+ *   void    **revalidateUd;  // userdata per step
+ *   int       revalidateCount, revalidateCap;
+ *
+ * FUNCTION REGISTRY (exported by board.h):
+ * ----------------------------------------------------------------------------
+ * Constructors:
+ *   - Board_0, Board_2, Board_new, Board_destroy
+ * Core:
+ *   - Board_resize, Board_publish, Board_fill
+ * Queries / Getters:
+ *   - Board_width, Board_height, Board_generation, Board_isValid,
+ *     Board_image, Board_native
+ * Revalidation:
+ *   - Board_addRevalidator, Board_clearRevalidators, Board_revalidate
+ * ============================================================================
+ */
 
 struct Board {
     Image *image;
     _Atomic uint64_t generation;
     void *native;    // opaque dialect handle (the backend's VkImage)
+    BoardRevalidateFn *revalidators;   // borrowed steps (R4 scene/content panels)
+    void **revalidateUd;               // userdata per step
+    int revalidateCount, revalidateCap;
 };
 
 Board *Board_new(const BoardDesc *desc) {
@@ -35,6 +87,8 @@ Board *Board_2(uint32_t width, uint32_t height) {
 void Board_destroy(Board *board) {
     if (!board) return;
     Image_destroy((*board).image);
+    free((*board).revalidators);
+    free((*board).revalidateUd);
     free(board);
 }
 
@@ -61,3 +115,32 @@ uint64_t Board_generation(const Board *board) {
 bool Board_isValid(const Board *board) { return board && Image_isValid((*board).image); }
 Image *Board_image(const Board *board) { return board ? (*board).image : NULL; }
 void *Board_native(const Board *board) { return board ? (*board).native : NULL; }
+
+// ── revalidation ────────────────────────────────────────────────────────────
+void Board_addRevalidator(Board *board, BoardRevalidateFn fn, void *userdata) {
+    if (!board || !fn) return;
+    if ((*board).revalidateCount == (*board).revalidateCap) {
+        int cap = (*board).revalidateCap ? (*board).revalidateCap * 2 : 4;
+        BoardRevalidateFn *steps = realloc((*board).revalidators, (size_t)cap * sizeof *steps);
+        void **uds = realloc((*board).revalidateUd, (size_t)cap * sizeof *uds);
+        if (!steps || !uds) return;   // best-effort; keep whatever we had
+        (*board).revalidators = steps;
+        (*board).revalidateUd = uds;
+        (*board).revalidateCap = cap;
+    }
+    (*board).revalidators[(*board).revalidateCount] = fn;
+    (*board).revalidateUd[(*board).revalidateCount] = userdata;
+    (*board).revalidateCount++;
+}
+
+void Board_clearRevalidators(Board *board) {
+    if (!board) return;
+    (*board).revalidateCount = 0;
+}
+
+void Board_revalidate(Board *board) {
+    if (!board) return;
+    for (int i = 0; i < (*board).revalidateCount; i++)
+        (*board).revalidators[i](board, (*board).revalidateUd[i]);
+    Board_publish(board);   // the board changed; wake the demand loop
+}

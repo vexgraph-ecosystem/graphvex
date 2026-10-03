@@ -1,10 +1,61 @@
 #include "vulkan/surface.h"
 
 #include <stdlib.h>
+#include <string.h>
 
-// graphvex R3 — vulkan/surface.c
-// The presentation seam. Owns a retained present Image; presents by handing it
-// to the host. There is deliberately NO swapchain here.
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+
+;;DEFINITION
+/**
+ * ============================================================================
+ * DEFINITION: Surface (vulkan/surface.c)
+ * ============================================================================
+ * The presentation seam. *** NO SWAPCHAIN. *** A Surface is a host-borrowed
+ * native destination (a CAMetalLayer on Apple, HWND on Windows, an xcb window
+ * on Linux) plus ONE retained present Image we render into. Surface_present()
+ * hands the completed image to the host seam; we never create, acquire, or
+ * present a VkSwapchainKHR (the Single-Seam Canvas Law).
+ *
+ * A surface may carry several boards (scene + content). Surface_revalidate is
+ * the one call a Frame makes: revalidate each attached board — which renders
+ * its scene/content into the board — then present the finished image. Boards
+ * are BORROWED; the surface never frees one.
+ * ============================================================================
+ */
+
+;;OVERVIEW
+/**
+ * ============================================================================
+ * CLASS: Surface (vulkan/surface.c)
+ * ============================================================================
+ * Host-borrowed native destination + one retained present Image + borrowed
+ * boards.
+ *
+ * STRUCT FIELDS:
+ * ----------------------------------------------------------------------------
+ *   void    *native;      // borrowed CAMetalLayer / HWND / xcb window
+ *   uint32_t width, height; // native px
+ *   Image   *present;     // the retained target we render into (owned)
+ *   bool     presented;   // diagnostic: did the last present succeed
+ *   SurfacePresentFn presentFn; // borrowed host blit (NULL = offscreen)
+ *   void    *presentUser; // passed to presentFn
+ *   Board  **boards;      // borrowed layers (owned by the caller)
+ *   int      boardCount, boardCap;
+ *
+ * FUNCTION REGISTRY (exported by vulkan/surface.h):
+ * ----------------------------------------------------------------------------
+ * Constructors:
+ *   - Surface_0, Surface_2, Surface_destroy
+ * Core:
+ *   - Surface_resize, Surface_onPresent, Surface_present
+ * Queries / Getters:
+ *   - Surface_width, Surface_height, Surface_isValid, Surface_handle,
+ *     Surface_presentImage
+ * Revalidation:
+ *   - Surface_addBoard, Surface_removeBoard, Surface_revalidate
+ * ============================================================================
+ */
 
 struct Surface {
     void *native;      // borrowed CAMetalLayer / HWND / xcb window
@@ -14,6 +65,8 @@ struct Surface {
     bool presented;    // diagnostic
     SurfacePresentFn presentFn;   // borrowed host blit (nullable = offscreen)
     void *presentUser;            // passed to presentFn
+    Board **boards;    // borrowed layers composited into the present image
+    int boardCount, boardCap;
 };
 
 Surface *Surface_0(void) { return Surface_2(NULL, 0, 0); }
@@ -37,6 +90,7 @@ Surface *Surface_2(void *native, uint32_t width, uint32_t height) {
 void Surface_destroy(Surface *surface) {
     if (!surface) return;
     Image_destroy((*surface).present);
+    free((*surface).boards);
     free(surface);
 }
 
@@ -67,4 +121,37 @@ bool Surface_present(Surface *surface) {
         ? (*surface).presentFn(surface, (*surface).presentUser)
         : false;
     return (*surface).presented;
+}
+
+// ── revalidation ────────────────────────────────────────────────────────────
+void Surface_addBoard(Surface *surface, Board *board) {
+    if (!surface || !board) return;
+    if ((*surface).boardCount == (*surface).boardCap) {
+        int cap = (*surface).boardCap ? (*surface).boardCap * 2 : 2;
+        Board **grown = realloc((*surface).boards, (size_t)cap * sizeof *grown);
+        if (!grown) return;
+        (*surface).boards = grown;
+        (*surface).boardCap = cap;
+    }
+    (*surface).boards[(*surface).boardCount++] = board;
+}
+
+void Surface_removeBoard(Surface *surface, Board *board) {
+    if (!surface || !board) return;
+    for (int i = 0; i < (*surface).boardCount; i++) {
+        if ((*surface).boards[i] != board) continue;
+        memmove(&(*surface).boards[i], &(*surface).boards[i + 1],
+                (size_t)((*surface).boardCount - i - 1) * sizeof *(*surface).boards);
+        (*surface).boardCount--;
+        return;
+    }
+}
+
+// The one call a Frame makes: revalidate each board (which renders its
+// scene/content), then present the finished image to the host.
+void Surface_revalidate(Surface *surface) {
+    if (!surface) return;
+    for (int i = 0; i < (*surface).boardCount; i++)
+        Board_revalidate((*surface).boards[i]);
+    Surface_present(surface);
 }
