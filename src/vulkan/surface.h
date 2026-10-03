@@ -25,6 +25,7 @@ typedef struct Surface Surface;
 // Surface_handle and Surface_presentImage, writes the destination, and returns
 // true only when a frame was actually handed over.
 typedef bool (*SurfacePresentFn)(Surface *surface, void *userdata);
+typedef uint64_t (*SurfaceClockFn)(void *userdata); // monotonic nanoseconds
 
 Surface *Surface_0(void);
 Surface *Surface_2(void *native, uint32_t width, uint32_t height);
@@ -46,6 +47,16 @@ void Surface_onPresent(Surface *surface, SurfacePresentFn fn, void *userdata);
 // nowhere to present) or when the blit reports failure. Never a swapchain
 // present — the host owns the drawable.
 bool Surface_present(Surface *surface);
+// Owner-thread policy. -1 = no imposed ceiling; positive = FPS ceiling.
+// No sleeps, no scene-thread pacing. Deferred invalidations coalesce.
+void Surface_setFPSCap(Surface *surface, int fps);
+int Surface_getFPSCap(const Surface *surface);
+uint64_t Surface_getPresentCount(const Surface *surface);
+void Surface_poll(Surface *surface);
+// Fresh offscreen/capture rendering; host publication still respects the cap.
+void Surface_revalidateNow(Surface *surface);
+// Optional deterministic clock; NULL restores CLOCK_MONOTONIC and resets deadline.
+void Surface_setClock(Surface *surface, SurfaceClockFn fn, void *userdata);
 
 // ── revalidation (the render cascade) ───────────────────────────────────────
 // A surface may own several boards (scene + content). Surface_revalidate is the

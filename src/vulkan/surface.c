@@ -2,9 +2,15 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "annotation/definition.h"
 #include "annotation/overview.h"
+#include "annotation/intention.h"
+
+;;INTENTION("Surface caps coalesce render/present demand without sleeping or "
+            "retiming independent scene workers. The host polls pending demand; "
+            "offscreen capture can refresh pixels without bypassing publication caps.")
 
 ;;DEFINITION
 /**
@@ -67,6 +73,11 @@ struct Surface {
     void *presentUser;            // passed to presentFn
     Board **boards;    // borrowed layers composited into the present image
     int boardCount, boardCap;
+    int fpsCap;
+    uint64_t lastPresent, presentCount;
+    bool pending;
+    SurfaceClockFn clockFn;
+    void *clockUser;
 };
 
 Surface *Surface_0(void) { return Surface_2(NULL, 0, 0); }
@@ -75,6 +86,7 @@ Surface *Surface_2(void *native, uint32_t width, uint32_t height) {
     Surface *s = calloc(1, sizeof *s);
     if (!s) return NULL;
     (*s).native = native;
+    (*s).fpsCap = -1;
     (*s).width = width;
     (*s).height = height;
     ImageDesc d = {width ? width : 1u, height ? height : 1u, IMAGE_FORMAT_RGBA8,
@@ -113,13 +125,43 @@ void Surface_onPresent(Surface *surface, SurfacePresentFn fn, void *userdata) {
     (*surface).presentUser = userdata;
 }
 
+static uint64_t surfaceNow(Surface *surface) {
+    if ((*surface).clockFn) return (*surface).clockFn((*surface).clockUser);
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+static bool surfaceDue(Surface *surface) {
+    return (*surface).fpsCap == -1 || !(*surface).presentCount ||
+        surfaceNow(surface) - (*surface).lastPresent >=
+        (1000000000ULL + (uint64_t)(*surface).fpsCap - 1) / (uint64_t)(*surface).fpsCap;
+}
+
+void Surface_setFPSCap(Surface *surface, int fps) {
+    if (!surface || (fps != -1 && fps <= 0) || (*surface).fpsCap == fps) return;
+    (*surface).fpsCap = fps;
+}
+int Surface_getFPSCap(const Surface *surface) { return surface ? (*surface).fpsCap : 0; }
+uint64_t Surface_getPresentCount(const Surface *surface) { return surface ? (*surface).presentCount : 0; }
+void Surface_setClock(Surface *surface, SurfaceClockFn fn, void *userdata) {
+    if (!surface) return;
+    (*surface).clockFn = fn; (*surface).clockUser = userdata;
+    (*surface).lastPresent = 0; (*surface).presentCount = 0;
+}
+
 bool Surface_present(Surface *surface) {
     if (!surface || !(*surface).present) return false;
+    if (!surfaceDue(surface)) { (*surface).pending = true; return false; }
     // The host owns the drawable; we only hand it the finished image. With no
     // blit installed (an offscreen surface) there is nowhere to present.
     (*surface).presented = (*surface).presentFn
         ? (*surface).presentFn(surface, (*surface).presentUser)
         : false;
+    if ((*surface).presented) {
+        (*surface).lastPresent = surfaceNow(surface);
+        (*surface).presentCount++;
+        (*surface).pending = false;
+    }
     return (*surface).presented;
 }
 
@@ -150,6 +192,17 @@ void Surface_removeBoard(Surface *surface, Board *board) {
 // The one call a Frame makes: revalidate each board (which renders its
 // scene/content), then present the finished image to the host.
 void Surface_revalidate(Surface *surface) {
+    if (!surface) return;
+    (*surface).pending = true;
+    Surface_poll(surface);
+}
+
+void Surface_poll(Surface *surface) {
+    if (!surface || !(*surface).pending || !surfaceDue(surface)) return;
+    Surface_revalidateNow(surface);
+}
+
+void Surface_revalidateNow(Surface *surface) {
     if (!surface) return;
     for (int i = 0; i < (*surface).boardCount; i++)
         Board_revalidate((*surface).boards[i]);
