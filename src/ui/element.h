@@ -125,6 +125,11 @@ bool  Element_isVisible(const Element *element);
 bool  Element_isPressed(const Element *element);
 const char *Element_tag(const Element *element);
 
+// Inert per-node cursor preference. -1 inherits; nonnegative values are
+// interpreted by the UI host, never by this renderer. Not shared with Property.
+Element *Element_setCursorPreference(Element *element, int cursor);
+int Element_cursorPreference(const Element *element);
+
 // Paint this element at an ABSOLUTE rect, then its children (resolved against
 // that rect). A parent with radius > 0 clips its children to the rounded shape.
 // A fully transparent element paints nothing but still walks.

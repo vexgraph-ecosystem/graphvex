@@ -5,12 +5,38 @@
 #include <string.h>
 
 #include "nio/property_pool.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
-// graphvex R3 — element.c
-// The one UI node. Its rectangle + style live in a pooled Property* (shareable);
-// identity (offset/anchor/pivot/tag/state) and the tree stay on the Element.
-// Pure geometry + display-list paint; revalidation is explicit and pruned.
-// Hit traversal respects the same rectangular/rounded ancestor masks as paint.
+;;DEFINITION
+/**
+ * The R3 UI node owns its child tree and optionally a pooled, shareable bound.
+ * Placement identity and host cursor preference stay on each node, not on that
+ * shared paint bound. Cursor preference is inert numeric data: R4 interprets
+ * it, while this renderer never calls an OS cursor API. Construction defaults
+ * it to inheritance (-1); destroying the node destroys its preference without
+ * leaving an external registration. Layout reads effective bound sizes; hit
+ * traversal respects rectangular/rounded ancestor masks just like paint.
+ */
+;;OVERVIEW
+/**
+ * CLASS: Element (ui/element.c)
+ * Fields in declaration order:
+ *   Property *property; bool ownsProperty, dirty;
+ *   float offsetX, offsetY; int anchor, pivot; const char *tag;
+ *   bool pressed, visible; int cursorPreference; // -1 inherits
+ *   struct Element *parent; struct Element **children; int count, cap;
+ * Public API (ui/element.h):
+ *   Part_point; Element_0/1, destroy; property, setProperty, ownProperty;
+ *   markDirty, revalidate, isDirty; add, addAt, remove, count, child, parent,
+ *   root, find, hit; resolve, bounds, paint;
+ *   setSize, setMinimumSize, setMaximumSize, setOffset, setAnchor, setPivot,
+ *   setTag, setRadius, setBackground, setBorder, setShadow, setShadowColor,
+ *   setBlur, setClip, setPressed, setVisible;
+ *   width, height, radius, anchor, pivot, isValid, isVisible, isPressed, tag;
+ *   Element_setCursorPreference, Element_cursorPreference.
+ * Private helpers: child_insert (reparent/insert), hit_rec (masked traversal).
+ */
 
 struct Element {
     Property *property;      // owned (from the default pool) or borrowed
@@ -22,6 +48,7 @@ struct Element {
     const char *tag;
     bool pressed;
     bool visible;
+    int cursorPreference; // per-node host preference; -1 inherits (not pooled)
 
     struct Element *parent;
     struct Element **children;
@@ -60,6 +87,7 @@ Element *Element_1(const ElementDesc *d) {
     (*e).pivot = d ? (*d).pivot : PART_TOP_LEFT;
     (*e).tag = d ? (*d).tag : NULL;
     (*e).visible = true;
+    (*e).cursorPreference = -1;
     return e;
 }
 
@@ -310,6 +338,11 @@ Element *Element_setVisible(Element *e, bool visible) {
 }
 
 // ── queries ─────────────────────────────────────────────────────────────────
+Element *Element_setCursorPreference(Element *e, int cursor) {
+    if (e) (*e).cursorPreference = cursor;
+    return e;
+}
+int Element_cursorPreference(const Element *e) { return e ? (*e).cursorPreference : -1; }
 float Element_width(const Element *e) { return (e && (*e).property) ? Property_width((*e).property) : 0.0f; }
 float Element_height(const Element *e) { return (e && (*e).property) ? Property_height((*e).property) : 0.0f; }
 float Element_radius(const Element *e) { return (e && (*e).property) ? (*e).property->radius : 0.0f; }
