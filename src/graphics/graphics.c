@@ -9,13 +9,19 @@
 // graphvex R3 — graphics/graphics.c
 // The registry, the slim forwarders, the display-list streamer, and the
 // headless CPU (raster) backend. No Vulkan here: the GPU backend lands behind
-// the same row later.
+// the same row later. DisplayList reserves reusable clip-stack scratch while
+// recording. Submission intersects every enclosing mask and restores caller
+// scope; mixed rounded intersections use coalesced pixel-center scissors on
+// both backends, retaining the original quad geometry and texture coordinates.
+// Raster fill draws an inside border as well as the background.
 
 // ── backend registry ────────────────────────────────────────────────────────
 #define MAX_BACKENDS 8
 static const Backend *s_rows[MAX_BACKENDS];
 static int s_rowCount = 0;
 static const Backend *s_current = NULL;
+static DrawCmd s_baseClip;
+static bool s_hasBaseClip = false; // explicit clip outside a display-list scope
 
 const Backend *RasterGraphics_row(void);   // defined below
 
@@ -31,13 +37,13 @@ bool Graphics_register(const Backend *row) {
 
 bool Graphics_use(uint32_t backendId) {
     for (int i = 0; i < s_rowCount; i++) {
-        if ((*s_rows[i]).id == backendId) { s_current = s_rows[i]; return true; }
+        if ((*s_rows[i]).id == backendId) { s_current = s_rows[i]; s_hasBaseClip = false; return true; }
     }
     // convenience: the raster backend self-registers on first use
     if (backendId == BACKEND_RASTER) {
         Graphics_register(RasterGraphics_row());
         for (int i = 0; i < s_rowCount; i++)
-            if ((*s_rows[i]).id == backendId) { s_current = s_rows[i]; return true; }
+            if ((*s_rows[i]).id == backendId) { s_current = s_rows[i]; s_hasBaseClip = false; return true; }
     }
     return false;
 }
@@ -50,17 +56,20 @@ bool Graphics_begin(void)   { return s_current && (*s_current).begin   ? (*s_cur
 bool Graphics_end(void)     { return s_current && (*s_current).end     ? (*s_current).end()     : false; }
 bool Graphics_present(void) { return s_current && (*s_current).present ? (*s_current).present() : false; }
 bool Graphics_resize(uint32_t w, uint32_t h) {
-    return s_current && (*s_current).resize ? (*s_current).resize(w, h) : false;
+    bool ok = s_current && (*s_current).resize ? (*s_current).resize(w, h) : false;
+    if (ok) s_hasBaseClip = false;
+    return ok;
 }
 bool Graphics_clear(Color color) {
     return s_current && (*s_current).clear ? (*s_current).clear(color) : false;
 }
-bool Graphics_clip(const Rect *rect) {
-    return s_current && (*s_current).clip ? (*s_current).clip(rect, 0.0f) : false;
-}
 bool Graphics_clipRounded(const Rect *rect, float radius) {
-    return s_current && (*s_current).clip ? (*s_current).clip(rect, radius) : false;
+    if (!s_current || !(*s_current).clip || !(*s_current).clip(rect, radius)) return false;
+    s_hasBaseClip = rect != NULL;
+    if (rect) { s_baseClip.dst = *rect; s_baseClip.radius = fmaxf(radius, 0); }
+    return true;
 }
+bool Graphics_clip(const Rect *rect) { return Graphics_clipRounded(rect, 0.0f); }
 bool Graphics_fillRect(const Rect *rect, const Brush *brush) {
     return s_current && (*s_current).fillRect ? (*s_current).fillRect(rect, brush) : false;
 }
@@ -79,6 +88,8 @@ struct DisplayList {
     DrawCmd *items;
     size_t count;
     size_t cap;
+    size_t *clipStack;       // command indices; reusable submission scratch
+    size_t clipCap, clipDepth; // reserved nesting depth and recording depth
 };
 
 DisplayList *DisplayList_0(void) {
@@ -89,11 +100,12 @@ DisplayList *DisplayList_0(void) {
 void DisplayList_free(DisplayList *dl) {
     if (!dl) return;
     free((*dl).items);
+    free((*dl).clipStack);
     free(dl);
 }
 
 void DisplayList_clear(DisplayList *dl) {
-    if (dl) (*dl).count = 0;
+    if (dl) { (*dl).count = 0; (*dl).clipDepth = 0; }
 }
 
 static DrawCmd *dl_push(DisplayList *dl) {
@@ -146,8 +158,16 @@ void DisplayList_clip(DisplayList *dl, Rect rect) {
 
 void DisplayList_clipRounded(DisplayList *dl, Rect rect, float radius) {
     if (!dl) return;
+    if ((*dl).clipDepth == (*dl).clipCap) {
+        size_t cap = (*dl).clipCap ? (*dl).clipCap * 2 : 8;
+        size_t *grown = realloc((*dl).clipStack, cap * sizeof *grown);
+        if (!grown) return;
+        (*dl).clipStack = grown;
+        (*dl).clipCap = cap;
+    }
     DrawCmd *c = dl_push(dl);
     if (!c) return;
+    (*dl).clipDepth++;
     (*c).kind = CMD_CLIP_PUSH;
     (*c).dst = rect;
     (*c).radius = radius > 0.0f ? radius : 0.0f;   // 0 = rectangular scissor
@@ -158,42 +178,107 @@ void DisplayList_unclip(DisplayList *dl) {
     DrawCmd *c = dl_push(dl);
     if (!c) return;
     (*c).kind = CMD_CLIP_POP;
+    if ((*dl).clipDepth > 0) (*dl).clipDepth--;
 }
 
 size_t DisplayList_count(const DisplayList *dl) { return dl ? (*dl).count : 0; }
 const DrawCmd *DisplayList_cmds(const DisplayList *dl) { return dl ? (*dl).items : NULL; }
 
-bool Graphics_submit(DisplayList *dl) {
-    if (!dl || !s_current) return false;
-    const DrawCmd *cmds = (*dl).items;
-    for (size_t i = 0; i < (*dl).count; i++) {
-        const DrawCmd *k = &cmds[i];
-        switch ((*k).kind) {
-            case CMD_RECT: {
-                Brush b = {(*k).color, (*k).radius, (*k).borderColor, (*k).border, (*k).blur};
-                if (!Graphics_fillRect(&(*k).dst, &b)) return false;
-                break;
-            }
-            case CMD_IMAGE: {
-                if (!Graphics_drawImage((*k).image, &(*k).dst)) return false;
-                break;
-            }
-            case CMD_TEXT: {
-                Brush b = {(*k).color, 0.0f, 0u, 0.0f, 0.0f};
-                if (!Graphics_drawText(&(*k).dst, (*k).text, &b)) return false;
-                break;
-            }
-            case CMD_CLIP_PUSH:
-                if (!Graphics_clipRounded(&(*k).dst, (*k).radius)) return false;
-                break;
-            case CMD_CLIP_POP:
-                if (!Graphics_clip(NULL)) return false;
-                break;
-            default:
-                break;
+// Submit original geometry; scissors must never resize rounded boxes or UVs.
+static bool submit_draw(const DrawCmd *cmd) {
+    Brush brush = {(*cmd).color, (*cmd).radius, (*cmd).borderColor, (*cmd).border, (*cmd).blur};
+    switch ((*cmd).kind) {
+        case CMD_RECT: return Graphics_fillRect(&(*cmd).dst, &brush);
+        case CMD_IMAGE: return Graphics_drawImage((*cmd).image, &(*cmd).dst);
+        case CMD_TEXT: return Graphics_drawText(&(*cmd).dst, (*cmd).text, &brush);
+        default: return false;
+    }
+}
+
+static bool submit_clip(const Rect *rect, float radius) {
+    return (*s_current).clip && (*s_current).clip(rect, radius);
+}
+
+static const DrawCmd *submit_mask(DisplayList *dl, size_t index) {
+    if (s_hasBaseClip) {
+        if (index == 0) return &s_baseClip;
+        --index;
+    }
+    return &(*dl).items[(*dl).clipStack[index]];
+}
+
+static bool submit_span(const DrawCmd *cmd, Rect span) {
+    return Rect_isEmpty(span) || (submit_clip(&span, 0) && submit_draw(cmd));
+}
+
+static bool submit_masks(DisplayList *dl, const DrawCmd *cmd, size_t depth) {
+    depth += s_hasBaseClip ? 1 : 0;
+    if (depth == 0)
+        return submit_clip(NULL, 0) && submit_draw(cmd);
+    if (depth == 1) {
+        const DrawCmd *mask = submit_mask(dl, 0);
+        return submit_clip(&(*mask).dst, (*mask).radius) && submit_draw(cmd);
+    }
+    Rect bounds = (*cmd).dst;
+    bool rounded = false;
+    for (size_t i = 0; i < depth; ++i) {
+        const DrawCmd *mask = submit_mask(dl, i);
+        bounds = Rect_intersect(bounds, (*mask).dst);
+        rounded |= (*mask).radius > 0.0f;
+    }
+    if (Rect_isEmpty(bounds)) return true;
+    if (!rounded) return submit_clip(&bounds, 0) && submit_draw(cmd);
+    if (!isfinite(bounds.x) || !isfinite(bounds.y) ||
+        !isfinite(bounds.w) || !isfinite(bounds.h)) return false;
+
+    // Rounded rectangles are convex: intersect the horizontal interval each
+    // ancestor admits at the pixel center. Coalesce identical adjacent rows.
+    // Cost is restricted to this quad's clipped bounds, not the whole window.
+    Rect span = {0};
+    float end = ceilf(bounds.y + bounds.h - 0.5f);
+    for (float y = ceilf(bounds.y - 0.5f); y < end; y += 1.0f) {
+        float left = bounds.x, right = bounds.x + bounds.w;
+        for (size_t i = 0; i < depth; ++i) {
+            const DrawCmd *mask = submit_mask(dl, i);
+            Rect r = (*mask).dst;
+            float radius = fminf((*mask).radius, fminf(r.w, r.h) * 0.5f);
+            if (radius <= 0.0f) continue;
+            float qy = fabsf(y + 0.5f - r.y - r.h * 0.5f) - (r.h * 0.5f - radius);
+            float inset = qy > 0.0f ? radius - sqrtf(fmaxf(0.0f, radius * radius - qy * qy)) : 0.0f;
+            left = fmaxf(left, r.x + inset);
+            right = fminf(right, r.x + r.w - inset);
+        }
+        float x0 = ceilf(left - 0.5f), x1 = ceilf(right - 0.5f);
+        if (x1 > x0 && span.h > 0 && span.x == x0 && span.w == x1 - x0 && span.y + span.h == y) {
+            span.h += 1;
+        } else {
+            if (!submit_span(cmd, span)) return false;
+            span = (Rect){x0, y, fmaxf(x1 - x0, 0), 1};
         }
     }
-    return true;
+    return submit_span(cmd, span);
+}
+
+bool Graphics_submit(DisplayList *dl) {
+    if (!dl || !s_current) return false;
+    size_t depth = 0;
+    bool ok = true;
+    for (size_t i = 0; i < (*dl).count && ok; ++i) {
+        const DrawCmd *cmd = &(*dl).items[i];
+        if ((*cmd).kind == CMD_CLIP_PUSH) {
+            if (depth >= (*dl).clipCap) { ok = false; break; }
+            (*dl).clipStack[depth++] = i;
+        } else if ((*cmd).kind == CMD_CLIP_POP) {
+            if (depth == 0) { ok = false; break; }
+            --depth;
+        } else {
+            ok = submit_masks(dl, cmd, depth);
+        }
+    }
+    // Restore the caller's explicit clip on success and error; list-local
+    // masks never leak across submissions or overwrite an enclosing scope.
+    bool reset = submit_clip(s_hasBaseClip ? &s_baseClip.dst : NULL, s_baseClip.radius);
+    return ok && depth == 0 && reset;
 }
 
 // ── headless CPU (raster) backend ───────────────────────────────────────────
@@ -343,9 +428,16 @@ static bool raster_fillRect(const Rect *rect, const Brush *brush) {
                 if (a <= 0.0f) continue;
                 if (a > 1.0f) a = 1.0f;
             }
-            uint32_t sa = (uint32_t)((float)((*brush).color & 0xFFu) * a + 0.5f);
+            float stroke = (*brush).borderWidth > 0.0f ? (*brush).borderWidth : 0.0f;
+            float borderMix = stroke > 0.0f ? fminf(fmaxf(d + stroke + 0.5f, 0.0f), 1.0f) : 0.0f;
+            float borderAlpha = (float) Color_alpha((*brush).border) / 255.0f * borderMix;
+            Color fill = (*brush).color, border = (*brush).border;
+            uint32_t red = (uint32_t) ((float) Color_red(fill) * (1 - borderAlpha) + (float) Color_red(border) * borderAlpha + 0.5f);
+            uint32_t green = (uint32_t) ((float) Color_green(fill) * (1 - borderAlpha) + (float) Color_green(border) * borderAlpha + 0.5f);
+            uint32_t blue = (uint32_t) ((float) Color_blue(fill) * (1 - borderAlpha) + (float) Color_blue(border) * borderAlpha + 0.5f);
+            uint32_t sa = (uint32_t) (((float) Color_alpha(fill) * (1 - borderAlpha) + (float) Color_alpha(border) * borderAlpha) * a + 0.5f);
             if (sa == 0u) continue;
-            uint32_t src = ((*brush).color & 0xFFFFFF00u) | sa;
+            uint32_t src = COLOR_RGBA(red, green, blue, sa);
             size_t i = (size_t)y * (size_t)s_capW + (size_t)x;
             s_px[i] = blend_over(s_px[i], src);
         }

@@ -1,5 +1,6 @@
 #include "ui/element.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,6 +10,7 @@
 // The one UI node. Its rectangle + style live in a pooled Property* (shareable);
 // identity (offset/anchor/pivot/tag/state) and the tree stay on the Element.
 // Pure geometry + display-list paint; revalidation is explicit and pruned.
+// Hit traversal respects the same rectangular/rounded ancestor masks as paint.
 
 struct Element {
     Property *property;      // owned (from the default pool) or borrowed
@@ -186,7 +188,18 @@ Element *Element_find(Element *root, const char *tag) {
 
 // ── hit-test (deepest top-most element under the point) ─────────────────────
 static Element *hit_rec(Element *e, Rect absolute, float x, float y) {
-    if (!e || !(*e).visible) return NULL;
+    if (!e || !(*e).visible || !(*e).property) return NULL;
+    const Property *property = (*e).property;
+    // Descendants cannot receive input where an ancestor masks their paint.
+    if ((*property).clip || (*property).radius > 0.0f) {
+        if (!Rect_contains(absolute, x, y)) return NULL;
+        float radius = fminf((*property).radius, fminf(absolute.w, absolute.h) * 0.5f);
+        if (radius > 0.0f) {
+            float qx = fmaxf(fabsf(x - absolute.x - absolute.w * 0.5f) - (absolute.w * 0.5f - radius), 0.0f);
+            float qy = fmaxf(fabsf(y - absolute.y - absolute.h * 0.5f) - (absolute.h * 0.5f - radius), 0.0f);
+            if (qx * qx + qy * qy > radius * radius) return NULL;
+        }
+    }
     for (int i = (*e).count - 1; i >= 0; i--) {
         Element *c = (*e).children[i];
         Rect cr = Element_resolve(c, absolute);

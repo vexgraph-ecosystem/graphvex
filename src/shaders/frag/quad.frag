@@ -75,8 +75,8 @@ void main() {
 
     // border: inside the shape, within `stroke` of the edge (AA'd too)
     if (stroke > 0.0) {
-        float inner = 1.0 - smoothstep(-stroke - aa, -stroke + aa, d);
-        base = mix(base, vBorder, vBorder.a * inner);
+        float edge = smoothstep(-stroke - aa, -stroke + aa, d);
+        base = mix(base, vBorder, vBorder.a * edge);
     }
 
     outColor = vec4(base.rgb, base.a * coverage);
