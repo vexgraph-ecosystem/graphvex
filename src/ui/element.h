@@ -88,6 +88,8 @@ Element *Element_hit(Element *root, float x, float y);   // top-most, deepest
 // ── geometry ────────────────────────────────────────────────────────────────
 Rect Element_resolve(const Element *element, Rect parent);
 Element *Element_setSize(Element *element, float width, float height);
+Element *Element_setMinimumSize(Element *element, float width, float height);
+Element *Element_setMaximumSize(Element *element, float width, float height);
 Element *Element_setOffset(Element *element, float x, float y);
 Element *Element_setAnchor(Element *element, int anchor);
 Element *Element_setPivot(Element *element, int pivot);

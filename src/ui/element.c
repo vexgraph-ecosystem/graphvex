@@ -214,22 +214,33 @@ static Element *hit_rec(Element *e, Rect absolute, float x, float y) {
 
 Element *Element_hit(Element *root, float x, float y) {
     if (!root) return NULL;
-    return hit_rec(root, (Rect){0, 0, (*root).property->w, (*root).property->h}, x, y);
+    Rect self = {0, 0, Property_width((*root).property), Property_height((*root).property)};
+    return hit_rec(root, self, x, y);
 }
 
 // ── geometry ────────────────────────────────────────────────────────────────
 Rect Element_resolve(const Element *e, Rect parent) {
     if (!e || !(*e).property) return (Rect){0, 0, 0, 0};
+    float w = Property_width((*e).property);
+    float h = Property_height((*e).property);
     Point anchor = Part_point(parent, (*e).anchor);
-    Rect self = {0.0f, 0.0f, (*e).property->w, (*e).property->h};
+    Rect self = {0.0f, 0.0f, w, h};
     Point pivot = Part_point(self, (*e).pivot);
     return (Rect){anchor.x + (*e).offsetX - pivot.x,
                   anchor.y + (*e).offsetY - pivot.y,
-                  (*e).property->w, (*e).property->h};
+                  w, h};
 }
 
 Element *Element_setSize(Element *e, float w, float h) {
     if (e && (*e).property) { (*e).property->w = w; (*e).property->h = h; Element_markDirty(e); }
+    return e;
+}
+Element *Element_setMinimumSize(Element *e, float w, float h) {
+    if (e && (*e).property) { Property_setMinSize((*e).property, w, h); Element_markDirty(e); }
+    return e;
+}
+Element *Element_setMaximumSize(Element *e, float w, float h) {
+    if (e && (*e).property) { Property_setMaxSize((*e).property, w, h); Element_markDirty(e); }
     return e;
 }
 Element *Element_setOffset(Element *e, float x, float y) {
@@ -299,8 +310,8 @@ Element *Element_setVisible(Element *e, bool visible) {
 }
 
 // ── queries ─────────────────────────────────────────────────────────────────
-float Element_width(const Element *e) { return (e && (*e).property) ? (*e).property->w : 0.0f; }
-float Element_height(const Element *e) { return (e && (*e).property) ? (*e).property->h : 0.0f; }
+float Element_width(const Element *e) { return (e && (*e).property) ? Property_width((*e).property) : 0.0f; }
+float Element_height(const Element *e) { return (e && (*e).property) ? Property_height((*e).property) : 0.0f; }
 float Element_radius(const Element *e) { return (e && (*e).property) ? (*e).property->radius : 0.0f; }
 int   Element_anchor(const Element *e) { return e ? (*e).anchor : PART_TOP_LEFT; }
 int   Element_pivot(const Element *e) { return e ? (*e).pivot : PART_TOP_LEFT; }
