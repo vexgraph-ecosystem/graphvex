@@ -44,6 +44,13 @@ void main() {
         if (sdRoundBox(vLocal - ccenter, chs, cr) > 0.0) discard;
     }
 
+    // CPU-shadow color runs already describe pixel coverage. A one-pixel run
+    // must not lose energy to another shape AA pass; ancestor clips still apply.
+    if (vParams.z < 0.0) {
+        outColor = vFill;
+        return;
+    }
+
     vec2 p = vLocal - vSize * 0.5;          // centred
     // The quad already carries the blur margin, so the SHAPE is inset by it.
     float blur = max(vBlur, 0.0);

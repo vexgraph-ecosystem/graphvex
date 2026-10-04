@@ -1,4 +1,5 @@
 #include "graphics/graphics.h"
+#include "graphics/image_runs.h"
 
 #include "image.h"
 
@@ -445,13 +446,20 @@ static bool raster_fillRect(const Rect *rect, const Brush *brush) {
     return true;
 }
 
+static bool raster_imageRun(Rect run, Color color, void *context) {
+    (void) context;
+    Brush brush = {color, 0, 0, 0, 0};
+    return raster_fillRect(&run, &brush);
+}
+
 static bool raster_drawImage(const Image *image, const Rect *dst) {
-    // No texture store in the headless core: fill the dst with opaque magenta so
-    // a missing texture is loud, and keep the seam honest.
-    (void)image;
-    if (!s_px || !dst) return false;
-    Brush b = {0xFF00FFFFu, 0.0f, 0u, 0.0f, 0.0f};
-    return raster_fillRect(dst, &b);
+    if (!s_px || !dst)
+        return false;
+    Rect viewport = {0, 0, (float) s_w, (float) s_h};
+    Rect clip = Rect_intersect(s_clip, viewport);
+    if (Rect_isEmpty(clip))
+        return true;
+    return ImageRuns_visit(image, *dst, clip, raster_imageRun, nullptr);
 }
 
 static bool raster_drawText(const Rect *rect, const char *text, const Brush *brush) {

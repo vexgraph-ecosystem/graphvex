@@ -29,7 +29,7 @@ typedef struct VkQuad {
     float radius;    // corner radius, px
     float stroke;    // border width, px (0 = none)
     float blur;      // soft-edge falloff, px (0 = hard)
-    float mode;      // 0 = solid, 1 = image, 2 = glyph mask
+    float mode;      // -1 = pre-sampled pixels (no shape AA), 0 solid, 1 image, 2 glyph
     uint32_t texture; // atlas/layer id (0 = white)
     // clip window in the quad's LOCAL space (0..w, 0..h). The shape keeps its
     // true size; fragments outside this window are discarded, never resized.

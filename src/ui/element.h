@@ -107,11 +107,32 @@ Element *Element_setBlur(Element *element, float blur);
 Element *Element_setClip(Element *element, bool clip);   // clip children to the bound
 Element *Element_setPressed(Element *element, bool pressed);
 Element *Element_setVisible(Element *element, bool visible);
+// Per-node borrowed image content, independent of the shareable Property.
+// Whole source stretches into the event rect after body paint, before children.
+// Radius masks the image locally; ancestor clips remain in force. No fit modes,
+// image blur or automatic sizing are implied. Image and its backing must remain
+// live until this node AND any recorded DisplayList using it are cleared/freed.
+Element *Element_setImage(Element *element, const Image *image);
+const Image *Element_image(const Element *element);
 
 // ── boxes ───────────────────────────────────────────────────────────────────
-// Element_resolve = the LAYOUT/HIT rect (what placement, clicks and anchoring
-// use) — untouched by shadows/blur. Element_bounds = the PAINT bounds (the
-// layout rect grown to fit the filters); the reference location never moves.
+// Exactly two public bounds, in world/native-pixel coordinates when `parent`
+// is the parent's world event rect. Parent supplies placement, NOT a clip.
+// eventBound is resolved layout/hit geometry, unaffected by visibility/effects.
+// absoluteBound conservatively encloses this node's body soft edge/shadow and
+// visible descendants. Local child clips (including radius > 0 by default)
+// constrain descendants, never this node's own halo. Rounded clips use their
+// enclosing rect here; exact shape tests remain in hit/paint. Ancestor clips
+// are applied when this result is included in the ancestor's subtree query.
+// Transparent nodes may reserve their body rect (this is not a tight alpha
+// bound). absoluteBound returns the zero rect for hidden/property-less subtrees
+// and null; eventBound returns zero only for null/property-less nodes.
+// Requires a finite, acyclic tree with finite geometry, externally synchronized
+// against mutation; queries borrow data, allocate nothing and change no state.
+Rect Element_eventBound(const Element *element, Rect parent);
+Rect Element_absoluteBound(const Element *element, Rect parent);
+// Compatibility: resolve delegates to eventBound; bounds delegates to
+// absoluteBound (now descendant-inclusive rather than own-paint-only).
 Rect Element_bounds(const Element *element, Rect parent);
 
 // ── queries ─────────────────────────────────────────────────────────────────

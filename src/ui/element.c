@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "nio/property_pool.h"
+#include "image.h"
 #include "annotation/definition.h"
 #include "annotation/overview.h"
 
@@ -24,17 +25,17 @@
  * Fields in declaration order:
  *   Property *property; bool ownsProperty, dirty;
  *   float offsetX, offsetY; int anchor, pivot; const char *tag;
- *   bool pressed, visible; int cursorPreference; // -1 inherits
+ *   bool pressed, visible; int cursorPreference; const Image *image; // borrowed
  *   struct Element *parent; struct Element **children; int count, cap;
  * Public API (ui/element.h):
  *   Part_point; Element_0/1, destroy; property, setProperty, ownProperty;
  *   markDirty, revalidate, isDirty; add, addAt, remove, count, child, parent,
- *   root, find, hit; resolve, bounds, paint;
+ *   root, find, hit; eventBound, absoluteBound, resolve, bounds, paint;
  *   setSize, setMinimumSize, setMaximumSize, setOffset, setAnchor, setPivot,
  *   setTag, setRadius, setBackground, setBorder, setShadow, setShadowColor,
  *   setBlur, setClip, setPressed, setVisible;
  *   width, height, radius, anchor, pivot, isValid, isVisible, isPressed, tag;
- *   Element_setCursorPreference, Element_cursorPreference.
+ *   Element_setCursorPreference, Element_cursorPreference; setImage, image.
  * Private helpers: child_insert (reparent/insert), hit_rec (masked traversal).
  */
 
@@ -49,6 +50,7 @@ struct Element {
     bool pressed;
     bool visible;
     int cursorPreference; // per-node host preference; -1 inherits (not pooled)
+    const Image *image;    // borrowed, survives through recorded DisplayLists
 
     struct Element *parent;
     struct Element **children;
@@ -247,7 +249,7 @@ Element *Element_hit(Element *root, float x, float y) {
 }
 
 // ── geometry ────────────────────────────────────────────────────────────────
-Rect Element_resolve(const Element *e, Rect parent) {
+Rect Element_eventBound(const Element *e, Rect parent) {
     if (!e || !(*e).property) return (Rect){0, 0, 0, 0};
     float w = Property_width((*e).property);
     float h = Property_height((*e).property);
@@ -257,6 +259,10 @@ Rect Element_resolve(const Element *e, Rect parent) {
     return (Rect){anchor.x + (*e).offsetX - pivot.x,
                   anchor.y + (*e).offsetY - pivot.y,
                   w, h};
+}
+
+Rect Element_resolve(const Element *e, Rect parent) {
+    return Element_eventBound(e, parent);
 }
 
 Element *Element_setSize(Element *e, float w, float h) {
@@ -337,6 +343,18 @@ Element *Element_setVisible(Element *e, bool visible) {
     return e;
 }
 
+Element *Element_setImage(Element *e, const Image *image) {
+    if (e) {
+        (*e).image = image;
+        Element_markDirty(e);
+    }
+    return e;
+}
+
+const Image *Element_image(const Element *e) {
+    return e ? (*e).image : NULL;
+}
+
 // ── queries ─────────────────────────────────────────────────────────────────
 Element *Element_setCursorPreference(Element *e, int cursor) {
     if (e) (*e).cursorPreference = cursor;
@@ -382,6 +400,19 @@ void Element_paint(const Element *e, Rect absolute, DisplayList *dl) {
         }
     }
 
+    // Image content uses the ordinary paint path, not a widget-specific backend.
+    // Its own rounded mask is balanced before descendants, even when clip=false.
+    const Image *image = (*e).image;
+    if (image && Image_isValid(image) && !Rect_isEmpty(absolute)) {
+        bool rounded = (*p).radius > 0.0f;
+        if (rounded)
+            DisplayList_clipRounded(dl, absolute, (*p).radius);
+        Rect source = {0, 0, (float) Image_width(image), (float) Image_height(image)};
+        DisplayList_image(dl, image, source, absolute);
+        if (rounded)
+            DisplayList_unclip(dl);
+    }
+
     // A clipping / rounded parent MASKS its children: the radius means what it
     // says, and a scroll viewport clips to its rect.
     bool clips = ((*p).clip || (*p).radius > 0.0f) && (*e).count > 0;
@@ -393,9 +424,11 @@ void Element_paint(const Element *e, Rect absolute, DisplayList *dl) {
     if (clips) DisplayList_unclip(dl);
 }
 
-Rect Element_bounds(const Element *e, Rect parent) {
-    Rect base = Element_resolve(e, parent);
-    if (!e || !(*e).property) return base;
+Rect Element_absoluteBound(const Element *e, Rect parent) {
+    if (!e || !(*e).visible || !(*e).property) return (Rect){0, 0, 0, 0};
+    Rect base = Element_eventBound(e, parent);
+    // Current styles affect the node's own shape, not the assembled subtree.
+    // Ordered group-filter support will be integrated at the compositor seam.
     float eb = (*e).property->blur > 0.0f ? (*e).property->blur : 0.0f;
     float x0 = base.x - eb, y0 = base.y - eb;
     float x1 = base.x + base.w + eb, y1 = base.y + base.h + eb;
@@ -408,5 +441,22 @@ Rect Element_bounds(const Element *e, Rect parent) {
         if (sx1 > x1) x1 = sx1;
         if (sy1 > y1) y1 = sy1;
     }
-    return (Rect){x0, y0, x1 - x0, y1 - y0};
+    Rect result = {x0, y0, x1 - x0, y1 - y0};
+    bool clips = (*e).property->clip || (*e).property->radius > 0.0f;
+    for (int i = 0; i < (*e).count; i++) {
+        Rect child = Element_absoluteBound((*e).children[i], base);
+        if (clips) child = Rect_intersect(child, base);
+        if (Rect_isEmpty(child)) continue;
+        if (Rect_isEmpty(result)) { result = child; continue; }
+        float left = fminf(result.x, child.x);
+        float top = fminf(result.y, child.y);
+        float right = fmaxf(result.x + result.w, child.x + child.w);
+        float bottom = fmaxf(result.y + result.h, child.y + child.h);
+        result = (Rect){left, top, right - left, bottom - top};
+    }
+    return result;
+}
+
+Rect Element_bounds(const Element *e, Rect parent) {
+    return Element_absoluteBound(e, parent);
 }

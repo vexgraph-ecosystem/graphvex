@@ -18,6 +18,9 @@ from `vexspoke/src` via the PUBLIC link, never copied here.
 | `src/graphics/viewport.{h,c}` | points ↔ native px via the backing scale (no virtual canvas) |
 | `src/graphics/render_loop.{h,c}` | present-on-demand: a resting client presents zero frames |
 | `src/image.{h,c}` | RGBA8 pixel buffer (scenes, pixel buffers, IOSurface) with a CPU shadow |
+| `src/compositor/` | origin-aware CPU group isolation, linear-premultiplied composition and ordered scatter filters; see [COMPOSITOR.md](COMPOSITOR.md) |
+| `src/lang/filter.h` | 64-bit inline filter-token ABI; `compositor/filter_pool` stores indexed immutable complex recipes |
+| `src/ui/element.{h,c}` | graphical tree with separate event and absolute paint-bound queries |
 | `src/board.{h,c}` | a **retained offscreen target**; `Board_publish` bumps the generation that wakes the loop |
 | `src/panel.{h,c}` | **the UI component**: rect + corner radius + border + shadow + the anchor/pivot placement model |
 | `src/vulkan/device.{h,c}` | the Vulkan session (instance → device → queue), no presentation |
@@ -35,9 +38,14 @@ from `vexspoke/src` via the PUBLIC link, never copied here.
 - **Anchor / Pivot** — `anchor` is the point on the **parent**, `pivot` the point
   on the **panel** that lands on it (9 parts each: `PART_TOP_LEFT … PART_BOTTOM_RIGHT`),
   plus an offset. `Panel_resolve(panel, parentRect)` is pure geometry.
-- **Forward rendering** — the painted display list is batched into quads and
-  drawn in one pass; alpha blends in submission order (TBPP-friendly). Nothing
-  allocates per logical extent.
+- **Rendering ownership** — Graphvex owns widget/element composition; Darling
+  owns widget interfaces, input/focus, layout policy and host bridges. The existing
+  flat GPU display list remains available; filtered CPU groups use isolated
+  surfaces and preserve their absolute origin when submitted as images. The new
+  reference compositor allocates on composition and is not yet a pooled hot path.
+- **Two bounds** — event bounds are resolved layout/hit geometry. Absolute bounds
+  conservatively include descendant paint and effects; filter halos do not move
+  anchors or enlarge mouse targets. Ancestor composition clips apply externally.
 - **Demand-driven** — `render_loop` presents only when `markDirty` or a newer
   board generation demands it; a resting client costs zero frames.
 

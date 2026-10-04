@@ -20,6 +20,9 @@
 | **Native Pixel Law** | R3 GPU Driver | Mandatory for `graphvex` |
 | **R3 Graphics Language & Board Compositor Law** | R3 GPU Driver | Mandatory for `graphvex` |
 | **UI Graphics Source Placement Law** | R3 graphics primitives | Mandatory for `graphvex` |
+| **Absolute Rendering & Event Bound Law** | R3 element geometry/composition | Mandatory for `graphvex` |
+| **Ordered Filter & Scatter Composition Law** | R3 widget compositor | Mandatory for `graphvex` |
+| **Independent Scene Cadence Law** | R3 composition/image handoff | Mandatory for `graphvex` |
 
 ## 2. Exclusive Repo-Local Laws (FULL PROSE RESTATEMENT)
 
@@ -70,11 +73,14 @@ Fragmented color channel encodings (`0xAARRGGBB` vs `0xRRGGBBAA` vs `0xBBGGRRAA`
 
 ### SPIR-V Shader Deployment Law
 
-SPIR-V shaders (`.spv`) are centralized under `/shader/` — the single source of truth, laid out by stage:
-- `shader/frag/`, `shader/vert/`, `shader/comp/` — GLSL sources (base: `hello_triangle`, `solid_quad`; UI: `texture_quad`, `text_sdf`; compute: `sdf_jfa`, `sdf_combine`).
-- `shader/spv/` — compiled blobs (`<name>_<stage>.spv`, bare `<name>.spv` for compute), rebuilt via `shader/build_shaders.sh` (requires `glslangValidator`).
-- (Legacy note: sources lived in `hotcwap/vulkan/shaders/` + `darling/vulkan/shaders/`, blobs in per-subsystem `spv/` mirrors — all stale, pending deletion.)
-- **`vexspoke` / `darling`**: Own zero blobs; they load via the resolution protocol below. Per-subsystem `spv/` directories, if still present, are stale mirrors pending deletion.
+GLSL sources belong to Graphvex's `src/shaders/`; the umbrella build `tools/b`
+compiles ahead-of-time SPIR-V into its external build-state `shader/` directory.
+Existing stage directories remain supported. New modules separate responsibilities
+(`ui`, `shadow`, `compositor`, `filters`, `light`) rather than creating one
+unbounded shader spanning widget composition and scene lighting. Shared color,
+alpha and coordinate helpers have one implementation. Darling and vexspoke own
+no shader blobs. A source module is not runtime support until a backend pipeline
+actually executes it and has stated automated evidence.
 
 **Runtime Shader Resolution Protocol**:
 The runtime loader (`loadSpvAny`) must search in this exact precedence order:
@@ -83,7 +89,10 @@ The runtime loader (`loadSpvAny`) must search in this exact precedence order:
 3. `<exe_dir>/../Resources/spv/<name>` (macOS `.app` bundle)
 4. CWD-relative paths (`spv/<name>`, `src/_old/vulkan/spv/<name>`)
 
-The top-level `vexgraph` CMake build staging copies all `.spv` blobs from `/shader/spv/` into `${CMAKE_BINARY_DIR}/spv/` so all subsystems discover their shaders seamlessly.
+The umbrella build is shader build truth; IDE adapters delegate to it. Compiler
+errors propagate, generated outputs stay outside source, and shader dependencies
+must invalidate their consumers. Pointwise fusion uses bounded instruction/variant
+budgets and preserves order; spatial filters are explicit pipeline boundaries.
 
 ---
 
@@ -132,38 +141,30 @@ there are no per-pane surfaces or swapchains.
 ### R3 Graphics Language & Board Compositor Law
 
 #### Definition:
-`graphvex` (R3) hosts the **graphics language** (`lang/`): the backend-agnostic
-vocabulary every layer speaks — `Device` (the dialect registry), `Image`,
-`Filter` + `FilterStack` (the ordered filter chain), the **board compositor**,
-and the **element placement vocabulary** (`GraphicsComponent` + `ElementNode` +
-`Transform`, the origin/anchor/pivot dials). These are generic graphics
-primitives, not UI widgets: the board compositor folds the window's board images
-into one seam image and runs the filter chain; the placement vocabulary places
-any rect — a board, a scene object, or a UI element — inside a parent rect.
-
-The **UI toolkit proper** — panels, widgets, input, the widget tree, and the
-*UI* compositor that paints it — remains R4 `darling-framework` (the Vertical
-Integration Law).
+`graphvex` (R3) owns the backend-agnostic graphics language, graphical element
+tree and widget compositor: placement, isolated groups, images, filters, masks,
+render dependencies and ordered composition into the host-borrowed destination.
+This includes composing images produced for a Darling Scene widget. Darling
+(R4) is the widget interface: widget semantics, tree construction, layout policy,
+input/focus and application/native-window bridges. It submits Graphvex graphics
+records; it does not own a competing filter or render compositor.
 
 #### The Why:
-The Vertical Integration Law names "compositor" under R4, but there are two
-compositors, and conflating them inverts the dependency. The **board compositor**
-is a pure image operation (over-composite + filter chain) the seam needs; the
-origin/anchor/pivot math is ONE vocabulary that the compositor, scenes, and UI
-all place with. Duplicating either per layer drifts. So the placement vocabulary
-and the board compositor live at R3 (the language), and darling becomes the
-interface that consumes them. This is a managed exception per the Conflict
-Triage Law: the Tier-1/Tier-2 invariants (Vertical Integration allowlist) are
-preserved — R4 may `#include` graphvex; graphvex never includes R4.
+Widget rendering is a graphics operation even when its source is a widget tree.
+One R3 compositor keeps filters, bounds and backend behavior consistent for all
+interfaces. The Vertical Integration Law assigns graphical tree composition to
+R3 and widget behavior to R4; include and lifecycle directions are unchanged.
 
 #### The Rule:
 1. **`lang/` owns the graphics vocabulary:** `device`, `image`, `filter`,
    `filter_stack`, `compositor`, `graphics_component`, `element_node`,
    `transform`. Each is a `lang/<name>.h` contract with a `<dir>/<name>.c`
    implementation.
-2. **Two compositors, two layers.** The **board compositor** (R3, image collage
-   + filter chain) is graphvex; the **UI compositor** (widget-tree paint) stays
-   R4 darling.
+2. **One graphics composition owner.** Board-image and widget-element rendering,
+   isolation and filter execution belong to R3 Graphvex. R4 Darling constructs
+   widgets and supplies their graphical content through R3 contracts. A host
+   bridge may orchestrate calls during migration, but cannot duplicate rendering
+   semantics; draft R4 compositor files confer no alternate ownership.
 3. **Naming marks the layer.** The placement type is `GraphicsComponent`
    (graphvex), never `Component` (darling's own interface type). The container is
    `ElementNode` (graphvex), never darling's container. Same idea, different
@@ -187,7 +188,8 @@ preserved — R4 may `#include` graphvex; graphvex never includes R4.
    from vexspoke's ForeignMemory, stable addresses), so an element borrows one
    and may share it — aliasing the address is the bind, and `revalidate`
    reflects a shared record everywhere. A `radius > 0` clips children to the
-   rounded shape. Widgets, input, and focus remain R4.
+   rounded shape. Widget semantics, input, and focus remain R4. Filter halos are
+   not stored by changing this placement rectangle.
 
 ---
 
@@ -203,4 +205,97 @@ preserved — R4 may `#include` graphvex; graphvex never includes R4.
 
 ### UI Graphics Source Placement Law
 
-Graphical panel and label implementations live under `src/ui/<kind>/`; their public vocabulary remains under `src/lang`. The `ui/` directory owns graphics presentation primitives only. Editing, focus, widget composition, and application behavior remain in Darling (R4); Graphvex still includes only vexspoke.
+Graphical panel and label implementations live under `src/ui/<kind>/`; their
+public vocabulary remains under `src/lang`. Graphvex owns graphical element-tree
+composition and filter execution, with implementation under `src/compositor/`.
+Editing, focus, widget semantics, layout policy and application behavior remain
+in Darling (R4); Graphvex still includes only vexspoke.
+
+### Absolute Rendering & Event Bound Law
+
+#### Definition:
+Each element has two public geometric bounds with distinct purposes: its
+**event bound** and its **absolute bound**. Neither is an offscreen allocation.
+
+#### The Why:
+Rendering effects need extra pixels without moving the widget, its siblings,
+anchors or mouse target. Conflating placement with paint crops halos or enlarges
+input regions invisibly.
+
+#### The Rule:
+1. **Event bound:** the resolved layout/hit rectangle in the declared coordinate
+   space. Filters never alter it. Layout changes still update it normally.
+   Effective hit eligibility also applies ancestor event clips and shape tests;
+   a rectangular broad phase does not replace rounded hit testing.
+2. **Absolute bound:** a conservative world-space AABB enclosing this group's
+   own paint and contributing descendant paint, after descendant effects,
+   child-content clips and ordered element filters. This query describes group
+   output before external ancestor composition clips; those constrain its
+   contribution at their composition stage. It need not be pixel-tight.
+   Ancestor filters belong to the ancestor group's bound, not each child's bound.
+3. **Ordered support:** each filter maps preceding output support in stack order.
+   Blur halos accumulate; offsets/crops may move or shrink support. Input ROIs,
+   preclip support, scratch extents, pixel rounding and damage are internal data,
+   not extra public bounds. Unknown support requires conservative full-group
+   fallback or explicit rejection, never an invented finite margin.
+4. **Absolute origins:** targets retain their world origin. Expanded allocations
+   translate coordinates only; never stretch an expanded result back into its
+   event rectangle. Native-pixel allocation rounds support outward.
+5. **Clip stages:** rounded child-content clipping remains the default when
+   radius is positive. It clips children before the element's own filter stack,
+   not its own effect halo. Hard containment needs an explicit output clip.
+   Allocation edges are not semantic clips. Required source pixels outside the
+   visible region survive culling when they can scatter into visible output.
+6. **Damage:** movement, removal, filters and descendant changes invalidate old
+   and new absolute output support; backdrop reads add rendering dependencies.
+
+### Ordered Filter & Scatter Composition Law
+
+#### Definition:
+The widget compositor executes ordered filter stacks over isolated graphics
+groups, with scatter-first spatial filtering and explicit resolve semantics.
+
+#### The Rule:
+1. **Three scopes:** Backdrop filters consume the already-composed painter-order
+   scene prefix, excluding self/later siblings. Foreground filters consume content
+   and children, excluding own box decoration. Element filters consume the whole
+   assembled element, including filtered backdrop, decoration and children.
+   Filter a group once, not each overlapping child independently.
+2. **Compact tokens:** every filter token is `ID16 | payload48` in a 64-bit value.
+   The canonical operation table specifies inline parameter decoding or a typed
+   complex-filter-pool index. Payloads never encode raw pointers. Unknown IDs,
+   unsupported parameters and exhausted resources reject explicitly and preserve
+   previous valid state. Pool records outlive all stack/submitted consumers.
+3. **Order:** stacks execute left-to-right. No silent reordering of contrast,
+   HSV, noise or blur. Safe pointwise fusion preserves declared results.
+4. **Color:** composition and blur use linear-light premultiplied RGBA. Nonlinear
+   color operations define their working space, safely unpremultiply, operate,
+   and premultiply again; alpha-zero and alpha-preservation behavior are explicit.
+5. **Scatter:** weighted contributions add into isolated float accumulation,
+   followed by resolve and one ordinary source-over group composition. Raster
+   additive blending is valid; compute writes need supported atomics or exclusive
+   output ownership plus dependencies. Graphics blend state does not protect
+   compute stores. Device/format capabilities must be queried, never assumed.
+6. **Normalization:** source-energy conservation and constant-field preservation
+   are different contracts. Fixed/variable kernels declare finite support, edge
+   policy and weight-domain semantics. Transparent-domain samples count when
+   destination normalization is requested; normalization must not cancel intended
+   transparent edge fade. Normalize premultiplied RGB and alpha together.
+7. **Backdrop replacement:** filtered backdrop replaces its masked prefix region;
+   do not composite that same original backdrop twice. Snapshot/version the prefix
+   before scheduling dependent passes. Sampling ROI and output mask differ.
+8. **Incremental proof:** each operation has a CPU numeric reference and scoped
+   backend evidence. Shader compilation alone is not runtime support. Noise seeds
+   and coordinates are stable across allocation changes; animation is opt-in.
+
+### Independent Scene Cadence Law
+
+Graphvex widget composition and scene-image production have independent logical
+schedules. Separate OS threads are optional, not implied. The compositor consumes
+the newest completed scene image without forcing a scene tick or waiting for the
+next image. Versions do not replace GPU synchronization: images and parameter
+records remain alive until consumers finish, including resize/close. Widget
+changes and completed scene versions invalidate composition independently;
+scene work must not monopolize widget scheduling. Current host bridges may drive
+composition while ownership migrates; unfinished scheduler/GPU integration is
+reported as a gap, never inferred from this law.

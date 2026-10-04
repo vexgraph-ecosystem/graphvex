@@ -11,6 +11,7 @@
 #include <vulkan/vulkan.h>
 
 #include "image.h"
+#include "graphics/image_runs.h"
 #include "quad_spv.h"
 #include "vulkan/device.h"
 
@@ -592,11 +593,28 @@ static bool vk_fillRect(const Rect *rect, const Brush *brush) {
     VkBatch_rect(s_batch, *rect, brush);
     return true;
 }
-static bool vk_drawImage(const Image *image, const Rect *dst) {
-    if (!s_batch || !image || !dst) return false;
-    Rect src = {0, 0, (float)Image_width(image), (float)Image_height(image)};
-    VkBatch_image(s_batch, image, src, *dst);
+static bool vk_imageRun(Rect run, Color color, void *context) {
+    VkBatch *batch = context;
+    Brush brush = {color, 0, 0, 0, 0};
+    size_t before = VkBatch_vertices(batch, nullptr, 0);
+    VkBatch_rect(batch, run, &brush);
+    if (VkBatch_vertices(batch, nullptr, 0) != before + 6)
+        return false;
+    VkQuad *quad = &(*batch).quads[(*batch).count - 1];
+    (*quad).mode = -1.0f; // pre-sampled pixel coverage, not another SDF shape
     return true;
+}
+
+static bool vk_drawImage(const Image *image, const Rect *dst) {
+    if (!s_batch || !image || !dst)
+        return false;
+    // Reference image path: real CPU-shadow samples become color-run quads.
+    // It does not sample the placeholder atlas or claim optimized GPU textures.
+    Rect viewport = {0, 0, (float) s_w, (float) s_h};
+    Rect clip = Rect_intersect(s_clip, viewport);
+    if (Rect_isEmpty(clip))
+        return true;
+    return ImageRuns_visit(image, *dst, clip, vk_imageRun, s_batch);
 }
 static bool vk_drawText(const Rect *rect, const char *text, const Brush *brush) {
     if (!s_batch || !rect) return false;
