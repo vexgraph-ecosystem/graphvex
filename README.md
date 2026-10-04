@@ -1,7 +1,7 @@
 # graphvex — R3 graphics foundation (supervised by R1 hotcwap)
 
-The **rect-first** GPU driver + UI component core. Built by the workspace `b`
-(`../../../tools/b.c`) — not CMake, not Ninja.
+The **rect-first** GPU driver + UI element-tree core. Built by the workspace
+build system `b` (standalone repo at `b/`).
 
 > **NO SWAPCHAIN, EVER.** We never touch `VK_KHR_swapchain`. Rendering goes into
 > our own `Image`/`Board`s; the on-screen destination is a host-borrowed seam
@@ -21,8 +21,8 @@ from `vexspoke/src` via the PUBLIC link, never copied here.
 | `src/compositor/` | origin-aware CPU group isolation, linear-premultiplied composition and ordered scatter filters; see [COMPOSITOR.md](COMPOSITOR.md) |
 | `src/lang/filter.h` | 64-bit inline filter-token ABI; `compositor/filter_pool` stores indexed immutable complex recipes |
 | `src/ui/element.{h,c}` | graphical tree with separate event and absolute paint-bound queries |
+| `src/ui/property.{h,c}` | the shared placement record: rect + corner radius + border + shadow + anchor/pivot |
 | `src/board.{h,c}` | a **retained offscreen target**; `Board_publish` bumps the generation that wakes the loop |
-| `src/panel.{h,c}` | **the UI component**: rect + corner radius + border + shadow + the anchor/pivot placement model |
 | `src/vulkan/device.{h,c}` | the Vulkan session (instance → device → queue), no presentation |
 | `src/vulkan/surface.{h,c}` | host-borrowed destination + ONE retained present Image |
 | `src/vulkan/pipeline.{h,c}` | the one quad pipeline (SPIR-V shaders + state) |
@@ -32,12 +32,13 @@ from `vexspoke/src` via the PUBLIC link, never copied here.
 
 ## The model
 
-- **Everything visible is a Panel** — a rectangle with a corner radius, a
-  background, an optional border, and an optional shadow. Different panel
-  "types" are just different `PanelDesc` values; there is no subclass zoo.
+- **Everything visible is an Element** with a shared `Property` — a rectangle
+  with a corner radius, a background, an optional border, and an optional shadow.
+  Different element kinds are just different property values; there is no
+  subclass zoo.
 - **Anchor / Pivot** — `anchor` is the point on the **parent**, `pivot` the point
-  on the **panel** that lands on it (9 parts each: `PART_TOP_LEFT … PART_BOTTOM_RIGHT`),
-  plus an offset. `Panel_resolve(panel, parentRect)` is pure geometry.
+  on the **element** that lands on it (9 parts each: `PART_TOP_LEFT … PART_BOTTOM_RIGHT`),
+  plus an offset. `Element_resolve(element, parentRect)` is pure geometry.
 - **Rendering ownership** — Graphvex owns widget/element composition; Darling
   owns widget interfaces, input/focus, layout policy and host bridges. The existing
   flat GPU display list remains available; filtered CPU groups use isolated
