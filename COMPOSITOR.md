@@ -27,11 +27,16 @@ do not imply new effect execution. This first CPU slice supports:
 | Identity | none | unchanged output |
 | Gain | binary32 scalar in low 32 bits | scales linear RGB, preserves alpha; HDR is not clamped internally |
 | Scatter blur | integer radius, 0–16 native pixels | uniform square kernel, full normalized denominator, transparent outside |
-| Brightness | finite [-1,1] | adds to straight linear RGB, clamps [0,1], preserves alpha |
-| Contrast | finite multiplier >=0 | straight linear pivot 0.5, clamps [0,1], preserves alpha |
-| Grayscale / red / green / blue | none | Rec.709 luminance or selected channel replicated; HDR and alpha preserved |
-| Invert | none | straight linear 1-RGB clamped [0,1], alpha preserved |
-| Black-and-white | finite threshold [0,1] | Rec.709 luminance >= threshold selects white, alpha preserved |
+
+The color extension is **Vulkan-only**, through `compositor/color_pass.h` and
+`src/shaders/compositor/color.frag`; it is not implemented in this CPU reference.
+It samples a completed isolated group texture into a separate target using a
+fullscreen triangle. Brightness, contrast, weighted/channel grayscale, invert
+and black-and-white preserve alpha; see [FILTERS.md](FILTERS.md) for range,
+HDR, descriptor, synchronization and lifetime contracts. The production pass
+records GPU commands only, never CPU pixels or readback. `color_pass_test` performs
+headless Vulkan draws and readback assertions; automatic widget stack/scope wiring
+remains unfinished.
 
 Each source pixel adds its weighted premultiplied RGBA across the blur footprint.
 The output expands by the radius on all sides. Transparent edges remain faded;
@@ -87,9 +92,10 @@ RGBA8 quantization but does not claim end-to-end display parity.
   HSV, progressive blur, noise or frosted-glass recipe yet. These follow
   individually with numeric evidence.
 - CPU reference composition is not a GPU pipeline or a performance claim.
+  The new texture color pipeline is separate, not a CPU fallback.
   Modular `src/shaders/compositor/` splat/resolve entrypoints are compiled by the
   umbrella build and independently SPIR-V-validated, but are not yet bound by a
-  Vulkan compositor pipeline. Float attachment capability checks and GPU lifetime
+  Vulkan scatter compositor pipeline. Float attachment capability checks and GPU lifetime
   barriers remain mandatory before runtime integration.
 - No independent scene scheduler, completed-image GPU handoff or fence retirement
   yet. Existing Frame/Surface orchestration remains the migration bridge.
