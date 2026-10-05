@@ -12,11 +12,11 @@ for the requested collection, including separate HSL and HSV. `lang/filter.h`
 is a compatibility include. Tokens remain numeric `ID16 | payload48`, never
 pointer payloads. Endian encoding must be explicit when serializing.
 
-**Constructors are implemented; only the listed CPU effects execute.**
+**Color effects execute in Vulkan shaders, not CPU filters.**
 They encode arguments only: no allocation, ownership acquisition, parameter
 validation, image mutation or implicit pool lookup. The current CPU compositor
-executes identity, gain, scatter blur, brightness, contrast, grayscale/channel
-grayscale, invert and black-and-white. Remaining IDs return
+reference executes only its pre-existing identity, gain and scatter blur.
+The CPU color extension has been removed; new color IDs return
 `COMPOSITOR_UNSUPPORTED`, preserving submission outputs. No renderer silently
 treats these declarations as identity effects.
 
@@ -47,9 +47,15 @@ black-and-white a threshold. Complex modes (parallel/perspective extrusion,
 pixelate/sheer shape, noise seed, gradient stops) belong to future typed records,
 not guessed encodings squeezed into spare payload bits.
 
-## Implemented CPU color reference
+## Vulkan texture color pass
 
-All eight color operations preserve alpha and world bounds and execute once on
+`compositor/color_pass.{c,h}` creates a real Vulkan graphics pipeline using
+`resolve.vert` and `color.frag`. `ColorPass_record` samples an isolated group's
+completed float texture and draws a fullscreen triangle into a separate float
+attachment. No pixel processing, upload, readback or CPU fallback occurs in this
+production pass. Readback exists only in the GPU owner test.
+
+All eight color operations preserve alpha and extents and execute once on
 the assembled group. Brightness accepts a finite additive amount in [-1,1];
 contrast accepts a finite nonnegative multiplier around straight linear 0.5.
 These and invert clamp straight RGB to [0,1], intentionally saturating HDR even
@@ -58,13 +64,29 @@ channel grayscale replicates its selected channel. Both preserve HDR.
 Black-and-white accepts a finite threshold in [0,1]; luminance equal to the
 threshold selects white. Transparent pixels remain transparent black.
 
-Premultiplied affine formulas avoid division by tiny alpha; double intermediates
-avoid overflow at extreme valid contrast/HDR values. Reserved scalar bits,
+Premultiplied affine formulas avoid unpremultiplying tiny alpha. Contrast detects
+saturation before multiplication, avoiding overflow without requiring float64.
+GPU denormal handling is device-dependent; exact subnormal parity is not claimed.
+Reserved scalar bits,
 nonfinite/out-of-range parameters and nonzero no-argument payloads reject with
-`COMPOSITOR_INVALID`, preserving caller outputs and borrowed source pixels.
-The existing cold CPU seam reports status codes, not THROW diagnostics; diagnostic
-alignment and allocation-fault injection remain gaps. This is allocating reference
-work, not production hot-path or GPU support.
+`false` with one cold THROW at token validation/recording, before recording any
+commands. The pass borrows its device, command buffer, descriptor and textures.
+The caller cold-allocates a binding-0 combined-image-sampler descriptor matching
+`ColorPass_getDescriptorLayout`, supplies a compatible single-color render pass
+(subpass zero, sample count one), and keeps every resource alive through completion.
+Use linear-premultiplied float targets with supported sampled/color formats;
+pointwise blending is disabled. Final group composition uses source-over later.
+
+Stacks execute via ping-pong targets, with a color-write-to-fragment-read barrier
+between passes. Never sample the current destination attachment. Both images have
+the same native-pixel extent and retained world origin; no stretching. The caller
+selects foreground/backdrop/element input; there is one shader algorithm. Automatic
+tree/scope scheduling and attachment APIs remain unfinished, as do scatter runtime
+pipeline binding, allocation fault injection and other-platform GPU proof.
+Current automated GPU evidence is on Apple A18 Pro through MoltenVK. The local
+Vulkan loader dylib was built for macOS 26; execution at the macOS 14 support
+floor is unproved. Device validation-layer support is also not enabled by the
+current Device implementation. Neither gap is shader-compilation evidence.
 
 ## One implementation, three scopes
 
@@ -119,6 +141,8 @@ describes raised shading, not documented hardware ray tracing.
 Registered token/registry proof: `tools/b test filter_functions_test`,
 `tools/b test filter_type_test`, plus existing `tools/b test filter_test` and
 `tools/b test filter_pool_test`. These prove encoding and current rejection.
-`tools/b test compositor_color_test` proves CPU color pixels, alpha/HDR, order,
-rejection/recovery, recipe equivalence and all three explicit CPU scopes.
-Pool migration and GPU runtime remain unproved.
+`tools/b test color_pass_test` executes the Vulkan texture pipeline and asserts
+readback pixels, alpha/HDR, ordered ping-pong passes, cold rejection diagnostics
+and borrowed-device lifetime. CPU arithmetic in this test is only an oracle.
+Pool migration, automatic scope/tree wiring and the remaining GPU effects are
+not implemented.
