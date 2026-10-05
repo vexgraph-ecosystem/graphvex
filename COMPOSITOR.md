@@ -16,7 +16,11 @@ Group outputs can become sources for parent groups. Calls require external
 synchronization; outputs transfer ownership only on success and remain unchanged
 on failure. Destroy surfaces when their consumers finish.
 
-`lang/filter.h` encodes `ID16 | payload48` in a `uint64_t`. This first slice supports:
+`filter/filter_functions.h` encodes `ID16 | payload48` in a `uint64_t`;
+`lang/filter.h` remains a compatibility include. The canonical operation registry
+is `filter/filter_type.h`. See [FILTERS.md](FILTERS.md) for the expanded constructor
+vocabulary, pooled-reference contracts and scatter architecture. New constructors
+do not imply new effect execution. This first CPU slice supports:
 
 | Filter | Parameters | Behavior |
 |---|---|---|
