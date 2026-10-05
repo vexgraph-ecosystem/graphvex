@@ -262,7 +262,13 @@ groups, with scatter-first spatial filtering and explicit resolve semantics.
    assembled element, including filtered backdrop, decoration and children.
    Filter a group once, not each overlapping child independently.
 2. **Compact tokens:** every filter token is `ID16 | payload48` in a 64-bit value.
-   The canonical operation table specifies inline parameter decoding or a typed
+   `filter/filter_type.h` owns the canonical operation IDs, spelled
+   `FILTERNAME_ID` (for example `GAUSSIAN_BLUR_ID`) as hexadecimal `#define`
+   constants. Existing numeric IDs remain stable; legacy aliases refer to the
+   same table. Constructors live in `filter/filter_functions.h`, with
+   `lang/filter.h` retained as a compatibility include. A constructor or ID alone
+   is vocabulary, not implemented effect execution. The table specifies inline
+   parameter decoding or a typed
    complex-filter-pool index. Payloads never encode raw pointers. Unknown IDs,
    unsupported parameters and exhausted resources reject explicitly and preserve
    previous valid state. Pool records outlive all stack/submitted consumers.
