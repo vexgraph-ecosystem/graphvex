@@ -81,8 +81,9 @@ Stacks execute via ping-pong targets, with a color-write-to-fragment-read barrie
 between passes. Never sample the current destination attachment. Both images have
 the same native-pixel extent and retained world origin; no stretching. The caller
 selects foreground/backdrop/element input; there is one shader algorithm. Automatic
-tree/scope scheduling and attachment APIs remain unfinished, as do scatter runtime
-pipeline binding, allocation fault injection and other-platform GPU proof.
+tree/scope scheduling and attachment APIs remain unfinished, as do allocation
+fault injection and other-platform GPU proof. The explicit GpuScope spatial
+pipeline below now binds scatter at runtime.
 Current automated GPU evidence is on Apple A18 Pro through MoltenVK. The local
 Vulkan loader dylib was built for macOS 26; execution at the macOS 14 support
 floor is unproved. Device validation-layer support is also not enabled by the
@@ -105,13 +106,37 @@ retain stack entries and use one shared effect library, not duplicate effects.
 
 ## Scatter is not vertex-to-compute
 
-Current CPU scatter sends each source pixel's weighted premultiplied RGBA to
-multiple destination pixels. Shader prototypes use **vertex → fragment**:
+Legacy CPU scatter sends each source pixel's weighted premultiplied RGBA to
+multiple destination pixels. The Vulkan scatter pass uses **vertex → fragment**:
 `scatter.vert` creates a footprint per source pixel; `scatter.frag` emits weighted
 color and weight into float attachments requiring additive ONE/ONE blending;
-`resolve.frag` resolves before ordinary source-over composition. They are not
-bound to a working GPU compositor pipeline yet. Shader compilation is not GPU
-execution proof.
+`resolve.frag` is the standalone normalization vocabulary. `GpuScope` now binds
+the scatter pair to a two-attachment RGBA32F ONE/ONE ADD Vulkan pipeline and
+`scope.frag` resolves fixed-kernel accumulation while composing the scene.
+GPU pixel tests execute these pipelines; shader compilation alone is not proof.
+
+## GPU-bounded gallery scopes
+
+`compositor/gpu_scope` implements explicit rectangular backdrop/foreground/element
+groups for opaque-prior RGBA8 scenes. Its GPU passes decode sRGB textures, premultiply
+alpha, isolate the whole element when needed, scatter into expanded float targets,
+clip foreground before group assembly, replace the backdrop prefix exactly once,
+and keep whole-element halos outside the event rectangle. Final sRGB encoding and
+unpremultiplication happen in the fragment/output stage, never a CPU filter loop.
+
+`filter_gallery.c` now calls `FilterGallery_render` through GpuScope. The old
+`FilterGallery_make` CPU path is removed. Source fixtures and captions are ordinary
+asset generation. Every completed static GPU view is read back once for Picture;
+the current Image bridge is not zero-copy and is not a per-frame filter scheduler.
+
+Construction probes float attachment/blending and sampled/sRGB format support.
+The caller supplies a per-target pixel budget; extents and signed shader-index
+arithmetic reject cold. GPU fences have a fixed 100ms safety ceiling. A timeout
+leaves the submitted job and its staging/images/descriptors owned by the object;
+destroy returns false without freeing live resources, and retry retires the old
+job only after completion. No unbounded device/queue-idle waits. The owner test
+injects wait-timeout returns and proves destroy refusal/recovery; real hung-device
+recovery, driver validation layers and OOM injection remain explicit gaps.
 
 A future compute implementation would be a separate dispatch with supported
 atomics or another race-free accumulation strategy, followed by resolve and
