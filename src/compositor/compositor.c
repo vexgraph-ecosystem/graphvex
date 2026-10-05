@@ -20,10 +20,14 @@
 /* CompositorSurface fields: bounds then owned packed RGBA pixels.
  * Public: create/arity constructors/zero/destroy, bounded string projections,
  * bounds/pixels/constPixels/validate, filterBounds,
- * compose, sourceOver. Private: boundsCheck, decode, unionBounds, surfaceString, apply.
+ * compose, sourceOver. Private: boundsCheck, decode, unionBounds, surfaceString,
+ * apply and pointwise (alpha-preserving linear color operations).
  * Identity/gain keep support; blur expands each side and scatters weighted
  * source taps into the expanded target, then resolves alpha rounding. Group
  * filters run once AFTER painter-order assembly, not separately per child.
+ * Pointwise brightness/contrast/invert clamp straight RGB to [0,1]; weighted
+ * and channel grayscale preserve HDR. B&W compares linear Rec.709 luminance.
+ * These are cold CPU references with status-based rejection, not GPU/hot paths.
  * Compositor_* are stateless operations, not a second object/class. */
 
 struct CompositorSurface {
@@ -138,6 +142,28 @@ static CompositorStatus decode(FilterToken token, float *gain, uint32_t *radius)
         memcpy(gain, &bits, sizeof bits);
         return isfinite(*gain) && *gain >= 0 ? COMPOSITOR_OK : COMPOSITOR_INVALID;
     }
+    case BRIGHTNESS_ID:
+    case CONTRAST_ID:
+    case BLACK_AND_WHITE_ID: {
+        if (payload >> 32)
+            return COMPOSITOR_INVALID;
+        uint32_t bits = (uint32_t) payload;
+        memcpy(gain, &bits, sizeof bits);
+        if (!isfinite(*gain))
+            return COMPOSITOR_INVALID;
+        uint16_t id = Filter_id(token);
+        if (id == BRIGHTNESS_ID)
+            return *gain >= -1 && *gain <= 1 ? COMPOSITOR_OK : COMPOSITOR_INVALID;
+        if (id == BLACK_AND_WHITE_ID)
+            return *gain >= 0 && *gain <= 1 ? COMPOSITOR_OK : COMPOSITOR_INVALID;
+        return *gain >= 0 ? COMPOSITOR_OK : COMPOSITOR_INVALID;
+    }
+    case GRAYSCALE_ID:
+    case GRAYSCALE_RED_ID:
+    case GRAYSCALE_GREEN_ID:
+    case GRAYSCALE_BLUE_ID:
+    case INVERT_ID:
+        return payload ? COMPOSITOR_INVALID : COMPOSITOR_OK;
     case FILTER_SCATTER_BLUR:
         if (payload > FILTER_SCATTER_MAX_RADIUS)
             return COMPOSITOR_INVALID;
@@ -263,6 +289,47 @@ static CompositorStatus unionBounds(CompositorBounds a, CompositorBounds b,
     return status;
 }
 
+/* Rec.709 coefficients are fixed colorimetry, not configurable style defaults.
+ * Premultiplied formulas avoid dividing by tiny/zero alpha. Double intermediates
+ * keep finite HDR input and extreme valid contrast from overflowing a float.
+ * This helper receives only cold-validated pixels and token parameters. */
+static const double LUMA_RED = 0.2126;
+static const double LUMA_GREEN = 0.7152;
+static const double LUMA_BLUE = 0.0722;
+static const double CONTRAST_PIVOT = 0.5;
+
+static void pointwise(uint16_t id, float amount, float *p) {
+    double alpha = p[3];
+    if (id == BRIGHTNESS_ID || id == CONTRAST_ID || id == INVERT_ID) {
+        for (unsigned c = 0; c < 3; ++c) {
+            double value = p[c];
+            if (id == BRIGHTNESS_ID)
+                value += amount * alpha;
+            else if (id == CONTRAST_ID)
+                value = (value - CONTRAST_PIVOT * alpha) * amount + CONTRAST_PIVOT * alpha;
+            else
+                value = alpha - value;
+            p[c] = (float) fmin(alpha, fmax(0, value));
+        }
+        return;
+    }
+    double gray;
+    if (id == GRAYSCALE_RED_ID)
+        gray = p[0];
+    else if (id == GRAYSCALE_GREEN_ID)
+        gray = p[1];
+    else if (id == GRAYSCALE_BLUE_ID)
+        gray = p[2];
+    else {
+        gray = p[0] * LUMA_RED + p[1] * LUMA_GREEN + p[2] * LUMA_BLUE;
+        if (id == BLACK_AND_WHITE_ID)
+            gray = gray >= amount * alpha ? alpha : 0;
+        else
+            gray = fmin(gray, FLT_MAX); /* convex-sum roundoff at HDR maximum */
+    }
+    p[0] = p[1] = p[2] = (float) gray;
+}
+
 static CompositorStatus apply(CompositorSurface **surface, FilterToken token) {
     float gain = 1;
     uint32_t radius = 0;
@@ -272,6 +339,14 @@ static CompositorStatus apply(CompositorSurface **surface, FilterToken token) {
     CompositorSurface *src = *surface;
     CompositorBounds b = (*src).bounds;
     size_t count = (size_t) b.width * b.height;
+    uint16_t id = Filter_id(token);
+    if (id == BRIGHTNESS_ID || id == CONTRAST_ID || id == BLACK_AND_WHITE_ID ||
+        id == GRAYSCALE_ID || id == GRAYSCALE_RED_ID || id == GRAYSCALE_GREEN_ID ||
+        id == GRAYSCALE_BLUE_ID || id == INVERT_ID) {
+        for (size_t i = 0; i < count; ++i)
+            pointwise(id, gain, (*src).pixels + 4 * i);
+        return COMPOSITOR_OK;
+    }
     if (Filter_id(token) == FILTER_GAIN) {
         for (size_t i = 0; i < count; ++i)
             for (unsigned c = 0; c < 3; ++c)
