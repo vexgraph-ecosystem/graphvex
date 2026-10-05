@@ -293,6 +293,12 @@ groups, with scatter-first spatial filtering and explicit resolve semantics.
 8. **Incremental proof:** each operation has a CPU numeric reference and scoped
    backend evidence. Shader compilation alone is not runtime support. Noise seeds
    and coordinates are stable across allocation changes; animation is opt-in.
+9. **GPU execution truth:** Vulkan filter paths and GPU filter galleries execute
+   shader pipelines, never CPU filtering/composition disguised by GPU presentation.
+   CPU numeric math is an oracle or explicitly named legacy reference, not a GPU
+   fallback. Source asset preparation and upload/readback are data transport;
+   an Image/Picture bridge using readback must not be called zero-copy. Prove actual
+   GPU pixels at the owner seam and leave interactive appearance approval to the user.
 
 ### Independent Scene Cadence Law
 
