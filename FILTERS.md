@@ -12,10 +12,11 @@ for the requested collection, including separate HSL and HSV. `lang/filter.h`
 is a compatibility include. Tokens remain numeric `ID16 | payload48`, never
 pointer payloads. Endian encoding must be explicit when serializing.
 
-**Constructors are implemented; the newly named effects are not implemented.**
+**Constructors are implemented; only the listed CPU effects execute.**
 They encode arguments only: no allocation, ownership acquisition, parameter
 validation, image mutation or implicit pool lookup. The current CPU compositor
-executes only identity, gain and scatter blur. Every new ID returns
+executes identity, gain, scatter blur, brightness, contrast, grayscale/channel
+grayscale, invert and black-and-white. Remaining IDs return
 `COMPOSITOR_UNSUPPORTED`, preserving submission outputs. No renderer silently
 treats these declarations as identity effects.
 
@@ -39,12 +40,31 @@ pools are not interchangeable. Generation zero is encoded unchanged and reserved
 as invalid, not converted to identity. Copies do not retain an entry.
 
 All float bit patterns, including NaN, infinity and negative zero, are preserved.
-Ranges, color spaces and defaults for newly named effects remain to be defined
-at their actual execution seam; a constructor cannot assert those policies.
+Ranges and color spaces for unimplemented effects remain to be defined
+at their actual execution seam; a constructor does not validate those policies.
 Brightness's scalar denotes an additive amount, contrast a multiplier, and
 black-and-white a threshold. Complex modes (parallel/perspective extrusion,
 pixelate/sheer shape, noise seed, gradient stops) belong to future typed records,
 not guessed encodings squeezed into spare payload bits.
+
+## Implemented CPU color reference
+
+All eight color operations preserve alpha and world bounds and execute once on
+the assembled group. Brightness accepts a finite additive amount in [-1,1];
+contrast accepts a finite nonnegative multiplier around straight linear 0.5.
+These and invert clamp straight RGB to [0,1], intentionally saturating HDR even
+at neutral brightness/contrast. Weighted grayscale uses linear Rec.709 luminance;
+channel grayscale replicates its selected channel. Both preserve HDR.
+Black-and-white accepts a finite threshold in [0,1]; luminance equal to the
+threshold selects white. Transparent pixels remain transparent black.
+
+Premultiplied affine formulas avoid division by tiny alpha; double intermediates
+avoid overflow at extreme valid contrast/HDR values. Reserved scalar bits,
+nonfinite/out-of-range parameters and nonzero no-argument payloads reject with
+`COMPOSITOR_INVALID`, preserving caller outputs and borrowed source pixels.
+The existing cold CPU seam reports status codes, not THROW diagnostics; diagnostic
+alignment and allocation-fault injection remain gaps. This is allocating reference
+work, not production hot-path or GPU support.
 
 ## One implementation, three scopes
 
@@ -98,5 +118,7 @@ describes raised shading, not documented hardware ray tracing.
 
 Registered token/registry proof: `tools/b test filter_functions_test`,
 `tools/b test filter_type_test`, plus existing `tools/b test filter_test` and
-`tools/b test filter_pool_test`. These prove encoding and current rejection,
-not new effect pixels, Pool migration or GPU runtime support.
+`tools/b test filter_pool_test`. These prove encoding and current rejection.
+`tools/b test compositor_color_test` proves CPU color pixels, alpha/HDR, order,
+rejection/recovery, recipe equivalence and all three explicit CPU scopes.
+Pool migration and GPU runtime remain unproved.
