@@ -11,9 +11,8 @@
  * Constructors only encode arguments, never allocate, validate, retain or edit.
  * Invalid arguments are preserved for cold submission rejection. Caller supplies
  * originating pool context for references; an index/generation is NOT global.
- * CPU executes identity/gain/scatterBlur plus brightness/contrast, grayscale
- * (weighted and channel), invert and blackAndWhite. Other operations reject
- * UNSUPPORTED until their owning backend is implemented.
+ * CPU reference executes only identity/gain/scatterBlur; new color operations
+ * belong to the Vulkan shader pass, never a CPU fallback.
  * All functions are pure/thread-independent; token copies do not acquire owners.
  */
 typedef uint64_t FilterToken;
@@ -53,7 +52,7 @@ static inline FilterToken Filter_gain(float gain) {
 static inline FilterToken Filter_scatterBlur(uint32_t radius) {
     return ((uint64_t) SCATTER_BLUR_ID << 48) | radius;
 }
-/* CPU straight-linear color: brightness finite [-1,1] additive amount;
+/* GPU straight-linear color: brightness finite [-1,1] additive amount;
  * contrast finite >=0 multiplier around 0.5; both clamp RGB to [0,1].
  * B&W finite [0,1] threshold against Rec.709 luminance; equality selects white.
  * All preserve alpha. Constructors preserve invalid input for cold rejection. */
