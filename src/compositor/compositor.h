@@ -43,19 +43,6 @@ typedef struct CompositorSurface CompositorSurface;
  * The radius cap of 16 pixels is a prototype backend limit, not a UI semantic
  * maximum. Recursive groups are formed
  * by composing group outputs as sources of a later compose call. */
-/* CPU pointwise color contract (alpha preserved; bounds unchanged):
- * Brightness: finite amount [-1,1], straight linear RGB + amount, clamp [0,1].
- * Contrast: finite multiplier >=0, pivot straight linear 0.5, clamp [0,1].
- * Invert: straight linear 1-RGB, clamp [0,1]. These saturate HDR intentionally,
- * including neutral brightness/contrast on HDR; gain remains HDR-preserving.
- * Grayscale: linear Rec.709 luminance (0.2126,0.7152,0.0722), preserves HDR.
- * Channel grayscale: selected channel replicated across RGB, preserves HDR.
- * B&W: finite threshold [0,1], luminance >= threshold becomes white, else black.
- * Formulas run premultiplied, equivalent to unpremultiply/operate/premultiply,
- * without division by tiny alpha. Alpha-zero RGB stays zero. No-param operations
- * reject nonzero payload; scalar operations reject reserved bits/nonfinite/range.
- * Current cold seams return CompositorStatus; no per-pixel logs/allocations.
- */
 CompositorStatus CompositorSurface_create(CompositorBounds bounds,
                                           CompositorSurface **out);
 /* Arity constructors return a new owned surface or NULL on failure; use create
