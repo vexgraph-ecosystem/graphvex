@@ -1,5 +1,5 @@
 #version 450
-// Prototype entrypoint, not yet bound by VulkanBackend. Each source texel emits
+// Bound by GpuScope's isolated accumulation pass. Each source texel emits
 // one six-vertex footprint. Host validates nonzero extents, radius <= 16,
 // instanceCount == sourceWidth*sourceHeight, target == source+2*radius, and float
 // sampled/attachment support. Source is linear-light premultiplied RGBA.
@@ -10,6 +10,7 @@ layout(push_constant) uniform ScatterPush {
     ivec2 sourceExtent;
     ivec2 targetExtent;
     int radius;
+    uint straightAlpha; // 1 for sampled sRGB source, 0 for premultiplied group
 } pc;
 layout(location = 0) flat out vec4 weightedColor;
 layout(location = 1) flat out float kernelWeight;
@@ -25,5 +26,8 @@ void main() {
     vec2 position = vec2(source) + corners[gl_VertexIndex] * diameter;
     gl_Position = vec4(position / vec2(pc.targetExtent) * 2.0 - 1.0, 0, 1);
     kernelWeight = 1.0 / (diameter * diameter);
-    weightedColor = texelFetch(sourceImage, source, 0) * kernelWeight;
+    vec4 color = texelFetch(sourceImage, source, 0);
+    if (pc.straightAlpha == 1u)
+        color.rgb *= color.a;
+    weightedColor = color * kernelWeight;
 }
