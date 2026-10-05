@@ -8,7 +8,7 @@
  * Tokens are scoped to their originating live pool; this format cannot detect
  * a token from another pool with coincident index/generation. Never transfer
  * tokens between pools or use tokens after pool destruction. */
-// FILTER_POOL_ID is defined once in the canonical lang/filter.h operation table.
+// RECIPE_POOL_ID (legacy FILTER_POOL_ID) lives in filter/filter_type.h.
 #define FILTER_POOL_MAX_CAPACITY 4096u
 typedef struct FilterPool FilterPool;
 typedef struct FilterPoolConfig {
