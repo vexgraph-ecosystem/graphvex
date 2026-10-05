@@ -93,10 +93,9 @@ RGBA8 quantization but does not claim end-to-end display parity.
   individually with numeric evidence.
 - CPU reference composition is not a GPU pipeline or a performance claim.
   The new texture color pipeline is separate, not a CPU fallback.
-  Modular `src/shaders/compositor/` splat/resolve entrypoints are compiled by the
-  umbrella build and independently SPIR-V-validated, but are not yet bound by a
-  Vulkan scatter compositor pipeline. Float attachment capability checks and GPU lifetime
-  barriers remain mandatory before runtime integration.
+  `GpuScope` now binds the modular scatter shaders to a real additive float
+  Vulkan pipeline, probes attachment capabilities, and supplies render dependencies
+  and bounded fence retirement. General tree/filter scheduling is still unfinished.
 - No independent scene scheduler, completed-image GPU handoff or fence retirement
   yet. Existing Frame/Surface orchestration remains the migration bridge.
 - No target reuse/damage graph, cold preparation, hostile OOM injection, or
@@ -149,9 +148,15 @@ resolved from live parent bounds rather than copied from the initial width.
 A generated landscape supplies clear
 edges: backdrop frost blurs only prior scene under a panel, foreground/child blur
 spills inside its panel but is clipped at the panel edge, and whole-element blur
-softens the assembled panel and spills beyond it. These are explicit CPU scope
-submissions displayed by real Picture/Element image painting, not automatic
-Element filter attachments or GPU spatial filtering.
+softens the assembled panel and spills beyond it. These now execute through
+`GpuScope_render`: real Vulkan sampled textures, additive vertex/fragment scatter,
+GPU isolation/clipping and prefix replacement. `FilterGallery_make` and the CPU
+scope fixture path have been removed. Landscape/caption generation is source
+asset preparation, not CPU filtering. The three static outputs are filtered on
+the GPU once at startup, then each is read back once for the current Picture
+CPU-shadow bridge. This is GPU filtering/composition, **not zero-copy presentation**
+or automatic Element filter attachments.
+These explicit GPU scopes are not automatic widget-stack scheduling.
 
 Resize updates use the ordinary Frame resize cascade, but changed geometry
 bypasses the content/focus FPS cap so publication does not wait for an
@@ -168,7 +173,14 @@ cost (color-run generation and target recreation remain).
 origin-aware `Compositor_crop`. This initial scope builder requires an opaque
 prior scene, rectangular masks, inline tokens and sufficient backdrop sample
 halo inside the viewport. It rejects unsupported input without replacing output.
-Scope, fixture and Picture owner tests pass; native `filter_gallery --smoke`
-asserts captured image pixels. This is not appearance approval. Vulkan's current
+The CPU scope API remains a separate legacy reference; the gallery does not call
+it. `gpu_scope_test` numerically proves the new GPU scope/scatter shaders, radius
+0/1/2/16, linear-premultiplied filtering, clipping/spill, diagnostic rejection,
+budget exhaustion/recovery and injected fence-timeout retention/destroy refusal.
+`filter_gallery_fixture_test` exercises all three actual 360x300 GPU views. The
+gallery app builds, but its migrated interactive appearance and native window
+path have not been run in this cycle; visual acceptance belongs to the user.
+Previous `--smoke` evidence describes the older fixture, not new GPU proof.
+Vulkan's current
 CPU-shadow image adapter emits pixel color-run quads; optimized texture uploads
 remain future work.
