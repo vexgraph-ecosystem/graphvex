@@ -27,6 +27,11 @@ do not imply new effect execution. This first CPU slice supports:
 | Identity | none | unchanged output |
 | Gain | binary32 scalar in low 32 bits | scales linear RGB, preserves alpha; HDR is not clamped internally |
 | Scatter blur | integer radius, 0–16 native pixels | uniform square kernel, full normalized denominator, transparent outside |
+| Brightness | finite [-1,1] | adds to straight linear RGB, clamps [0,1], preserves alpha |
+| Contrast | finite multiplier >=0 | straight linear pivot 0.5, clamps [0,1], preserves alpha |
+| Grayscale / red / green / blue | none | Rec.709 luminance or selected channel replicated; HDR and alpha preserved |
+| Invert | none | straight linear 1-RGB clamped [0,1], alpha preserved |
+| Black-and-white | finite threshold [0,1] | Rec.709 luminance >= threshold selects white, alpha preserved |
 
 Each source pixel adds its weighted premultiplied RGBA across the blur footprint.
 The output expands by the radius on all sides. Transparent edges remain faded;
@@ -78,7 +83,7 @@ RGBA8 quantization but does not claim end-to-end display parity.
 - No automatic Element/Property filter-stack attachment or Darling setter migration.
 - No foreground/backdrop scene-prefix planner, rounded group masks or reverse ROI
   culling yet. Callers explicitly choose group sources; allocation is not clipping.
-- No arbitrary complex-filter parameter schemas, nested pooled recipes, contrast,
+- No arbitrary complex-filter parameter schemas, nested pooled recipes, HSL,
   HSV, progressive blur, noise or frosted-glass recipe yet. These follow
   individually with numeric evidence.
 - CPU reference composition is not a GPU pipeline or a performance claim.
