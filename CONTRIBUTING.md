@@ -2,7 +2,10 @@
 
 This project is a strictly solo development process conducted in tight pair-programming partnership with an AI coding assistant.
 
-It serves as an architectural manifesto for **Level 2/Level 3 GPU Compute and Graphics Subsystems**: high-throughput Vulkan pipelines, 128-triangle meshlet clusters, signed distance field (SDF) rasterization, and lockless GPU synchronization in pure C23.
+It serves as an architectural manifesto for **R3 GPU Compute and Graphics**.
+Vexspoke owns R2 CPU computation/behavior; Relational Engine owns R2 memory/storage
+and native C search. R3 may borrow either public contract, without implying that
+engine integration exists. GPU shaders, dispatch and synchronization remain here.
 
 ---
 
@@ -41,10 +44,12 @@ This boilerplate is **not** an accident, nor is it a misunderstanding of idiomat
 
 All architectural rules and style invariants are governed by the central constitution:
 
-- **[preferences.md](https://github.com/vexgraph-ecosystem/vexspoke/blob/main/preferences.md)** (tracked in `vexspoke`, accessible locally at `../../../preferences.md`)
+- **[preferences.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a)** (one real, Git-ignored workspace-root `../../../preferences.md`, not a tracked Vexspoke file or symlink)
 - **[graphvex-preferences.md](graphvex-preferences.md)** (repo-local mirror binding graphvex)
 
-Whenever preferences or conventions evolve, `../../../preferences.md` and `graphvex-preferences.md` are updated and committed locally in the same cycle (the Living Preferences Law / Zero Drift).
+Under the Living Documentation Law, update affected contracts in the same cycle.
+Universal changes are published to the existing Gist and byte-verified; repo-local
+documentation is committed locally under the Git Workflow Law. Never auto-push.
 
 ---
 
@@ -53,6 +58,6 @@ Whenever preferences or conventions evolve, `../../../preferences.md` and `graph
 | Invariant | Specification |
 | :--- | :--- |
 | **Zero Steady-State Allocation** | GPU command pools, descriptor sets, and staging buffers are pre-allocated during init; zero runtime `malloc` during render loops (per the Data-Oriented Storage Law). |
-| **Dest Last Parameter Order** | Vector/matrix math and raster operations always place destination buffers last: `Mat4_multiply(left, right, dest)` (per the Dest-Last Law). |
+| **Dest Last Parameter Order** | Vector/matrix math and raster operations always place destination buffers last: `Mat4_multiply(left, right, dest)` (per the Semantic Consistency Law (Argument order)). |
 | **Bounded Queue & Fence Waits** | Vulkan queue and fence waits must specify bounded timeouts (e.g. 100ms) with graceful frame-drop fallbacks; never wait `UINT64_MAX` on worker joins (per the Bounded Wait Law). |
-| **Teardown Reverse Order** | Destroy pipelines, render passes, framebuffers, and swapchain images top-down before destroying device or instances. `Memory_freeAll` runs strictly last (per the Teardown Order Law). |
+| **Teardown Reverse Order** | Destroy pipelines, render passes, framebuffers and owned images before devices/instances. `Memory_freeAll` runs strictly last (per the Vertical Integration Law (Teardown)). |
