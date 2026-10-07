@@ -10,9 +10,9 @@
 // graphvex R3 — image.h
 //
 // An RGBA8 pixel buffer. The substrate for scenes, offscreen Boards, and
-// pixel-buffered panels. Owns a CPU shadow (so it works headless and is fully
-// testable) plus an optional opaque native handle (VkImage / MTLTexture) that
-// the backend fills in. IOSurface sharing is the macOS zero-copy path.
+// pixel-buffered panels. Owns an optional CPU shadow and/or a retained completed
+// sampled GPU texture. GPU-only filter outputs remain drawable without readback.
+// Legacy native/IOSurface fields are borrowed handles, not ownership references.
 //
 // Strict 0xRRGGBBAA Color Law: bytes in memory are R,G,B,A; the Metal drawable
 // wants BGRA, so the conversion lives ONLY at the presentation boundary.
@@ -26,6 +26,7 @@
 #define IMAGE_USAGE_TRANSFER (1u << 2)
 
 typedef struct Image Image;
+typedef bool (*ImageGpuRefFn)(void *resource);
 
 typedef struct ImageDesc {
     uint32_t width;    // default 1
@@ -37,6 +38,9 @@ typedef struct ImageDesc {
 Image *Image_0(void);
 Image *Image_2(uint32_t width, uint32_t height);
 Image *Image_4(uint32_t width, uint32_t height, uint32_t format, uint32_t usage);
+#define GRAPHVEX_IMAGE_CTOR(_0,_1,_2,_3,_4,NAME,...) NAME
+#define Image(...) GRAPHVEX_IMAGE_CTOR(0 __VA_OPT__(,) __VA_ARGS__, \
+    Image_4,Image_invalidArity,Image_2,Image_invalidArity,Image_0)(__VA_ARGS__)
 Image *Image_new(const ImageDesc *desc);
 void Image_destroy(Image *image);
 
@@ -59,5 +63,21 @@ void   Image_setNative(Image *image, void *native);
 void   Image_setIOSurface(Image *image, void *ioSurface);
 uint32_t Image_layer(const Image *image);       // atlas layer / sampler index (0 default)
 void     Image_setLayer(Image *image, uint32_t layer);
+
+/* Owned reference to an optional immutable sampled texture; CPU pixels may be
+ * absent. Driver admission validates matching extent and readiness; clearGpu unbinds.
+ * Texture Device must outlive Image and any recorded GPU frame. Raw CPU writes
+ * must call Image_clearGpu(image) to invalidate a prepared texture;
+ * upload/fill/resize do so automatically. Image_destroy retains the object if
+ * a final texture release cannot prove upload completion within 100ms. */
+/* Backend admission supplies validated ready handles and paired callbacks.
+ * This generic ownership seam does not force raster clients to link Vulkan. */
+bool Image_bindGpu(Image *image, void *resource, void *device, void *descriptor,
+                   ImageGpuRefFn retain, ImageGpuRefFn release);
+bool Image_clearGpu(Image *image);
+void *Image_gpuResource(const Image *image);
+void *Image_gpuDevice(const Image *image);
+void *Image_gpuDescriptor(const Image *image);
+bool Image_isDrawable(const Image *image);
 
 #endif // GRAPHICS_IMAGE_H

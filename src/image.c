@@ -1,10 +1,30 @@
 #include "image.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+#include "exception/throw.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 // graphvex R3 — image.c
-// Agnostic RGBA8 buffer with a CPU shadow. No GPU handle required.
+;;DEFINITION
+/* Image is the backend-neutral pixel identity: optional CPU RGBA shadow plus
+ * an owned reference to an immutable SampledImage. GPU-only filter outputs need
+ * no readback to become drawable. CPU edits invalidate the sampled reference;
+ * a recorded frame retains its own reference until its fence completes. */
+;;OVERVIEW
+/* CLASS: Image. Fields: width,height (logical native extent), capW,capH (CPU
+ * allocation/stride), format,usage (pixel contract), pixels (owned CPU shadow),
+ * native (borrowed dialect handle), ioSurface (borrowed native surface), layer
+ * (legacy atlas index), gpuResource (owned opaque texture), gpuDevice (borrowed
+ * owner identity), gpuDescriptor (borrowed from texture), gpuRetain/gpuRelease
+ * (reference callbacks). Public: existing
+ * constructors/new/destroy; resize/ensureShadow/upload/fill; dimensions/format/
+ * usage/stride/pixels/validity/native/IOSurface/layer; bindGpu/clearGpu and
+ * gpuResource/gpuDevice/gpuDescriptor/isDrawable. Admission validates resource
+ * dimensions/readiness in its owning driver; bind rejects incomplete fn-tables.
+ * Owner-thread or external synchronization. Raw pixel edits clear the sampled
+ * binding explicitly; borrowed native fields carry no lifetime ownership. */
 
 struct Image {
     uint32_t width;
@@ -17,6 +37,11 @@ struct Image {
     void *native;          // opaque dialect handle
     void *ioSurface;       // opaque IOSurfaceRef
     uint32_t layer;        // atlas layer / sampler index
+    void *gpuResource; // owned opaque texture; renderer retains independently
+    void *gpuDevice; // borrowed driver/device identity
+    void *gpuDescriptor; // borrowed descriptor from owned resource
+    ImageGpuRefFn gpuRetain;
+    ImageGpuRefFn gpuRelease;
 };
 
 static void clamp_dims(uint32_t *w, uint32_t *h) {
@@ -47,6 +72,8 @@ Image *Image_4(uint32_t width, uint32_t height, uint32_t format, uint32_t usage)
 
 void Image_destroy(Image *image) {
     if (!image) return;
+    if (!Image_clearGpu(image))
+        return;
     free((*image).pixels);
     free(image);
 }
@@ -54,6 +81,10 @@ void Image_destroy(Image *image) {
 bool Image_ensureShadow(Image *image, uint32_t width, uint32_t height) {
     if (!image) return false;
     clamp_dims(&width, &height);
+    if ((uint64_t) width * height > SIZE_MAX / 4u)
+        return false;
+    if (!Image_clearGpu(image))
+        return false;
     // GROW-ONLY: reuse the existing allocation whenever it already fits, so a
     // shrinking viewport (or a resize wobble) never reallocs and never refills.
     if ((*image).pixels && width <= (*image).capW && height <= (*image).capH) {
@@ -65,6 +96,8 @@ bool Image_ensureShadow(Image *image, uint32_t width, uint32_t height) {
     uint32_t nh = (*image).capH > height ? (*image).capH : height;
     while (nw < width) nw += nw / 2 + 64;
     while (nh < height) nh += nh / 2 + 64;
+    if ((uint64_t) nw * nh > SIZE_MAX / 4u)
+        return false;
     uint8_t *grown = realloc((*image).pixels, (size_t)nw * (size_t)nh * 4u);
     if (!grown) return false;
     (*image).pixels = grown;
@@ -91,6 +124,8 @@ bool Image_upload(const uint8_t *rgba, uint32_t width, uint32_t height, Image *d
 
 void Image_fill(Image *image, Color color) {
     if (!image) return;
+    if (!Image_clearGpu(image))
+        return;
     if (!(*image).pixels && !Image_ensureShadow(image, (*image).width, (*image).height)) return;
     uint8_t r = (uint8_t)Color_red(color);
     uint8_t g = (uint8_t)Color_green(color);
@@ -122,3 +157,46 @@ void Image_setNative(Image *image, void *native) { if (image) (*image).native = 
 void Image_setIOSurface(Image *image, void *ioSurface) { if (image) (*image).ioSurface = ioSurface; }
 uint32_t Image_layer(const Image *image) { return image ? (*image).layer : 0u; }
 void Image_setLayer(Image *image, uint32_t layer) { if (image) (*image).layer = layer; }
+
+void *Image_gpuResource(const Image *image) { return image ? (*image).gpuResource : nullptr; }
+void *Image_gpuDevice(const Image *image) { return image ? (*image).gpuDevice : nullptr; }
+void *Image_gpuDescriptor(const Image *image) { return image ? (*image).gpuDescriptor : nullptr; }
+bool Image_isDrawable(const Image *image) {
+    return Image_isValid(image) && (Image_pixels(image) || Image_gpuDescriptor(image));
+}
+bool Image_clearGpu(Image *image) {
+    if (!image)
+        return false;
+    if ((*image).gpuResource && !(*image).gpuRelease((*image).gpuResource))
+        return false;
+    (*image).gpuResource = nullptr;
+    (*image).gpuDevice = nullptr;
+    (*image).gpuDescriptor = nullptr;
+    (*image).gpuRetain = nullptr;
+    (*image).gpuRelease = nullptr;
+    return true;
+}
+bool Image_bindGpu(Image *image, void *resource, void *device, void *descriptor,
+                   ImageGpuRefFn retain, ImageGpuRefFn release) {
+    if (!image || !resource || !device || !descriptor || !retain || !release) {
+        THROW("Image GPU binding requires a complete validated resource");
+        return false;
+    }
+    if ((*image).gpuResource == resource && (*image).gpuDevice == device &&
+        (*image).gpuDescriptor == descriptor && (*image).gpuRetain == retain && (*image).gpuRelease == release)
+        return true;
+    if (!retain(resource)) {
+        THROW("Image GPU reference rejected");
+        return false;
+    }
+    if (!Image_clearGpu(image)) {
+        release(resource);
+        return false;
+    }
+    (*image).gpuResource = resource;
+    (*image).gpuDevice = device;
+    (*image).gpuDescriptor = descriptor;
+    (*image).gpuRetain = retain;
+    (*image).gpuRelease = release;
+    return true;
+}
