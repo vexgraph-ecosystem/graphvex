@@ -1,5 +1,20 @@
 # graphvex — R3 graphics foundation (supervised by R1 hotcwap)
 
+## CLion: CMake is IDE metadata only
+
+Open this repository root as a CMake project. `CMakeLists.txt` provides C23
+source targets, include paths and flags for navigation, diagnostics and inlay
+hints. Targets are excluded from the default build; no linking, dependency
+downloads, shader generation or application runner are wired into it.
+Set `VEXSPOKE_SOURCE_DIR` to a local Vexspoke `src/`, `VULKAN_INCLUDE_DIR` to
+local SDK headers, and optionally `VEXGRAPH_SHADER_DIR` to existing b shader
+output containing `quad_spv.h`. Missing headers stay real IDE errors; no fake
+declarations are generated. IDE appearance is user-verified.
+
+Build with [b](https://github.com/vex-graph/b), not this adapter. From the
+Vexgraph workspace root: `./tools/b build graphvex`. IDE metadata is not proof
+of a standalone runtime build or GPU readiness.
+
 The **rect-first** GPU driver + UI element-tree core. Built by the workspace
 build system `b` (standalone repo at `b/`).
 
