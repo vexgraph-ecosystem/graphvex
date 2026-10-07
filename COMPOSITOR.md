@@ -145,17 +145,20 @@ constitute user appearance approval.
 Backdrop, Foreground and Element examples. The fixed-size cards use native tree
 anchors: backdrop left, foreground centered, element right; their positions are
 resolved from live parent bounds rather than copied from the initial width.
-A generated landscape supplies clear
+The bundled sunflower photograph supplies clear
 edges: backdrop frost blurs only prior scene under a panel, foreground/child blur
 spills inside its panel but is clipped at the panel edge, and whole-element blur
 softens the assembled panel and spills beyond it. These now execute through
-`GpuScope_render`: real Vulkan sampled textures, additive vertex/fragment scatter,
+`GpuScope_renderSampled`: real Vulkan sampled textures, additive vertex/fragment scatter,
 GPU isolation/clipping and prefix replacement. `FilterGallery_make` and the CPU
-scope fixture path have been removed. Landscape/caption generation is source
+scope fixture path have been removed. Photo decoding/caption generation is source
 asset preparation, not CPU filtering. The three static outputs are filtered on
-the GPU once at startup, then each is read back once for the current Picture
-CPU-shadow bridge. This is GPU filtering/composition, **not zero-copy presentation**
-or automatic Element filter attachments.
+the GPU once at startup and retained as sampled textures on the renderer's borrowed
+Device. Picture accepts GPU-only Images. No filter-output readback, CPU pixel-run
+expansion or re-upload occurs in the interactive path: each Picture records one
+six-vertex quad. Caption CPU shadows upload once during cold preparation.
+This is a GPU-resident filter-to-Picture bridge, not automatic Element filter
+attachments or a new end-to-end linear-light UI composition claim.
 These explicit GPU scopes are not automatic widget-stack scheduling.
 
 Resize updates use the ordinary Frame resize cascade, but changed geometry
@@ -166,8 +169,36 @@ CAMetalLayer drawable); live resize flushes after committing the transaction.
 `frame_live_resize_test` asserts immediate native publication under a frozen
 clock; `filter_gallery --smoke` checks four extents and all three anchors using
 published IOSurface pixels without a capture-induced repaint. Neither proves
-human drag smoothness or eliminates reference-renderer
-cost (color-run generation and target recreation remain).
+human drag smoothness. Color-run generation is removed from the Vulkan image
+path; imported target recreation on resize remains.
+
+### Sampled texture ownership and proof
+
+`vulkan/sampled_image.h` owns immutable texture storage and descriptors. Images
+and recorded frames hold separate references; a frame keeps its texture alive
+through fence completion even after the Image is destroyed. All operations are
+owner-thread/external-sync only. A Device outlives its textures; clear/destroy
+Images before `VulkanBackend_unbind`. CPU `upload/fill/resize` invalidate cached
+textures; direct writes through `Image_pixels` require `Image_clearGpu` first.
+The backend-neutral Image callback seam admits only driver-validated resources,
+not arbitrary native handles. The same-device requirement rejects inter-device
+sampling rather than inventing resource sharing.
+
+Uploads and draws wait at most 100ms. A timed-out upload retains its staging,
+command and texture resources; failed final release retains caller ownership.
+A timed-out recorded frame retains its target, VBO and image references for
+retry. `GpuScope_render` remains the explicit numeric readback API.
+
+`sampled_image_test` proves upload orientation, alpha, painter order, clipping,
+40-image reference-array growth, stable repeated-frame VBO capacity, release
+after recording and injected upload/frame timeout recovery. The gallery fixture
+compares every sampled GPU output pixel against its numeric readback counterpart
+after destroying GpuScope; each image needs only 576 vertex bytes.
+`python3 -B tests/tools/sampled_texture_test.py` executes optimized ASan/UBSan
+host owner tests with actual Vulkan pixels and bounded subprocess watchdogs.
+GPU shader sanitization, validation layers, real device loss/OOM, macOS14 runtime
+with the local newer loader, other hosts, process-footprint/drag profiling and
+user appearance approval remain gaps. No interactive gallery is run as proof.
 
 `compositor/compositor_scope.h` exposes `Compositor_scopedScene` and an
 origin-aware `Compositor_crop`. This initial scope builder requires an opaque
@@ -181,6 +212,7 @@ budget exhaustion/recovery and injected fence-timeout retention/destroy refusal.
 gallery app builds, but its migrated interactive appearance and native window
 path have not been run in this cycle; visual acceptance belongs to the user.
 Previous `--smoke` evidence describes the older fixture, not new GPU proof.
-Vulkan's current
-CPU-shadow image adapter emits pixel color-run quads; optimized texture uploads
-remain future work.
+Vulkan samples retained image textures; the Raster reference still uses its
+separate CPU image-run visitor. The historical `vulkan/vk_guard.h` named by the
+repo-local safety-net law is absent in this checkout; no new guard implementation
+or full device-loss latch coverage is claimed by this slice.
