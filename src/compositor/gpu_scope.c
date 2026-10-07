@@ -1,4 +1,5 @@
 #include "compositor/gpu_scope.h"
+#include "vulkan/sampled_image.h"
 #include "filter/filter_functions.h"
 #include "annotation/definition.h"
 #include "annotation/overview.h"
@@ -14,8 +15,9 @@
  * isolate groups on the GPU, splat each source texel's weighted premultiplied
  * color into expanded float attachments with additive blending, then compose
  * the resulting scope into an sRGB target. Only byte transport crosses the CPU;
- * no CPU filter/color/composition algorithm or fallback exists here. This cold
- * Image bridge is synchronous and bounded; a timeout retains its entire job
+ * no CPU filter/color/composition algorithm or fallback exists here. The sampled
+ * output keeps the final texture on GPU; readback is an explicit numeric bridge.
+ * Both cold forms are synchronous and bounded; a timeout retains its entire job
  * until the fence signals, so neither retry nor destruction frees live work. */
 ;;OVERVIEW
 /* CLASS: GpuScope. STRUCT FIELDS: device (borrowed VkDevice), physical (borrowed
@@ -34,7 +36,9 @@
  * buffers[4] (3 uploads/readback), frames[3] (group/scatter/final), descriptors
  * (owned pool), sets[3] (borrowed pool sets). Counts are the fixed shader DAG,
  * not scene entity limits. Public: _0/_3/chooser/zero, render, pending query,
- * destroy and bounded projections. Private: Vulkan allocation, render-pass/
+ * destroy, renderSampled and bounded projections. owner (borrowed Device) is
+ * the final field after job; sampled Images outlive the scope, never the Device.
+ * Private: render dispatch, Vulkan allocation, render-pass/
  * pipeline setup, descriptor/barrier/record and retirement helpers.
  * Cold rejection reports once, preserves outputs. destroy false on unsignaled
  * fence is silent to preserve bounded teardown; state remains owned for retry. */
@@ -63,6 +67,7 @@ struct GpuScope {
     VkPipeline scatterPipeline, groupPipeline, finalPipeline;
     VkSampler sampler; VkCommandPool commands; VkCommandBuffer command;
     VkFence fence; bool pending; Job job;
+    Device *owner;
 };
 
 static uint32_t memoryType(GpuScope *self,uint32_t bits,VkMemoryPropertyFlags want) {
@@ -94,6 +99,7 @@ static bool makeBuffer(GpuScope *self,VkDeviceSize size,VkBufferUsageFlags usage
 static bool makeTexture(GpuScope *self,uint32_t width,uint32_t height,VkFormat format,Texture *out) {
     (*out).width=width; (*out).height=height; (*out).format=format;
     VkImageCreateInfo info={.sType=VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .flags=format==VK_FORMAT_R8G8B8A8_SRGB ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT : 0,
         .imageType=VK_IMAGE_TYPE_2D,.format=format,.extent={width,height,1},.mipLevels=1,
         .arrayLayers=1,.samples=VK_SAMPLE_COUNT_1_BIT,.tiling=VK_IMAGE_TILING_OPTIMAL,
         .usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|
@@ -264,6 +270,7 @@ GpuScope *GpuScope_3(Device *device,const char *directory,uint32_t maxPixels) {
     }
     GpuScope *self=calloc(1,sizeof *self);
     if (!self) { THROW("GpuScope allocation failed"); return nullptr; }
+    (*self).owner=device;
     (*self).device=(VkDevice) Device_native(device); (*self).physical=(VkPhysicalDevice) Device_physical(device);
     (*self).queue=(VkQueue) Device_queue(device); (*self).maxPixels=maxPixels;
     VkPhysicalDeviceProperties properties;
@@ -407,8 +414,8 @@ static bool inputValid(const Image *image,uint32_t maxPixels,uint32_t maxExtent)
     return image && w && h && w<=maxExtent && h<=maxExtent && (uint64_t) w*h<=maxPixels &&
         (uint64_t) w*h<=SIZE_MAX/4 && Image_format(image)==IMAGE_FORMAT_RGBA8 && Image_pixels(image) && Image_stride(image)>=(uint64_t) w*4;
 }
-bool GpuScope_render(GpuScope *self,unsigned scope,const Image *prior,const Image *decoration,
-    int32_t panelX,int32_t panelY,const Image *foreground,int32_t foregroundX,int32_t foregroundY,uint32_t radius,Image **out) {
+static bool render(GpuScope *self,unsigned scope,const Image *prior,const Image *decoration,
+    int32_t panelX,int32_t panelY,const Image *foreground,int32_t foregroundX,int32_t foregroundY,uint32_t radius,bool sampled,Image **out) {
     if (!self || !out || scope>GPU_SCOPE_ELEMENT || radius>FILTER_SCATTER_MAX_RADIUS)
         goto rejected;
     uint32_t max=(*self).maxPixels,extent=(*self).maxExtent;
@@ -438,7 +445,7 @@ bool GpuScope_render(GpuScope *self,unsigned scope,const Image *prior,const Imag
         !makeTexture(self,(uint32_t) aw,(uint32_t) ah,VK_FORMAT_R32G32B32A32_SFLOAT,&(*job).textures[ACCUMULATION]) ||
         !makeTexture(self,(uint32_t) aw,(uint32_t) ah,VK_FORMAT_R32G32B32A32_SFLOAT,&(*job).textures[WEIGHT]) ||
         !makeTexture(self,w,h,VK_FORMAT_R8G8B8A8_SRGB,&(*job).textures[OUTPUT]) ||
-        !makeBuffer(self,(VkDeviceSize) w*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,&(*job).buffers[READBACK]) ||
+        (!sampled && !makeBuffer(self,(VkDeviceSize) w*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,&(*job).buffers[READBACK])) ||
         !framebuffer(self,GROUP_FRAME,(*self).groupRender,GROUP,1) ||
         !framebuffer(self,SCATTER_FRAME,(*self).scatterRender,ACCUMULATION,2) ||
         !framebuffer(self,FINAL_FRAME,(*self).finalRender,OUTPUT,1))
@@ -473,14 +480,16 @@ bool GpuScope_render(GpuScope *self,unsigned scope,const Image *prior,const Imag
     vkCmdPushConstants((*self).command,(*self).scopeLayout,VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof push,push);
     vkCmdDraw((*self).command,3,1,0,0); vkCmdEndRenderPass((*self).command);
     Texture *target=&(*job).textures[OUTPUT]; Buffer *read=&(*job).buffers[READBACK];
-    barrier(self,target,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT);
-    VkBufferImageCopy copy={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},.imageExtent={w,h,1}};
-    vkCmdCopyImageToBuffer((*self).command,(*target).image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,(*read).buffer,1,&copy);
-    VkBufferMemoryBarrier host={.sType=VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT,
-        .dstAccessMask=VK_ACCESS_HOST_READ_BIT,.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
-        .buffer=(*read).buffer,.size=(*read).size};
-    vkCmdPipelineBarrier((*self).command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&host,0,nullptr);
+    if (!sampled) {
+        barrier(self,target,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,VK_ACCESS_TRANSFER_READ_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkBufferImageCopy copy={.imageSubresource={VK_IMAGE_ASPECT_COLOR_BIT,0,0,1},.imageExtent={w,h,1}};
+        vkCmdCopyImageToBuffer((*self).command,(*target).image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,(*read).buffer,1,&copy);
+        VkBufferMemoryBarrier host={.sType=VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask=VK_ACCESS_HOST_READ_BIT,.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED,
+            .buffer=(*read).buffer,.size=(*read).size};
+        vkCmdPipelineBarrier((*self).command,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&host,0,nullptr);
+    }
     if (vkEndCommandBuffer((*self).command)!=VK_SUCCESS || vkResetFences((*self).device,1,&(*self).fence)!=VK_SUCCESS)
         goto failed;
     VkSubmitInfo submit={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&(*self).command};
@@ -496,6 +505,30 @@ bool GpuScope_render(GpuScope *self,unsigned scope,const Image *prior,const Imag
         goto rejected;
     (*self).pending=false;
     Image *result=Image_2(w,h);
+    if (sampled) {
+        if (!result)
+            goto failed;
+        SampledImage *texture = SampledImage_5((*self).owner, (void*) (*target).image,
+            (void*) (*target).memory, w, h);
+        if (!texture) {
+            Image_destroy(result);
+            goto failed;
+        }
+        // Adopted storage now belongs to the texture; the temporary job view
+        // is released before that texture can be freed.
+        (*target).image = VK_NULL_HANDLE;
+        (*target).memory = VK_NULL_HANDLE;
+        bool bound = SampledImage_bindImage(texture, result);
+        // releaseJob must destroy its view before a failed bind frees storage.
+        releaseJob(self);
+        SampledImage_release(texture);
+        if (!bound) {
+            Image_destroy(result);
+            goto rejected;
+        }
+        *out = result;
+        return true;
+    }
     if (!result || !Image_ensureShadow(result,w,h)) { Image_destroy(result); goto failed; }
     void *mappedPixelBytes;
     if (vkMapMemory((*self).device,(*read).memory,0,(*read).size,0,&mappedPixelBytes)!=VK_SUCCESS) { Image_destroy(result); goto failed; }
@@ -506,6 +539,14 @@ failed:
     releaseJob(self);
 rejected:
     THROW("GpuScope rejected or failed GPU scope render"); return false;
+}
+bool GpuScope_render(GpuScope *self,unsigned scope,const Image *prior,const Image *decoration,
+    int32_t panelX,int32_t panelY,const Image *foreground,int32_t foregroundX,int32_t foregroundY,uint32_t radius,Image **out) {
+    return render(self,scope,prior,decoration,panelX,panelY,foreground,foregroundX,foregroundY,radius,false,out);
+}
+bool GpuScope_renderSampled(GpuScope *self,unsigned scope,const Image *prior,const Image *decoration,
+    int32_t panelX,int32_t panelY,const Image *foreground,int32_t foregroundX,int32_t foregroundY,uint32_t radius,Image **out) {
+    return render(self,scope,prior,decoration,panelX,panelY,foreground,foregroundX,foregroundY,radius,true,out);
 }
 static void format(const GpuScope *self,bool structure,char *dest,size_t cap,bool *outTruncated) {
     if (!dest || !cap) {
@@ -518,12 +559,12 @@ static void format(const GpuScope *self,bool structure,char *dest,size_t cap,boo
         n=snprintf(dest,cap,"nullptr");
     else if (!structure)
         n=snprintf(dest,cap,"GpuScope(Vulkan scatter, budget=%u,pending=%d)",(*self).maxPixels,(*self).pending);
-    else n=snprintf(dest,cap,"GpuScope{device=%p,physical=%p,queue=%p,maxPixels=%u,maxExtent=%u,scatterRender=%p,groupRender=%p,finalRender=%p,scatterDescriptor=%p,scopeDescriptor=%p,scatterLayout=%p,scopeLayout=%p,scatterPipeline=%p,groupPipeline=%p,finalPipeline=%p,sampler=%p,commands=%p,command=%p,fence=%p,pending=%d,job=GPU transport records}",
+    else n=snprintf(dest,cap,"GpuScope{device=%p,physical=%p,queue=%p,maxPixels=%u,maxExtent=%u,scatterRender=%p,groupRender=%p,finalRender=%p,scatterDescriptor=%p,scopeDescriptor=%p,scatterLayout=%p,scopeLayout=%p,scatterPipeline=%p,groupPipeline=%p,finalPipeline=%p,sampler=%p,commands=%p,command=%p,fence=%p,pending=%d,job=GPU transport records,owner=%p}",
         (void*) (*self).device,(void*) (*self).physical,(void*) (*self).queue,(*self).maxPixels,(*self).maxExtent,
         (void*) (*self).scatterRender,(void*) (*self).groupRender,(void*) (*self).finalRender,
         (void*) (*self).scatterDescriptor,(void*) (*self).scopeDescriptor,(void*) (*self).scatterLayout,(void*) (*self).scopeLayout,
         (void*) (*self).scatterPipeline,(void*) (*self).groupPipeline,(void*) (*self).finalPipeline,(void*) (*self).sampler,
-        (void*) (*self).commands,(void*) (*self).command,(void*) (*self).fence,(*self).pending);
+        (void*) (*self).commands,(void*) (*self).command,(void*) (*self).fence,(*self).pending,(void*) (*self).owner);
     if (outTruncated)
         *outTruncated=n<0 || (size_t) n>=cap;
 }

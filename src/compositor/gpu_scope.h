@@ -35,6 +35,14 @@ bool GpuScope_render(GpuScope *self, unsigned scope, const Image *prior,
     const Image *decoration, int32_t panelX, int32_t panelY,
     const Image *foreground, int32_t foregroundX, int32_t foregroundY,
     uint32_t radius, Image **out);
+/* Same validated GPU scope, but transfers a GPU-only drawable Image: no output
+ * staging/readback/CPU shadow. Its sampled texture outlives the scope, borrows
+ * the same Device, and must be released before that Device. Consumers retain
+ * resources through submission completion. Use render for numeric readback. */
+bool GpuScope_renderSampled(GpuScope *self, unsigned scope, const Image *prior,
+    const Image *decoration, int32_t panelX, int32_t panelY,
+    const Image *foreground, int32_t foregroundX, int32_t foregroundY,
+    uint32_t radius, Image **out);
 void GpuScope_toString(const GpuScope *self,char *dest,size_t cap,bool *outTruncated);
 void GpuScope_toStringStruct(const GpuScope *self,char *dest,size_t cap,bool *outTruncated);
 #endif
