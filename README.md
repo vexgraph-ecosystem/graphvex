@@ -16,14 +16,21 @@ Vexgraph workspace root: `./tools/b build graphvex`. IDE metadata is not proof
 of a standalone runtime build or GPU readiness.
 
 The **rect-first** GPU driver + UI element-tree core. Built by the workspace
-build system `b` (standalone repo at `b/`).
+build system `b` (standalone repo at `../../../personal/b`).
 
 > **NO SWAPCHAIN, EVER.** We never touch `VK_KHR_swapchain`. Rendering goes into
 > our own `Image`/`Board`s; the on-screen destination is a host-borrowed seam
 > (a `CAMetalLayer` on Apple). See `vulkan/surface.h`.
 
-graphvex depends only on `vexspoke` (the Foundation layer) — its headers resolve
-from `vexspoke/src` via the PUBLIC link, never copied here.
+Current builds consume Vexspoke headers/runtime. The Vertical Integration Law
+permits R3 to borrow either R2 public contract: **Vexspoke** CPU computation,
+math, algorithms, synchronization and behavior, or **Relational Engine**
+memory/storage, stable rows, bindings and native C search over Rust-owned spans.
+That permission is not an implemented engine dependency. Migration is staged;
+the existing Vexspoke memory/container ABI and default allocator remain unchanged.
+R1 owns storage residency/lifetimes. GPU shaders, dispatch, capabilities and
+synchronization stay Graphvex R3; no C/Rust atomic-layout compatibility or
+automatic schema migration is assumed. No R1/R4/R5 headers enter this driver.
 
 ## What's here
 
