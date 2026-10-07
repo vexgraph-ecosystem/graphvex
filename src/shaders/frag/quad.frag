@@ -50,6 +50,12 @@ void main() {
         outColor = vFill;
         return;
     }
+    // Images already have exact pixel coverage. One textured quad replaces the
+    // old CPU color-run expansion; only ancestor clips affect its coverage.
+    if (vParams.z > 0.5 && vParams.z < 1.5) {
+        outColor = texture(uAtlas, vec3(vUV, 0.0)) * vFill;
+        return;
+    }
 
     vec2 p = vLocal - vSize * 0.5;          // centred
     // The quad already carries the blur margin, so the SHAPE is inset by it.
