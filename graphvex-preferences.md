@@ -1,13 +1,11 @@
 # graphvex — Repo-Local Living Preferences
-> Exclusive repository-level preferences (the Living Preferences Law).
-> Universal Supreme Constitution: preferences.md (vexspoke).
-
-;;SYNC("mirrors ecosystem/vexspoke/preferences.md @ 2026.09-universal")
+> Repo-local preferences governed by the Living Documentation Law.
+> Universal Supreme Constitution: workspace-root preferences.md, published on Gist.
 
 ## 0. Constitution Link (supreme)
-- [preferences.md](https://github.com/vexgraph-ecosystem/vexspoke/blob/main/preferences.md) (canonical, vexspoke) — accessible locally at ../../preferences.md
+- [preferences.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a) — real, Git-ignored workspace-root file at ../../../preferences.md, not a tracked Vexspoke file or symlink.
 - All universal laws in `../../../preferences.md` are mandatory and binding across the ecosystem.
-- This document codifies **exclusive** preferences that apply uniquely to `graphvex` (R3 GPU Driver).
+- This document codifies **exclusive** preferences for `graphvex` (R3 GPU Driver). R3 may borrow Vexspoke CPU computation/behavior and/or Relational Engine memory/storage/native C search public contracts. Current Vexspoke allocation remains during staged migration. GPU shaders, dispatch, capabilities and synchronization stay Graphvex-owned; engine integration is not implied.
 
 ## 1. Exclusive Preferences Binding Matrix
 
@@ -73,7 +71,7 @@ Fragmented color channel encodings (`0xAARRGGBB` vs `0xRRGGBBAA` vs `0xBBGGRRAA`
 
 ### SPIR-V Shader Deployment Law
 
-GLSL sources belong to Graphvex's `src/shaders/`; the umbrella build `tools/b`
+GLSL sources belong to Graphvex's `src/shaders`; the umbrella build `../../../tools/b`
 compiles ahead-of-time SPIR-V into its external build-state `shader/` directory.
 Existing stage directories remain supported. New modules separate responsibilities
 (`ui`, `shadow`, `compositor`, `filters`, `light`) rather than creating one
@@ -109,7 +107,7 @@ GPU failures are only debuggable if the report site equals the cause site. Chasi
 2. **Tree-shaken when released.** Under `NDEBUG` the guard is a macro no-op: zero calls, zero branches, unevaluated arguments. Release binaries are the Cold-Strict, Hot-Minimal Validation Law hot-minimal skeleton of the debug build — the debug net never counts against hot-minimal branch budgets (the Conflict Triage Law triage: debug exhaustive / release minimal is the managed exception, codified here). Every file's `;;OVERVIEW` lists which of its functions carry the net.
 3. **Deterministic driver-state handling.** Every wait/acquire/submit/present follows one fixed decision table, written once: success advances; timeout-with-signal recovers; timeout-unsignaled drops with dirty state intact and retries next tick; `VK_ERROR_DEVICE_LOST` latches once at the true site (`presentDeviceLost(where)` in hotcwap — the latch is single-owned; downstream repos must not re-implement it, they may query `Vk_isDeviceLost()` wherever the allowlist permits) and short-circuits every later pass.
 4. **The report site is never the cause.** First action on any `VK_ERROR_DEVICE_LOST`: run with `MVK_CONFIG_LOG_LEVEL` enabled and read MoltenVK's underlying Metal error (`MTLCommandBuffer` error code + message) BEFORE touching code — `MTLCommandBufferErrorInternal`/`PageFault`/`Timeout` distinguishes a usage defect from a GPU power/restart event. Paste both lines together; never "fix the acquire" until MoltenVK says the acquire is the cause.
-5. **No loopholes in the health chain.** Handles are nulled in the same teardown pass (the Teardown Order Law) so a stale guard catches a real lifecycle defect instead of passing on a zombie pointer. Cold resource-creation paths (graphvex images/textures/framebuffers/views) keep the Cold-Strict, Hot-Minimal Validation Law result checks; hot per-frame seams (present, pane present, compositor batch, uploads, SDF dispatch, IOSurface export) carry `VkGuard_check` at entry.
+5. **No loopholes in the health chain.** Handles are nulled in the same teardown pass (the Vertical Integration Law (Teardown)) so a stale guard catches a real lifecycle defect instead of passing on a zombie pointer. Cold resource-creation paths (graphvex images/textures/framebuffers/views) keep the Cold-Strict, Hot-Minimal Validation Law result checks; hot per-frame seams (present, pane present, compositor batch, uploads, SDF dispatch, IOSurface export) carry `VkGuard_check` at entry.
 
 ---
 
@@ -169,8 +167,9 @@ R3 and widget behavior to R4; include and lifecycle directions are unchanged.
    (graphvex), never `Component` (darling's own interface type). The container is
    `ElementNode` (graphvex), never darling's container. Same idea, different
    layer, no collision.
-4. **Allowlist unchanged.** R4 darling may include graphvex (R3); graphvex
-   includes only vexspoke (R2). No reverse edge is created by this law.
+4. **Allowlist direction unchanged.** R4 darling may include graphvex (R3);
+   graphvex may borrow either R2 public contract, never R1/R4/R5 headers.
+   No reverse edge or implemented storage migration is implied.
 5. **AUTO is a sentinel with a per-class equivalence.** `lang/size.h` owns
    `SIZE_AUTO` (the åuto FourCC, `0xE575746F`, negative on every platform).
    A declared `w`/`h` holds either a concrete size or the sentinel; `w ==
@@ -199,9 +198,9 @@ R3 and widget behavior to R4; include and lifecycle directions are unchanged.
 
 ---
 
-## 4. Readiness Cross-Reference (the Living Feature Readiness Law)
+## 4. Readiness Cross-Reference (the Living Documentation Law)
 
-- Feature readiness matrix tracked in [`../../_repositories/.ecosystem/graphvex.md`](../../_repositories/.ecosystem/graphvex.md) (rendered as `[[graphvex]]` wiki page).
+- Feature readiness matrix: [graphvex](../../ecosystem/graphvex.md), rendered as `[[graphvex]]`.
 
 ### UI Graphics Source Placement Law
 
@@ -209,7 +208,7 @@ Graphical panel and label implementations live under `src/ui/<kind>/`; their
 public vocabulary remains under `src/lang`. Graphvex owns graphical element-tree
 composition and filter execution, with implementation under `src/compositor/`.
 Editing, focus, widget semantics, layout policy and application behavior remain
-in Darling (R4); Graphvex still includes only vexspoke.
+in Darling (R4); Graphvex borrows R2 public contracts only, never Darling headers.
 
 ### Absolute Rendering & Event Bound Law
 
