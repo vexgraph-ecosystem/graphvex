@@ -11,16 +11,37 @@
 #include <vulkan/vulkan.h>
 
 #include "image.h"
-#include "graphics/image_runs.h"
+#include "vulkan/sampled_image.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
+#include "exception/throw.h"
 #include "quad_spv.h"
 #include "vulkan/device.h"
 
 // graphvex R3 — vulkan/vk_renderer.c
 //
-// THE GPU RENDERER. The display list's quads are batched (vk_batch) and drawn on
-// the GPU in ONE forward pass into an offscreen target, then copied back for
-// capture. No swapchain; the target is ours. Presentation via the borrowed
-// CAMetalLayer is the next slice — the pixels are already GPU-produced here.
+;;DEFINITION
+/* The Vulkan backend consumes ordered geometry and retained sampled images.
+ * Each Picture is one textured quad, independent of its pixel/color complexity.
+ * Preparation uploads a CPU shadow once or borrows a completed same-device GPU
+ * filter output. Frame references pin descriptors/textures until the bounded
+ * fence signals, even if their original Image is destroyed after recording.
+ * Imported IOSurfaces present without readback; private capture copies only the
+ * final composed target. This legacy UI presenter samples byte-space UNORM;
+ * GpuScope's spatial filtering itself remains linear-premultiplied. */
+;;OVERVIEW
+/* MODULE: VulkanBackend. Public: existing row/bind/surface/batch/error APIs plus
+ * borrowed device, prepareImage and vertexBytes. Private: initialization, target/
+ * surface/pipeline helpers, retire_frame/release_image_draws, render and backend
+ * fn-table verbs. PRIVATE HELPERS: VkSurfaceSlot {surface borrowed native handle,
+ * image/view/fb owned import handles, w/h native extent, used admission flag};
+ * VkImageDraw {quad batch index, sampled owned frame reference}. Flat growable
+ * imageDraws array persists at its high-water capacity; no pixel-sized geometry.
+ * pending retains command/VBO/targets/image references on timeout; next begin
+ * polls completion before changing any of them. uploadPending owns any uncertain
+ * cold upload. All queue/resource calls are owner-thread/external-sync only.
+ * CPU-shadow auto-preparation on first draw is a cold compatibility admission,
+ * not allocation-free hot-path proof. Explicitly prepare gallery Images first. */
 
 #define VK_ERR(call) do { VkResult _r = (call); if (_r != VK_SUCCESS) { snprintf(s_err, sizeof s_err, #call " failed: VkResult %d", (int)_r); return false; } } while (0)
 
@@ -81,9 +102,35 @@ static int s_w = 0, s_h = 0;
 static Color s_clear = COLOR_BLACK;
 static bool s_rendered = false;
 static char s_err[256] = "ok";
+typedef struct VkImageDraw {
+    size_t quad;
+    SampledImage *sampled;
+} VkImageDraw;
+static VkImageDraw *s_imageDraws = nullptr;
+static size_t s_imageDrawCount, s_imageDrawCap;
+static bool s_pending;
+static SampledImage *s_uploadPending = nullptr;
+static const uint64_t RENDER_WAIT_NS = UINT64_C(100000000);
+enum { IMAGE_DRAW_INITIAL_CAPACITY = 16 };
+
+static bool retire_frame(void) {
+    if (s_pending) {
+        if (vkWaitForFences(s_device, 1, &s_fence, VK_TRUE, RENDER_WAIT_NS) != VK_SUCCESS)
+            return false;
+        s_pending = false;
+        s_rendered = true;
+    }
+    return true;
+}
+static void release_image_draws(void) {
+    for (size_t i = 0; i < s_imageDrawCount; ++i)
+        SampledImage_release(s_imageDraws[i].sampled);
+    s_imageDrawCount = 0;
+}
 
 const char *VulkanBackend_lastError(void) { return s_err; }
 const VkBatch *VulkanBackend_batch(void) { return s_batch; }
+size_t VulkanBackend_vertexBytes(void) { return (size_t) s_vboCap; }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 static uint32_t mem_type(uint32_t bits, VkMemoryPropertyFlags want) {
@@ -457,11 +504,43 @@ static bool init_vulkan(void) {
     return true;
 }
 
+Device *VulkanBackend_device(void) { return init_vulkan() ? s_dev : nullptr; }
+bool VulkanBackend_prepareImage(Image *image) {
+    if (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 || !init_vulkan()) {
+        THROW("Vulkan image preparation requires a valid RGBA image/device");
+        return false;
+    }
+    if (Image_gpuResource(image)) {
+        if (Image_gpuDevice(image) != s_dev) {
+            THROW("Vulkan image belongs to another Device");
+            return false;
+        }
+        return true;
+    }
+    if (s_uploadPending) {
+        if (!SampledImage_release(s_uploadPending))
+            return false;
+        s_uploadPending = nullptr;
+    }
+    SampledImage *sampled = SampledImage_2(s_dev, image);
+    if (!sampled)
+        return false;
+    if (!SampledImage_isReady(sampled)) {
+        s_uploadPending = sampled;
+        return false;
+    }
+    bool bound = SampledImage_bindImage(sampled, image);
+    SampledImage_release(sampled);
+    return bound;
+}
+
 // ── the batch render pass ───────────────────────────────────────────────────
 static float cf(Color c) { return (float)((c >> 24) & 0xFFu) / 255.0f; }
 
 static bool render(void) {
     if (!s_device) return false;
+    if (s_pending)
+        return retire_frame();
     // Resolve the target: the current imported IOSurface slot, else the private
     // readback target.
     VkSurfaceSlot *slot = NULL;
@@ -538,7 +617,22 @@ static bool render(void) {
         vkCmdPushConstants(s_cmd, s_pl, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
         VkDeviceSize off = 0;
         vkCmdBindVertexBuffers(s_cmd, 0, 1, &s_vbo, &off);
-        vkCmdDraw(s_cmd, (uint32_t)written, 1, 0, 0);
+        // Preserve painter order. Per-image descriptors are structural layout
+        // matches, not an atlas allocation or a per-pixel geometry expansion.
+        size_t imageIndex = 0;
+        for (size_t quad = 0; quad < written / 6u;) {
+            VkDescriptorSet descriptor = s_ds;
+            size_t count = 1;
+            if (imageIndex < s_imageDrawCount && s_imageDraws[imageIndex].quad == quad) {
+                SampledImage *sampled = s_imageDraws[imageIndex++].sampled;
+                descriptor = (VkDescriptorSet) SampledImage_descriptor(sampled);
+            } else
+                count = (imageIndex < s_imageDrawCount ? s_imageDraws[imageIndex].quad : written / 6u) - quad;
+            vkCmdBindDescriptorSets(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_pl, 0, 1,
+                &descriptor, 0, nullptr);
+            vkCmdDraw(s_cmd, (uint32_t) (count * 6u), 1, (uint32_t) (quad * 6u), 0);
+            quad += count;
+        }
     }
     vkCmdEndRenderPass(s_cmd);
     if (!imported) {
@@ -552,15 +646,19 @@ static bool render(void) {
     VkSubmitInfo si = {0}; si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &s_cmd;
-    VK_ERR(vkQueueSubmit(s_queue, 1, &si, s_fence));
-    VK_ERR(vkWaitForFences(s_device, 1, &s_fence, VK_TRUE, 1000000000ull));
-    s_rendered = true;
-    return true;
+    VkResult submitted = vkQueueSubmit(s_queue, 1, &si, s_fence);
+    if (submitted == VK_SUCCESS || submitted == VK_ERROR_DEVICE_LOST)
+        s_pending = true;
+    if (submitted != VK_SUCCESS)
+        return false;
+    return retire_frame();
 }
 
 // ── Backend row ─────────────────────────────────────────────────────────────
 static bool vk_begin(void) {
     if (!init_vulkan()) return false;
+    if (!retire_frame()) return false;
+    release_image_draws();
     if (!s_batch) s_batch = VkBatch_0();
     if (!s_batch) return false;
     VkBatch_clear(s_batch);
@@ -593,28 +691,42 @@ static bool vk_fillRect(const Rect *rect, const Brush *brush) {
     VkBatch_rect(s_batch, *rect, brush);
     return true;
 }
-static bool vk_imageRun(Rect run, Color color, void *context) {
-    VkBatch *batch = context;
-    Brush brush = {color, 0, 0, 0, 0};
-    size_t before = VkBatch_vertices(batch, nullptr, 0);
-    VkBatch_rect(batch, run, &brush);
-    if (VkBatch_vertices(batch, nullptr, 0) != before + 6)
-        return false;
-    VkQuad *quad = &(*batch).quads[(*batch).count - 1];
-    (*quad).mode = -1.0f; // pre-sampled pixel coverage, not another SDF shape
-    return true;
-}
-
 static bool vk_drawImage(const Image *image, const Rect *dst) {
     if (!s_batch || !image || !dst)
         return false;
-    // Reference image path: real CPU-shadow samples become color-run quads.
-    // It does not sample the placeholder atlas or claim optimized GPU textures.
+    if (Rect_isEmpty(*dst))
+        return true;
+    // One completed sampled image -> one quad. First CPU-shadow admission is
+    // cold; gallery resources are prepared explicitly before showing the frame.
     Rect viewport = {0, 0, (float) s_w, (float) s_h};
     Rect clip = Rect_intersect(s_clip, viewport);
     if (Rect_isEmpty(clip))
         return true;
-    return ImageRuns_visit(image, *dst, clip, vk_imageRun, s_batch);
+    if (!VulkanBackend_prepareImage((Image*) image))
+        return false;
+    if (s_imageDrawCount == s_imageDrawCap) {
+        size_t capacity = s_imageDrawCap ? s_imageDrawCap * 2u : IMAGE_DRAW_INITIAL_CAPACITY;
+        if (capacity < s_imageDrawCap || capacity > SIZE_MAX / sizeof *s_imageDraws)
+            return false;
+        VkImageDraw *grown = realloc(s_imageDraws, capacity * sizeof *grown);
+        if (!grown)
+            return false;
+        s_imageDraws = grown;
+        s_imageDrawCap = capacity;
+    }
+    SampledImage *sampled = Image_gpuResource(image);
+    if (!SampledImage_retain(sampled))
+        return false;
+    size_t before = (*s_batch).count;
+    VkBatch_image(s_batch, image, (Rect){0,0,(float) Image_width(image),(float) Image_height(image)}, *dst);
+    if ((*s_batch).count != before + 1u) {
+        SampledImage_release(sampled);
+        return false;
+    }
+    VkQuad *quad = &(*s_batch).quads[before];
+    (*quad).texture = 0; // each descriptor is a one-layer texture, not atlas ID
+    s_imageDraws[s_imageDrawCount++] = (VkImageDraw){before, sampled};
+    return true;
 }
 static bool vk_drawText(const Rect *rect, const char *text, const Brush *brush) {
     if (!s_batch || !rect) return false;
@@ -677,7 +789,7 @@ bool VulkanBackend_bindSurface(void *iosurface, uint32_t widthPx, uint32_t heigh
 // Leave the imported target and return to the private (readback) target.
 void VulkanBackend_unbindSurface(void) {
     if (s_boundSlot < 0) return;
-    if (s_device) vkDeviceWaitIdle(s_device);
+    if (!retire_frame()) return;
     s_surfaceCurrent = -1;
     surface_slot_destroy(s_boundSlot);
     s_boundSlot = -1;
@@ -702,13 +814,13 @@ bool VulkanBackend_useSurface(int slot) {
 
 void VulkanBackend_cleanupSurfaces(void) {
     if (!s_device) return;
-    vkDeviceWaitIdle(s_device);
+    if (!retire_frame()) return;
     surface_slots_destroy_all();
 }
 
 void VulkanBackend_removeSurface(int slot) {
     if (slot < 0 || slot >= VK_SURFACE_MAX || !s_surfaces[slot].used) return;
-    if (s_device) vkDeviceWaitIdle(s_device);
+    if (!retire_frame()) return;
     if (s_surfaceCurrent == slot) s_surfaceCurrent = -1;
     if (s_boundSlot == slot) s_boundSlot = -1;
     surface_slot_destroy(slot);
@@ -716,7 +828,10 @@ void VulkanBackend_removeSurface(int slot) {
 
 void VulkanBackend_unbind(void) {
     if (s_device) {
-        vkDeviceWaitIdle(s_device);
+        if (!retire_frame()) return;
+        if (s_uploadPending && !SampledImage_release(s_uploadPending)) return;
+        s_uploadPending = nullptr;
+        release_image_draws();
         destroy_target();
         surface_slots_destroy_all();
         if (s_vbo) vkDestroyBuffer(s_device, s_vbo, NULL);
@@ -727,6 +842,12 @@ void VulkanBackend_unbind(void) {
         if (s_pl) vkDestroyPipelineLayout(s_device, s_pl, NULL);
         if (s_dpool) vkDestroyDescriptorPool(s_device, s_dpool, NULL);
         if (s_dsl) vkDestroyDescriptorSetLayout(s_device, s_dsl, NULL);
+        if (s_sampler) vkDestroySampler(s_device, s_sampler, nullptr);
+        if (s_texView) vkDestroyImageView(s_device, s_texView, nullptr);
+        if (s_tex) vkDestroyImage(s_device, s_tex, nullptr);
+        if (s_texMem) vkFreeMemory(s_device, s_texMem, nullptr);
+        if (s_pool) vkDestroyCommandPool(s_device, s_pool, nullptr);
+        if (s_fence) vkDestroyFence(s_device, s_fence, nullptr);
         if (s_rp) vkDestroyRenderPass(s_device, s_rp, NULL);
         if (s_rpPresent) vkDestroyRenderPass(s_device, s_rpPresent, NULL);
     }
@@ -743,4 +864,14 @@ void VulkanBackend_unbind(void) {
     s_dsl = VK_NULL_HANDLE;
     s_rp = VK_NULL_HANDLE;
     s_vboCap = s_rboCap = 0;
+    free(s_imageDraws);
+    s_imageDraws = nullptr;
+    s_imageDrawCount = s_imageDrawCap = 0;
+    s_sampler = VK_NULL_HANDLE;
+    s_texView = VK_NULL_HANDLE;
+    s_tex = VK_NULL_HANDLE;
+    s_texMem = VK_NULL_HANDLE;
+    s_pool = VK_NULL_HANDLE;
+    s_fence = VK_NULL_HANDLE;
+    s_pending = false;
 }

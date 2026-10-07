@@ -6,6 +6,7 @@
 
 #include "graphics/graphics.h"
 #include "vulkan/vk_batch.h"
+#include "vulkan/device.h"
 
 // graphvex R3 — vulkan/vulkan_backend.h
 //
@@ -41,5 +42,14 @@ void VulkanBackend_cleanupSurfaces(void);
 // The live quad batch (tests/debug); valid between begin() and present().
 const VkBatch *VulkanBackend_batch(void);
 const char *VulkanBackend_lastError(void);
+
+/* Cold owner-thread seam. The returned Device is borrowed from the renderer;
+ * it remains alive until unbind. Prepare uploads a CPU Image once, or admits a
+ * completed texture from that same Device. Images must clear/release GPU bindings
+ * before unbind. Repainting reads retained descriptors, never CPU color runs.
+ * Mutating raw CPU pixels requires Image_clearGpu before the next preparation. */
+Device *VulkanBackend_device(void);
+bool VulkanBackend_prepareImage(Image *image);
+size_t VulkanBackend_vertexBytes(void);
 
 #endif // GRAPHICS_VULKAN_BACKEND_H
