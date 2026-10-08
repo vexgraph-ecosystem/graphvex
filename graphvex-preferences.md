@@ -5,7 +5,7 @@
 ## 0. Constitution Link (supreme)
 - [preferences.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a) — real, Git-ignored workspace-root file at ../../../preferences.md, not a tracked Vexspoke file or symlink.
 - All universal laws in `../../../preferences.md` are mandatory and binding across the ecosystem.
-- This document codifies **exclusive** preferences for `graphvex` (R3 GPU Driver). R3 may borrow Vexspoke CPU computation/behavior and/or Relational Engine memory/storage/native C search public contracts. Current Vexspoke allocation remains during staged migration. GPU shaders, dispatch, capabilities and synchronization stay Graphvex-owned; engine integration is not implied.
+- This document codifies **exclusive** preferences for `graphvex` (R3 GPU Driver). R3 borrows Vexspoke CPU computation/behavior and Relational Engine memory/storage contracts. Canonical IO/NIO includes and the native Memory implementation now come from RE by default; allocation semantics remain compatible, not rewritten into Rust. GPU shaders, dispatch, capabilities and synchronization stay Graphvex-owned.
 
 ## 1. Exclusive Preferences Binding Matrix
 
@@ -28,9 +28,9 @@
 
 #### Definition:
 `graphvex` provides unified, backend-agnostic graphics primitives (`Image`, `Fence`, `Semaphore`, `Swapchain`, `CommandBuffer`, `CommandQueue`, `Surface`, and `GraphicsLayer`) that decouple high-level application and UI rendering pipelines from concrete hardware APIs (Vulkan, Metal, Direct3D).
-- **CPU Shadow & Zero Steady-State Allocation:** Resource handles (`Image`, `Swapchain`) maintain tightly-packed CPU shadow memory blocks (e.g. RGBA8 at width * height * 4 bytes) allocated through the `vexspoke` arena (`Memory_alloc`). High-level operations manipulate metadata and memory-mapped buffers without invoking heavy GPU driver state transitions during recording.
+- **CPU Shadow & Zero Steady-State Allocation:** Resource handles (`Image`, `Swapchain`) maintain tightly-packed CPU shadow memory blocks (e.g. RGBA8 at width * height * 4 Bytes) allocated through the `vexspoke` arena (`Memory_alloc`). High-level operations manipulate metadata and memory-mapped buffers without invoking heavy GPU driver state transitions during recording.
 - **Synchronization Contracts:** GPU-CPU join points (`Fence`) enforce a hard 100ms ceiling under the Bounded Wait Law (`FENCE_WAIT_TIMEOUT_NS`), preventing deadlocks on dropped frames. GPU-GPU timeline ordering (`Semaphore`) advances monotonically and is strictly probed, never blocking CPU threads.
-- **Dual Presentation Seam:** Display surfaces and swapchains seamlessly bridge into OS-level compositing layers (CAMetalLayer via `GraphicsLayer`, `VkIOSurface`, and window surface hooks) using native hardware pixel scaling (the Native Pixel Law) without leaking backend API types across repository boundaries. On Apple the host creates the IOSurface; `VulkanBackend_bindSurface` imports it as the render target (`VK_EXT_metal_objects`, `VkImportMetalIOSurfaceInfoEXT`) so the GPU writes the exact bytes CoreAnimation composites — zero-copy, no readback, still no `VkSwapchainKHR`.
+- **Dual Presentation Seam:** Display surfaces and swapchains seamlessly bridge into OS-level compositing layers (CAMetalLayer via `GraphicsLayer`, `VkIOSurface`, and window surface hooks) using native hardware pixel scaling (the Native Pixel Law) without leaking backend API types across repository boundaries. On Apple the host creates the IOSurface; `VulkanBackend_bindSurface` imports it as the render target (`VK_EXT_metal_objects`, `VkImportMetalIOSurfaceInfoEXT`) so the GPU writes the exact Bytes CoreAnimation composites — zero-copy, no readback, still no `VkSwapchainKHR`.
 
 #### The Why:
 Directly coupling UI widgets or game logic to Vulkan or Metal handles creates intractable cross-platform fragmentation, dangling command buffers across dynamic reload cycles, and driver lockups. By unifying graphics objects into pure C23 structs with predictable memory footprints, bounded waits, and optional backend binding, `graphvex` guarantees deterministic multi-platform rendering across macOS, Linux, and Windows with zero driver lock-in.
@@ -206,7 +206,7 @@ R3 and widget behavior to R4; include and lifecycle directions are unchanged.
 
 Graphical panel and label implementations live under `src/ui/<kind>/`; their
 public vocabulary remains under `src/lang`. Graphvex owns graphical element-tree
-composition and filter execution, with implementation under `src/compositor/`.
+composition and filter execution, with implementation under `src/compositor`.
 Editing, focus, widget semantics, layout policy and application behavior remain
 in Darling (R4); Graphvex borrows R2 public contracts only, never Darling headers.
 
