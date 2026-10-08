@@ -23,7 +23,7 @@ This codebase strictly enforces the verbose, explicit boilerplate required acros
 ### Why the Boilerplate Exists
 This boilerplate is **not** an accident, nor is it a misunderstanding of idiomatic C. It is an intentional, machine-verifiable scaffold built specifically for **AI-Human Pair Systems Programming**:
 1. **Machine Comprehension**: By eliminating `->` and isolating classes to single files, an AI coding agent can track GPU descriptor bindings, push constants, and synchronization fences with flawless mechanical rigor and zero aliasing.
-2. **Explicit Memory Boundaries**: `(*ptr).field` makes every memory indirection and GPU buffer offset unmistakable.
+2. **Explicit memory Boundaries**: `(*ptr).field` makes every memory indirection and GPU buffer offset unmistakable.
 3. **AI-Maintained Rigor**: The AI agent authors and maintains the dense boilerplate, allowing human architectural focus to be spent on Vulkan command recording, mesh clustering, and compute shader dispatch.
 
 ---

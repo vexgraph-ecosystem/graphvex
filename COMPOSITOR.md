@@ -131,7 +131,7 @@ CompositorStatus prepareGroup(const Image *content, DisplayList *list,
 
 ## Automated checks
 
-Tests live in the workspace `tests/graphvex/`, mirroring their owning units.
+Tests live in the workspace `../../../tests/graphvex`, mirroring their owning units.
 Use `./tools/b test compositor`, `./tools/b test filter_pool_test`,
 `./tools/b test filter_test` and `./tools/b test element_bounds_test` from the
 workspace. Documentation contracts use
@@ -193,7 +193,7 @@ retry. `GpuScope_render` remains the explicit numeric readback API.
 40-image reference-array growth, stable repeated-frame VBO capacity, release
 after recording and injected upload/frame timeout recovery. The gallery fixture
 compares every sampled GPU output pixel against its numeric readback counterpart
-after destroying GpuScope; each image needs only 576 vertex bytes.
+after destroying GpuScope; each image needs only 576 vertex Bytes.
 `python3 -B tests/tools/sampled_texture_test.py` executes optimized ASan/UBSan
 host owner tests with actual Vulkan pixels and bounded subprocess watchdogs.
 GPU shader sanitization, validation layers, real device loss/OOM, macOS14 runtime
