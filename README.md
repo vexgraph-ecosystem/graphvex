@@ -26,8 +26,8 @@ Current builds consume Vexspoke headers/runtime. The Vertical Integration Law
 permits R3 to borrow either R2 public contract: **Vexspoke** CPU computation,
 math, algorithms, synchronization and behavior, or **Relational Engine**
 memory/storage, stable rows, bindings and native C search over Rust-owned spans.
-That permission is not an implemented engine dependency. Migration is staged;
-the existing Vexspoke memory/container ABI and default allocator remain unchanged.
+Production native IO/NIO now comes from Relational Engine by default, with
+compatible C allocator semantics, not a Rust rewrite. Broader migration is staged.
 R1 owns storage residency/lifetimes. GPU shaders, dispatch, capabilities and
 synchronization stay Graphvex R3; no C/Rust atomic-layout compatibility or
 automatic schema migration is assumed. No R1/R4/R5 headers enter this driver.
@@ -40,7 +40,7 @@ automatic schema migration is assumed. No R1/R4/R5 headers enter this driver.
 | `src/graphics/viewport.{h,c}` | points ↔ native px via the backing scale (no virtual canvas) |
 | `src/graphics/render_loop.{h,c}` | present-on-demand: a resting client presents zero frames |
 | `src/image.{h,c}` | RGBA8 pixel buffer (scenes, pixel buffers, IOSurface) with a CPU shadow |
-| `src/compositor/` | origin-aware CPU group isolation, linear-premultiplied composition and ordered scatter filters; see [COMPOSITOR.md](COMPOSITOR.md) |
+| `src/compositor` | origin-aware CPU group isolation, linear-premultiplied composition and ordered scatter filters; see [COMPOSITOR.md](COMPOSITOR.md) |
 | `src/lang/filter.h` | 64-bit inline filter-token ABI; `compositor/filter_pool` stores indexed immutable complex recipes |
 | `src/ui/element.{h,c}` | graphical tree with separate event and absolute paint-bound queries |
 | `src/ui/property.{h,c}` | the shared placement record: rect + corner radius + border + shadow + anchor/pivot |
