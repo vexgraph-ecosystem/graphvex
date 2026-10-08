@@ -1,5 +1,34 @@
 # graphvex — R3 graphics foundation (supervised by R1 hotcwap)
 
+## Current State
+
+graphvex is an **R3 graphics driver**. Today it provides a working CPU
+graphics/compositor foundation plus a single Vulkan backend row — a substantial
+implementation, **not** a finished production renderer. Every claim below is
+bounded by the recorded evidence in `tests/test-checklist.md`.
+
+- **Implemented and exercised** (Apple Silicon macOS is the only proven host):
+  the rect-first drawable seam with a headless CPU raster backend (`graphics`),
+  native-pixel `viewport`, present-on-demand `render_loop`, the RGBA8 `image`,
+  the origin-aware CPU compositor with ordered filter tokens and isolated
+  groups, the `ui/element` + `ui/property` tree with separate event and paint
+  bounds, retained offscreen `board`s, and the Vulkan session / pipeline / quad
+  batcher / `vk_renderer` row; `compositor/gpu_scope` executes real Vulkan
+  filter-scatter pipelines.
+- **Recorded proof is partial.** The per-file ledger carries executed evidence
+  for only a minority of graphvex files (for example `image`, `gpu_scope`,
+  `sampled_image`, `image_runs`, and the compositor/filter/vulkan suites); many
+  source and test rows are **unrecorded**. Unrecorded is *not proven* — and it
+  is not a claim that those files fail.
+- **Documented as partial or planned, not proven:** the wider subsystem grades
+  in the readiness matrix (bindless descriptor heaps, meshlets, SDF atlases,
+  zero-copy IOSurface compositing, 3D shading) exceed what the recorded graphvex
+  evidence establishes. The reference compositor still allocates during
+  composition rather than running a pooled hot path; advanced compute/lighting
+  (PBR, particles, OIT) is not implemented.
+- **Platforms:** proven on Apple Silicon macOS 14+ only. Windows and Linux GPU
+  paths and shaders are unproven.
+
 ## CLion: CMake is IDE metadata only
 
 Open this repository root as a CMake project. `CMakeLists.txt` provides C23
@@ -84,3 +113,22 @@ cd ~/vexgraph
 The tests live in the workspace `tests` repo, mirrored per unit under
 `tests/graphvex/<dir>/<unit>_test.c` (the Test Tree Mirror Law). The in-repo
 `../../../tests` and prebuilt `shader/spv/` of the old tree were retired with the rewrite.
+
+## Scope and Limitations
+
+graphvex covers backend-agnostic graphics primitives, the graphical element-tree
+compositor, and SPIR-V shader deployment. It deliberately does not do the
+following:
+
+- **It never owns a window or a swapchain.** There is no `VK_KHR_swapchain`;
+  rendering targets graphvex `Image`/`Board`s, and the on-screen destination is
+  a host-borrowed seam (a `CAMetalLayer` on Apple).
+- **It includes no R1/R4/R5 headers** and does not own widget semantics,
+  input/focus, layout policy, or host bridges — those stay with `hotcwap` (R1)
+  and `darling-framework` (R4).
+- **It is not a complete production renderer.** Bindless descriptor heaps,
+  meshlets, SDF atlases, 3D shading and advanced lighting remain partial or
+  planned; the reference compositor is not yet a pooled hot path.
+- **It proves no cross-platform GPU path.** Only Apple Silicon macOS 14+ on the
+  local host is exercised; the IDE CMake adapter is metadata only and is not
+  proof of a standalone runtime build or GPU readiness.
