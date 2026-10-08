@@ -69,7 +69,7 @@ CompositorSurface *CompositorSurface_0(void) {
     return CompositorSurface_1((CompositorBounds) {0});
 }
 CompositorSurface *CompositorSurface_1(CompositorBounds bounds) {
-    CompositorSurface *surface = NULL;
+    CompositorSurface *surface = nullptr;
     CompositorSurface_create(bounds, &surface);
     return surface;
 }
@@ -120,10 +120,10 @@ CompositorBounds CompositorSurface_bounds(const CompositorSurface *surface) {
     return surface ? (*surface).bounds : (CompositorBounds) {0};
 }
 float *CompositorSurface_pixels(CompositorSurface *surface) {
-    return surface ? (*surface).pixels : NULL;
+    return surface ? (*surface).pixels : nullptr;
 }
 const float *CompositorSurface_constPixels(const CompositorSurface *surface) {
-    return surface ? (*surface).pixels : NULL;
+    return surface ? (*surface).pixels : nullptr;
 }
 
 static CompositorStatus decode(FilterToken token, float *gain, uint32_t *radius) {
@@ -291,7 +291,7 @@ static CompositorStatus apply(CompositorSurface **surface, FilterToken token) {
     status = Compositor_filterBounds(b, &token, 1, &expanded);
     if (status != COMPOSITOR_OK)
         return status;
-    CompositorSurface *dst = NULL;
+    CompositorSurface *dst = nullptr;
     status = CompositorSurface_create(expanded, &dst);
     if (status != COMPOSITOR_OK)
         return status;
@@ -354,7 +354,7 @@ CompositorStatus Compositor_compose(const CompositorSurface *const *sources,
                                                        &finalBounds);
     if (status != COMPOSITOR_OK)
         return status;
-    CompositorSurface *group = NULL;
+    CompositorSurface *group = nullptr;
     status = CompositorSurface_create(bounds, &group);
     if (status != COMPOSITOR_OK)
         return status;

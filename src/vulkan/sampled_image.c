@@ -226,9 +226,9 @@ SampledImage *SampledImage_2(Device *owner, const Image *source) {
     self = adopt(owner, image, memory, w, h);
     if (!self)
         goto failed;
-    VkDeviceSize bytes = (VkDeviceSize) w * h * 4u;
+    VkDeviceSize Bytes = (VkDeviceSize) w * h * 4u;
     VkBufferCreateInfo staging = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .size = bytes, .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+        .size = Bytes, .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
     if (vkCreateBuffer(d, &staging, nullptr, &(*self).staging) != VK_SUCCESS)
         goto failed;
     vkGetBufferMemoryRequirements(d, (*self).staging, &requirements);
@@ -240,7 +240,7 @@ SampledImage *SampledImage_2(Device *owner, const Image *source) {
         vkBindBufferMemory(d, (*self).staging, (*self).stagingMemory, 0) != VK_SUCCESS)
         goto failed;
     void *mappedPixelBytes = nullptr;
-    if (vkMapMemory(d, (*self).stagingMemory, 0, bytes, 0, &mappedPixelBytes) != VK_SUCCESS)
+    if (vkMapMemory(d, (*self).stagingMemory, 0, Bytes, 0, &mappedPixelBytes) != VK_SUCCESS)
         goto failed;
     for (uint32_t y = 0; y < h; ++y)
         memcpy((uint8_t*) mappedPixelBytes + (size_t) y * w * 4u,

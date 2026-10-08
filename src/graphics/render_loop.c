@@ -38,7 +38,7 @@ void RenderLoop_free(RenderLoop *loop) {
     free(loop);
 }
 
-static RenderLoop *s_default = NULL;
+static RenderLoop *s_default = nullptr;
 RenderLoop *RenderLoop_default(void) {
     if (!s_default) s_default = RenderLoop_0();
     return s_default;
@@ -75,10 +75,10 @@ bool RenderLoop_removeClient(RenderLoop *loop, void *window) {
 }
 
 Client *RenderLoop_findClient(RenderLoop *loop, const void *window) {
-    if (!loop) return NULL;
+    if (!loop) return nullptr;
     for (int i = 0; i < (*loop).count; i++)
         if ((*loop).clients[i].window == window) return &(*loop).clients[i];
-    return NULL;
+    return nullptr;
 }
 
 void RenderLoop_markDirty(RenderLoop *loop, void *window) {

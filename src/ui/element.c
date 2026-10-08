@@ -67,9 +67,9 @@ Point Part_point(Rect r, int part) {
 
 Element *Element_1(const ElementDesc *d) {
     Element *e = calloc(1, sizeof *e);
-    if (!e) return NULL;
-    Property *p = PropertyPool_alloc(PropertyPool_default(), NULL);
-    if (!p) { free(e); return NULL; }
+    if (!e) return nullptr;
+    Property *p = PropertyPool_alloc(PropertyPool_default(), nullptr);
+    if (!p) { free(e); return nullptr; }
     (*e).property = p;
     (*e).ownsProperty = true;
     (*p).w = d ? (*d).width : 0.0f;
@@ -87,13 +87,13 @@ Element *Element_1(const ElementDesc *d) {
     (*e).offsetY = d ? (*d).offsetY : 0.0f;
     (*e).anchor = d ? (*d).anchor : PART_TOP_LEFT;
     (*e).pivot = d ? (*d).pivot : PART_TOP_LEFT;
-    (*e).tag = d ? (*d).tag : NULL;
+    (*e).tag = d ? (*d).tag : nullptr;
     (*e).visible = true;
     (*e).cursorPreference = -1;
     return e;
 }
 
-Element *Element_0(void) { return Element_1(NULL); }
+Element *Element_0(void) { return Element_1(nullptr); }
 
 void Element_destroy(Element *e) {
     if (!e) return;
@@ -105,7 +105,7 @@ void Element_destroy(Element *e) {
 }
 
 // ── the bound ───────────────────────────────────────────────────────────────
-Property *Element_property(const Element *e) { return e ? (*e).property : NULL; }
+Property *Element_property(const Element *e) { return e ? (*e).property : nullptr; }
 
 Element *Element_setProperty(Element *e, Property *property) {
     if (!e) return e;
@@ -184,7 +184,7 @@ bool Element_remove(Element *child) {
         if ((*p).children[i] != child) continue;
         memmove(&(*p).children[i], &(*p).children[i + 1], (size_t)((*p).count - i - 1) * sizeof *(*p).children);
         (*p).count--;
-        (*child).parent = NULL;
+        (*child).parent = nullptr;
         Element_markDirty(p);
         return true;
     }
@@ -194,40 +194,40 @@ bool Element_remove(Element *child) {
 int Element_count(const Element *e) { return e ? (*e).count : 0; }
 
 Element *Element_child(const Element *e, int index) {
-    if (!e || index < 0 || index >= (*e).count) return NULL;
+    if (!e || index < 0 || index >= (*e).count) return nullptr;
     return (*e).children[index];
 }
 
-Element *Element_parent(const Element *e) { return e ? (*e).parent : NULL; }
+Element *Element_parent(const Element *e) { return e ? (*e).parent : nullptr; }
 
 Element *Element_root(Element *e) {
-    if (!e) return NULL;
+    if (!e) return nullptr;
     while ((*e).parent) e = (*e).parent;
     return e;
 }
 
 Element *Element_find(Element *root, const char *tag) {
-    if (!root || !tag) return NULL;
+    if (!root || !tag) return nullptr;
     if ((*root).tag && !strcmp((*root).tag, tag)) return root;
     for (int i = 0; i < (*root).count; i++) {
         Element *hit = Element_find((*root).children[i], tag);
         if (hit) return hit;
     }
-    return NULL;
+    return nullptr;
 }
 
 // ── hit-test (deepest top-most element under the point) ─────────────────────
 static Element *hit_rec(Element *e, Rect absolute, float x, float y) {
-    if (!e || !(*e).visible || !(*e).property) return NULL;
+    if (!e || !(*e).visible || !(*e).property) return nullptr;
     const Property *property = (*e).property;
     // Descendants cannot receive input where an ancestor masks their paint.
     if ((*property).clip || (*property).radius > 0.0f) {
-        if (!Rect_contains(absolute, x, y)) return NULL;
+        if (!Rect_contains(absolute, x, y)) return nullptr;
         float radius = fminf((*property).radius, fminf(absolute.w, absolute.h) * 0.5f);
         if (radius > 0.0f) {
             float qx = fmaxf(fabsf(x - absolute.x - absolute.w * 0.5f) - (absolute.w * 0.5f - radius), 0.0f);
             float qy = fmaxf(fabsf(y - absolute.y - absolute.h * 0.5f) - (absolute.h * 0.5f - radius), 0.0f);
-            if (qx * qx + qy * qy > radius * radius) return NULL;
+            if (qx * qx + qy * qy > radius * radius) return nullptr;
         }
     }
     for (int i = (*e).count - 1; i >= 0; i--) {
@@ -239,11 +239,11 @@ static Element *hit_rec(Element *e, Rect absolute, float x, float y) {
     if (x >= absolute.x && x < absolute.x + absolute.w &&
         y >= absolute.y && y < absolute.y + absolute.h)
         return e;
-    return NULL;
+    return nullptr;
 }
 
 Element *Element_hit(Element *root, float x, float y) {
-    if (!root) return NULL;
+    if (!root) return nullptr;
     Rect self = {0, 0, Property_width((*root).property), Property_height((*root).property)};
     return hit_rec(root, self, x, y);
 }
@@ -352,7 +352,7 @@ Element *Element_setImage(Element *e, const Image *image) {
 }
 
 const Image *Element_image(const Element *e) {
-    return e ? (*e).image : NULL;
+    return e ? (*e).image : nullptr;
 }
 
 // ── queries ─────────────────────────────────────────────────────────────────
@@ -369,7 +369,7 @@ int   Element_pivot(const Element *e) { return e ? (*e).pivot : PART_TOP_LEFT; }
 bool  Element_isValid(const Element *e) { return e && (*e).property && (*e).property->w >= 0.0f && (*e).property->h >= 0.0f; }
 bool  Element_isVisible(const Element *e) { return e && (*e).visible; }
 bool  Element_isPressed(const Element *e) { return e && (*e).pressed; }
-const char *Element_tag(const Element *e) { return e ? (*e).tag : NULL; }
+const char *Element_tag(const Element *e) { return e ? (*e).tag : nullptr; }
 
 // ── paint ───────────────────────────────────────────────────────────────────
 void Element_paint(const Element *e, Rect absolute, DisplayList *dl) {

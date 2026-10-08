@@ -46,11 +46,11 @@ CompositorStatus Compositor_crop(const CompositorSurface *source,
     const float *sp = CompositorSurface_constPixels(source);
     float *dp = CompositorSurface_pixels(crop);
     if (x1 > x0) {
-        size_t bytes = (size_t) (x1 - x0) * 4 * sizeof(float);
+        size_t Bytes = (size_t) (x1 - x0) * 4 * sizeof(float);
         for (int64_t y = y0; y < y1; ++y) {
             const float *row = sp + 4 * ((size_t) (y - s.y) * s.width + (size_t) (x0 - s.x));
             float *dest = dp + 4 * ((size_t) (y - bounds.y) * bounds.width + (size_t) (x0 - bounds.x));
-            memcpy(dest, row, bytes);
+            memcpy(dest, row, Bytes);
         }
     }
     *out = crop;

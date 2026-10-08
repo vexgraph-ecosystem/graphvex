@@ -15,10 +15,10 @@ typedef struct Pipeline Pipeline;
 
 typedef struct PipelineDesc {
     const void *vertSpirv;    // SPIR-V words
-    uint32_t vertSize;        // bytes
+    uint32_t vertSize;        // Bytes
     const void *fragSpirv;
     uint32_t fragSize;
-    uint32_t vertexStride;    // bytes per vertex (VK_VERTEX_FLOATS * 4)
+    uint32_t vertexStride;    // Bytes per vertex (VK_VERTEX_FLOATS * 4)
     uint32_t pushConstantSize;// e.g. sizeof(vec2 viewport)
 } PipelineDesc;
 

@@ -14,7 +14,7 @@
 // sampled GPU texture. GPU-only filter outputs remain drawable without readback.
 // Legacy native/IOSurface fields are borrowed handles, not ownership references.
 //
-// Strict 0xRRGGBBAA Color Law: bytes in memory are R,G,B,A; the Metal drawable
+// Strict 0xRRGGBBAA Color Law: Bytes in memory are R,G,B,A; the Metal drawable
 // wants BGRA, so the conversion lives ONLY at the presentation boundary.
 
 #define IMAGE_FORMAT_RGBA8 0u
@@ -53,7 +53,7 @@ uint32_t Image_width(const Image *image);
 uint32_t Image_height(const Image *image);
 uint32_t Image_format(const Image *image);
 uint32_t Image_usage(const Image *image);
-size_t   Image_stride(const Image *image);      // bytes per row
+size_t   Image_stride(const Image *image);      // Bytes per row
 uint8_t *Image_pixels(const Image *image);      // CPU shadow (nullable)
 bool     Image_isValid(const Image *image);
 

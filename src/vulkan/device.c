@@ -25,7 +25,7 @@ static void set_err(Device *c, const char *msg) {
 Device *Device_create(bool enableValidation) {
     (void)enableValidation;   // validation layers land in a debug slice
     Device *c = calloc(1, sizeof *c);
-    if (!c) return NULL;
+    if (!c) return nullptr;
     set_err(c, "ok");
 
     VkApplicationInfo app = {0};
@@ -47,20 +47,20 @@ Device *Device_create(bool enableValidation) {
     ici.enabledExtensionCount = extCount;
     ici.ppEnabledExtensionNames = exts;
     ici.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-    if (vkCreateInstance(&ici, NULL, &(*c).instance) != VK_SUCCESS) {
+    if (vkCreateInstance(&ici, nullptr, &(*c).instance) != VK_SUCCESS) {
         set_err(c, "vkCreateInstance failed (is a Vulkan/MoltenVK driver installed?)");
         Device_destroy(c);
-        return NULL;
+        return nullptr;
     }
 
     uint32_t count = 0;
-    if (vkEnumeratePhysicalDevices((*c).instance, &count, NULL) != VK_SUCCESS || count == 0) {
+    if (vkEnumeratePhysicalDevices((*c).instance, &count, nullptr) != VK_SUCCESS || count == 0) {
         set_err(c, "no Vulkan physical devices");
         Device_destroy(c);
-        return NULL;
+        return nullptr;
     }
     VkPhysicalDevice *devs = calloc(count, sizeof *devs);
-    if (!devs) { Device_destroy(c); return NULL; }
+    if (!devs) { Device_destroy(c); return nullptr; }
     vkEnumeratePhysicalDevices((*c).instance, &count, devs);
     (*c).physical = devs[0];
     free(devs);
@@ -70,9 +70,9 @@ Device *Device_create(bool enableValidation) {
     snprintf((*c).deviceName, sizeof (*c).deviceName, "%s", props.deviceName);
 
     uint32_t qn = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties((*c).physical, &qn, NULL);
+    vkGetPhysicalDeviceQueueFamilyProperties((*c).physical, &qn, nullptr);
     VkQueueFamilyProperties *qf = calloc(qn ? qn : 1, sizeof *qf);
-    if (!qf) { Device_destroy(c); return NULL; }
+    if (!qf) { Device_destroy(c); return nullptr; }
     vkGetPhysicalDeviceQueueFamilyProperties((*c).physical, &qn, qf);
     int chosen = -1;
     for (uint32_t i = 0; i < qn; i++) {
@@ -82,7 +82,7 @@ Device *Device_create(bool enableValidation) {
     if (chosen < 0) {
         set_err(c, "no graphics queue family");
         Device_destroy(c);
-        return NULL;
+        return nullptr;
     }
     (*c).queueFamily = (uint32_t)chosen;
 
@@ -102,12 +102,12 @@ Device *Device_create(bool enableValidation) {
     // it when present. VK_EXT_metal_objects (Apple) lets us import an IOSurface
     // as a render target — the zero-copy seam. Both are enabled only if present.
     uint32_t extN = 0;
-    vkEnumerateDeviceExtensionProperties((*c).physical, NULL, &extN, NULL);
+    vkEnumerateDeviceExtensionProperties((*c).physical, nullptr, &extN, nullptr);
     VkExtensionProperties *devExts = calloc(extN ? extN : 1, sizeof *devExts);
     const char *want[2];
     uint32_t wantN = 0;
     if (devExts) {
-        vkEnumerateDeviceExtensionProperties((*c).physical, NULL, &extN, devExts);
+        vkEnumerateDeviceExtensionProperties((*c).physical, nullptr, &extN, devExts);
         for (uint32_t i = 0; i < extN; i++) {
             if (!strcmp(devExts[i].extensionName, "VK_KHR_portability_subset"))
                 want[wantN++] = "VK_KHR_portability_subset";
@@ -119,12 +119,12 @@ Device *Device_create(bool enableValidation) {
         free(devExts);
     }
     dci.enabledExtensionCount = wantN;
-    dci.ppEnabledExtensionNames = wantN ? want : NULL;
+    dci.ppEnabledExtensionNames = wantN ? want : nullptr;
 
-    if (vkCreateDevice((*c).physical, &dci, NULL, &(*c).device) != VK_SUCCESS) {
+    if (vkCreateDevice((*c).physical, &dci, nullptr, &(*c).device) != VK_SUCCESS) {
         set_err(c, "vkCreateDevice failed");
         Device_destroy(c);
-        return NULL;
+        return nullptr;
     }
     vkGetDeviceQueue((*c).device, (*c).queueFamily, 0, &(*c).queue);
     return c;
@@ -132,17 +132,17 @@ Device *Device_create(bool enableValidation) {
 
 void Device_destroy(Device *c) {
     if (!c) return;
-    if ((*c).device) vkDestroyDevice((*c).device, NULL);
-    if ((*c).instance) vkDestroyInstance((*c).instance, NULL);
+    if ((*c).device) vkDestroyDevice((*c).device, nullptr);
+    if ((*c).instance) vkDestroyInstance((*c).instance, nullptr);
     free(c);
 }
 
 bool Device_isValid(const Device *c) { return c && (*c).device != VK_NULL_HANDLE; }
 const char *Device_lastError(const Device *c) { return c ? (*c).error : "null device"; }
 const char *Device_name(const Device *c) { return c ? (*c).deviceName : ""; }
-void *Device_native(const Device *c) { return c ? (void *)((*c).device) : NULL; }
-void *Device_instance(const Device *c) { return c ? (void *)((*c).instance) : NULL; }
-void *Device_physical(const Device *c) { return c ? (void *)((*c).physical) : NULL; }
-void *Device_queue(const Device *c) { return c ? (void *)((*c).queue) : NULL; }
+void *Device_native(const Device *c) { return c ? (void*) ((*c).device) : nullptr; }
+void *Device_instance(const Device *c) { return c ? (void*) ((*c).instance) : nullptr; }
+void *Device_physical(const Device *c) { return c ? (void*) ((*c).physical) : nullptr; }
+void *Device_queue(const Device *c) { return c ? (void*) ((*c).queue) : nullptr; }
 uint32_t Device_queueFamily(const Device *c) { return c ? (*c).queueFamily : 0u; }
 bool Device_hasMetalObjects(const Device *c) { return c && (*c).metalObjects; }

@@ -39,7 +39,7 @@ CompositorStatus CompositorSurface_fromImage(const Image *image,
     if (!pixels)
         return COMPOSITOR_INVALID;
     CompositorBounds b = {x, y, Image_width(image), Image_height(image)};
-    CompositorSurface *surface = NULL;
+    CompositorSurface *surface = nullptr;
     CompositorStatus status = CompositorSurface_create(b, &surface);
     if (status != COMPOSITOR_OK)
         return status;

@@ -47,7 +47,7 @@ static VkQuad *batch_push(VkBatch *b) {
     if ((*b).count == (*b).cap) {
         (*b).cap = (*b).cap ? (*b).cap * 2 : 256;
         VkQuad *grown = realloc((*b).quads, (*b).cap * sizeof *grown);
-        if (!grown) { (*b).cap = 0; (*b).count = 0; return NULL; }
+        if (!grown) { (*b).cap = 0; (*b).count = 0; return nullptr; }
         (*b).quads = grown;
     }
     VkQuad *q = &(*b).quads[(*b).count++];

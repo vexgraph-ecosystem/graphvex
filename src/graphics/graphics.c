@@ -20,7 +20,7 @@
 #define MAX_BACKENDS 8
 static const Backend *s_rows[MAX_BACKENDS];
 static int s_rowCount = 0;
-static const Backend *s_current = NULL;
+static const Backend *s_current = nullptr;
 static DrawCmd s_baseClip;
 static bool s_hasBaseClip = false; // explicit clip outside a display-list scope
 
@@ -66,7 +66,7 @@ bool Graphics_clear(Color color) {
 }
 bool Graphics_clipRounded(const Rect *rect, float radius) {
     if (!s_current || !(*s_current).clip || !(*s_current).clip(rect, radius)) return false;
-    s_hasBaseClip = rect != NULL;
+    s_hasBaseClip = rect != nullptr;
     if (rect) { s_baseClip.dst = *rect; s_baseClip.radius = fmaxf(radius, 0); }
     return true;
 }
@@ -113,7 +113,7 @@ static DrawCmd *dl_push(DisplayList *dl) {
     if ((*dl).count == (*dl).cap) {
         (*dl).cap = (*dl).cap ? (*dl).cap * 2 : 64;
         (*dl).items = realloc((*dl).items, (*dl).cap * sizeof *(*dl).items);
-        if (!(*dl).items) { (*dl).cap = 0; (*dl).count = 0; return NULL; }
+        if (!(*dl).items) { (*dl).cap = 0; (*dl).count = 0; return nullptr; }
     }
     DrawCmd *c = &(*dl).items[(*dl).count++];
     memset(c, 0, sizeof *c);
@@ -183,7 +183,7 @@ void DisplayList_unclip(DisplayList *dl) {
 }
 
 size_t DisplayList_count(const DisplayList *dl) { return dl ? (*dl).count : 0; }
-const DrawCmd *DisplayList_cmds(const DisplayList *dl) { return dl ? (*dl).items : NULL; }
+const DrawCmd *DisplayList_cmds(const DisplayList *dl) { return dl ? (*dl).items : nullptr; }
 
 // Submit original geometry; scissors must never resize rounded boxes or UVs.
 static bool submit_draw(const DrawCmd *cmd) {
@@ -215,7 +215,7 @@ static bool submit_span(const DrawCmd *cmd, Rect span) {
 static bool submit_masks(DisplayList *dl, const DrawCmd *cmd, size_t depth) {
     depth += s_hasBaseClip ? 1 : 0;
     if (depth == 0)
-        return submit_clip(NULL, 0) && submit_draw(cmd);
+        return submit_clip(nullptr, 0) && submit_draw(cmd);
     if (depth == 1) {
         const DrawCmd *mask = submit_mask(dl, 0);
         return submit_clip(&(*mask).dst, (*mask).radius) && submit_draw(cmd);
@@ -278,12 +278,12 @@ bool Graphics_submit(DisplayList *dl) {
     }
     // Restore the caller's explicit clip on success and error; list-local
     // masks never leak across submissions or overwrite an enclosing scope.
-    bool reset = submit_clip(s_hasBaseClip ? &s_baseClip.dst : NULL, s_baseClip.radius);
+    bool reset = submit_clip(s_hasBaseClip ? &s_baseClip.dst : nullptr, s_baseClip.radius);
     return ok && depth == 0 && reset;
 }
 
 // ── headless CPU (raster) backend ───────────────────────────────────────────
-static uint32_t *s_px = NULL;
+static uint32_t *s_px = nullptr;
 static int32_t s_capW = 0, s_capH = 0;   // allocation; row stride == s_capW
 static int32_t s_w = 0, s_h = 0;         // logical viewport (the scissor region)
 static Rect s_clip = {0, 0, 0, 0};
@@ -339,7 +339,7 @@ uint32_t Raster_pixelAt(uint32_t x, uint32_t y) {
     return s_px[(size_t)y * (size_t)s_capW + (size_t)x];
 }
 
-static bool raster_begin(void) { return s_px != NULL; }
+static bool raster_begin(void) { return s_px != nullptr; }
 static bool raster_end(void) { return true; }
 static bool raster_present(void) { return true; }
 
@@ -470,7 +470,7 @@ static bool raster_drawText(const Rect *rect, const char *text, const Brush *bru
     return true;
 }
 
-// screenshot: copy the framebuffer into an Image (RGBA8, 0xRRGGBBAA bytes)
+// screenshot: copy the framebuffer into an Image (RGBA8, 0xRRGGBBAA Bytes)
 static bool raster_capture(Image *dest) {
     if (!dest || !s_px) return false;
     if (!Image_ensureShadow(dest, (uint32_t)s_w, (uint32_t)s_h)) return false;

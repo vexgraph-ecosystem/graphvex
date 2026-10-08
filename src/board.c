@@ -65,7 +65,7 @@ struct Board {
 
 Board *Board_new(const BoardDesc *desc) {
     Board *b = calloc(1, sizeof *b);
-    if (!b) return NULL;
+    if (!b) return nullptr;
     uint32_t w = desc ? (*desc).width : 1;
     uint32_t h = desc ? (*desc).height : 1;
     uint32_t usage = desc ? (*desc).usage : (IMAGE_USAGE_RENDER | IMAGE_USAGE_SAMPLED | IMAGE_USAGE_TRANSFER);
@@ -73,12 +73,12 @@ Board *Board_new(const BoardDesc *desc) {
     (*b).image = Image_new(&id);
     if (!(*b).image) {
         free(b);
-        return NULL;
+        return nullptr;
     }
     return b;
 }
 
-Board *Board_0(void) { return Board_new(NULL); }
+Board *Board_0(void) { return Board_new(nullptr); }
 Board *Board_2(uint32_t width, uint32_t height) {
     BoardDesc d = {width, height, 0u};
     return Board_new(&d);
@@ -113,8 +113,8 @@ uint64_t Board_generation(const Board *board) {
     return board ? atomic_load(&(*board).generation) : 0u;
 }
 bool Board_isValid(const Board *board) { return board && Image_isValid((*board).image); }
-Image *Board_image(const Board *board) { return board ? (*board).image : NULL; }
-void *Board_native(const Board *board) { return board ? (*board).native : NULL; }
+Image *Board_image(const Board *board) { return board ? (*board).image : nullptr; }
+void *Board_native(const Board *board) { return board ? (*board).native : nullptr; }
 
 // ── revalidation ────────────────────────────────────────────────────────────
 void Board_addRevalidator(Board *board, BoardRevalidateFn fn, void *userdata) {

@@ -16,15 +16,15 @@ struct PropertyPool {
 
 PropertyPool *PropertyPool_0(void) {
     PropertyPool *pp = calloc(1, sizeof *pp);
-    if (!pp) return NULL;
+    if (!pp) return nullptr;
     (*pp).slots = Pool_new(sizeof(Property), PROPERTY_POOL_BLOCK_CAP);
-    if (!(*pp).slots) { free(pp); return NULL; }
+    if (!(*pp).slots) { free(pp); return nullptr; }
     return pp;
 }
 
-// The process-global pool Element-owned bounds come from (like Memory's default
+// The process-global pool Element-owned bounds come from (like memory's default
 // arena). Borrowed, never destroyed by callers.
-static PropertyPool *s_default = NULL;
+static PropertyPool *s_default = nullptr;
 PropertyPool *PropertyPool_default(void) {
     if (!s_default) s_default = PropertyPool_0();
     return s_default;
@@ -37,9 +37,9 @@ void PropertyPool_destroy(PropertyPool *pool) {
 }
 
 Property *PropertyPool_alloc(PropertyPool *pool, const Property *init) {
-    if (!pool) return NULL;
+    if (!pool) return nullptr;
     Property *p = Pool_alloc((*pool).slots);
-    if (!p) return NULL;
+    if (!p) return nullptr;
     *p = init ? *init : Property_default();
     return p;
 }

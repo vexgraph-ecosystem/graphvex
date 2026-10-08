@@ -9,7 +9,7 @@
 // a Device is bound (next slice); until then this is the shader/state record.
 
 struct Pipeline {
-    void *vert;         // SPIR-V bytes
+    void *vert;         // SPIR-V Bytes
     uint32_t vertSize;
     void *frag;
     uint32_t fragSize;
@@ -20,15 +20,15 @@ struct Pipeline {
 
 static void *slurp(const char *path, uint32_t *outSize) {
     FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
+    if (!f) return nullptr;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (n <= 0) { fclose(f); return NULL; }
+    if (n <= 0) { fclose(f); return nullptr; }
     void *buf = malloc((size_t)n);
     if (buf && fread(buf, 1, (size_t)n, f) != (size_t)n) {
         free(buf);
-        buf = NULL;
+        buf = nullptr;
     }
     fclose(f);
     if (buf) *outSize = (uint32_t)n;
@@ -36,14 +36,14 @@ static void *slurp(const char *path, uint32_t *outSize) {
 }
 
 Pipeline *Pipeline_new(const PipelineDesc *desc) {
-    if (!desc || !(*desc).vertSpirv || !(*desc).fragSpirv) return NULL;
+    if (!desc || !(*desc).vertSpirv || !(*desc).fragSpirv) return nullptr;
     Pipeline *p = calloc(1, sizeof *p);
-    if (!p) return NULL;
+    if (!p) return nullptr;
     (*p).vert = malloc((*desc).vertSize);
     (*p).frag = malloc((*desc).fragSize);
     if (!(*p).vert || !(*p).frag) {
         Pipeline_destroy(p);
-        return NULL;
+        return nullptr;
     }
     memcpy((*p).vert, (*desc).vertSpirv, (*desc).vertSize);
     memcpy((*p).frag, (*desc).fragSpirv, (*desc).fragSize);
@@ -62,7 +62,7 @@ Pipeline *Pipeline_fromFiles(const char *vertSpvPath, const char *fragSpvPath,
     if (!v || !f) {
         free(v);
         free(f);
-        return NULL;
+        return nullptr;
     }
     PipelineDesc d = {v, vs, f, fs, vertexStride, pushConstantSize};
     Pipeline *p = Pipeline_new(&d);
@@ -86,4 +86,4 @@ uint32_t Pipeline_vertexStride(const Pipeline *pipeline) {
     return pipeline ? (*pipeline).vertexStride : 0u;
 }
 
-void *Pipeline_native(const Pipeline *pipeline) { return pipeline ? (*pipeline).native : NULL; }
+void *Pipeline_native(const Pipeline *pipeline) { return pipeline ? (*pipeline).native : nullptr; }

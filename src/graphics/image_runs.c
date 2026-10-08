@@ -6,7 +6,7 @@
 #include <limits.h>
 #include <math.h>
 
-_Static_assert(SIZE_MAX / 4 >= UINT32_MAX, "RGBA row bytes require supported 64-bit size_t");
+_Static_assert(SIZE_MAX / 4 >= UINT32_MAX, "RGBA row Bytes require supported 64-bit size_t");
 
 ;;DEFINITION
 /* ImageRuns converts a borrowed straight RGBA8 CPU shadow into nearest-sampled

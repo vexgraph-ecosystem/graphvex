@@ -32,8 +32,8 @@ static bool blocks_push(Pool *p, void *block) {
 }
 
 static bool pool_grow(Pool *p) {
-    size_t bytes = (*p).stride * (size_t)(*p).blockCap;
-    uint8_t *mem = Memory_alloc(0, bytes);
+    size_t Bytes = (*p).stride * (size_t)(*p).blockCap;
+    uint8_t *mem = Memory_alloc(0, Bytes);
     if (!mem) return false;
     if (!blocks_push(p, mem)) { Memory_free(mem); return false; }
     for (uint32_t i = 0; i < (*p).blockCap; i++) {
@@ -45,9 +45,9 @@ static bool pool_grow(Pool *p) {
 }
 
 Pool *Pool_new(size_t stride, uint32_t blockCap) {
-    if (stride < sizeof(void *) || blockCap == 0) return NULL;
+    if (stride < sizeof(void *) || blockCap == 0) return nullptr;
     Pool *p = calloc(1, sizeof *p);
-    if (!p) return NULL;
+    if (!p) return nullptr;
     (*p).stride = stride;
     (*p).blockCap = blockCap;
     return p;
@@ -61,8 +61,8 @@ void Pool_destroy(Pool *pool) {
 }
 
 void *Pool_alloc(Pool *pool) {
-    if (!pool) return NULL;
-    if (!(*pool).freeHead && !pool_grow(pool)) return NULL;
+    if (!pool) return nullptr;
+    if (!(*pool).freeHead && !pool_grow(pool)) return nullptr;
     void *item = (*pool).freeHead;
     (*pool).freeHead = *(void **)item;
     memset(item, 0, (*pool).stride);

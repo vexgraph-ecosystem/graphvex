@@ -80,11 +80,11 @@ struct Surface {
     void *clockUser;
 };
 
-Surface *Surface_0(void) { return Surface_2(NULL, 0, 0); }
+Surface *Surface_0(void) { return Surface_2(nullptr, 0, 0); }
 
 Surface *Surface_2(void *native, uint32_t width, uint32_t height) {
     Surface *s = calloc(1, sizeof *s);
-    if (!s) return NULL;
+    if (!s) return nullptr;
     (*s).native = native;
     (*s).fpsCap = -1;
     (*s).width = width;
@@ -94,7 +94,7 @@ Surface *Surface_2(void *native, uint32_t width, uint32_t height) {
     (*s).present = Image_new(&d);
     if (!(*s).present) {
         free(s);
-        return NULL;
+        return nullptr;
     }
     return s;
 }
@@ -115,9 +115,9 @@ bool Surface_resize(Surface *surface, uint32_t width, uint32_t height) {
 
 uint32_t Surface_width(const Surface *surface) { return surface ? (*surface).width : 0u; }
 uint32_t Surface_height(const Surface *surface) { return surface ? (*surface).height : 0u; }
-bool Surface_isValid(const Surface *surface) { return surface && (*surface).present != NULL; }
-void *Surface_handle(const Surface *surface) { return surface ? (*surface).native : NULL; }
-Image *Surface_presentImage(Surface *surface) { return surface ? (*surface).present : NULL; }
+bool Surface_isValid(const Surface *surface) { return surface && (*surface).present != nullptr; }
+void *Surface_handle(const Surface *surface) { return surface ? (*surface).native : nullptr; }
+Image *Surface_presentImage(Surface *surface) { return surface ? (*surface).present : nullptr; }
 
 void Surface_onPresent(Surface *surface, SurfacePresentFn fn, void *userdata) {
     if (!surface) return;

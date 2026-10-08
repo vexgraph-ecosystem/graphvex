@@ -51,7 +51,7 @@ static void clamp_dims(uint32_t *w, uint32_t *h) {
 
 Image *Image_new(const ImageDesc *desc) {
     Image *img = calloc(1, sizeof *img);
-    if (!img) return NULL;
+    if (!img) return nullptr;
     (*img).width = desc ? (*desc).width : 1;
     (*img).height = desc ? (*desc).height : 1;
     (*img).format = desc ? (*desc).format : IMAGE_FORMAT_RGBA8;
@@ -60,7 +60,7 @@ Image *Image_new(const ImageDesc *desc) {
     return img;
 }
 
-Image *Image_0(void) { return Image_new(NULL); }
+Image *Image_0(void) { return Image_new(nullptr); }
 Image *Image_2(uint32_t width, uint32_t height) {
     ImageDesc d = {width, height, IMAGE_FORMAT_RGBA8, IMAGE_USAGE_NONE};
     return Image_new(&d);
@@ -148,11 +148,11 @@ uint32_t Image_height(const Image *image) { return image ? (*image).height : 0u;
 uint32_t Image_format(const Image *image) { return image ? (*image).format : IMAGE_FORMAT_RGBA8; }
 uint32_t Image_usage(const Image *image) { return image ? (*image).usage : IMAGE_USAGE_NONE; }
 size_t Image_stride(const Image *image) { return image ? (size_t)((*image).capW) * 4u : 0u; }
-uint8_t *Image_pixels(const Image *image) { return image ? (*image).pixels : NULL; }
+uint8_t *Image_pixels(const Image *image) { return image ? (*image).pixels : nullptr; }
 bool Image_isValid(const Image *image) { return image && (*image).width > 0 && (*image).height > 0; }
 
-void *Image_native(const Image *image) { return image ? (*image).native : NULL; }
-void *Image_iosurface(const Image *image) { return image ? (*image).ioSurface : NULL; }
+void *Image_native(const Image *image) { return image ? (*image).native : nullptr; }
+void *Image_iosurface(const Image *image) { return image ? (*image).ioSurface : nullptr; }
 void Image_setNative(Image *image, void *native) { if (image) (*image).native = native; }
 void Image_setIOSurface(Image *image, void *ioSurface) { if (image) (*image).ioSurface = ioSurface; }
 uint32_t Image_layer(const Image *image) { return image ? (*image).layer : 0u; }
