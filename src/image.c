@@ -49,6 +49,7 @@ static void clamp_dims(uint32_t *w, uint32_t *h) {
     if (*h == 0) *h = 1;
 }
 
+// Allocates image metadata and normalizes zero dimensions to one; pixel storage is lazy.
 Image *Image_new(const ImageDesc *desc) {
     Image *img = calloc(1, sizeof *img);
     if (!img) return nullptr;
@@ -60,16 +61,20 @@ Image *Image_new(const ImageDesc *desc) {
     return img;
 }
 
+// Creates an empty 1x1 RGBA image descriptor with no usage flags.
 Image *Image_0(void) { return Image_new(nullptr); }
+// Creates an RGBA image descriptor with the requested dimensions and no usage flags.
 Image *Image_2(uint32_t width, uint32_t height) {
     ImageDesc d = {width, height, IMAGE_FORMAT_RGBA8, IMAGE_USAGE_NONE};
     return Image_new(&d);
 }
+// Creates an image descriptor with explicit dimensions, format, and usage.
 Image *Image_4(uint32_t width, uint32_t height, uint32_t format, uint32_t usage) {
     ImageDesc d = {width, height, format, usage};
     return Image_new(&d);
 }
 
+// Releases GPU binding and owned CPU pixels, then frees metadata; a failed GPU release preserves the image.
 void Image_destroy(Image *image) {
     if (!image) return;
     if (!Image_clearGpu(image))
@@ -78,6 +83,7 @@ void Image_destroy(Image *image) {
     free(image);
 }
 
+// Ensures CPU RGBA shadow capacity, growing only when needed and updating logical extent.
 bool Image_ensureShadow(Image *image, uint32_t width, uint32_t height) {
     if (!image) return false;
     clamp_dims(&width, &height);
@@ -108,10 +114,12 @@ bool Image_ensureShadow(Image *image, uint32_t width, uint32_t height) {
     return true;
 }
 
+// Resizes the image's CPU shadow through the capacity-preserving ensure path.
 bool Image_resize(Image *image, uint32_t width, uint32_t height) {
     return Image_ensureShadow(image, width, height);
 }
 
+// Copies tightly packed RGBA rows into the destination shadow, honoring its padded row stride.
 bool Image_upload(const uint8_t *rgba, uint32_t width, uint32_t height, Image *dest) {
     if (!dest || !rgba) return false;
     if (!Image_ensureShadow(dest, width, height)) return false;
@@ -122,6 +130,7 @@ bool Image_upload(const uint8_t *rgba, uint32_t width, uint32_t height, Image *d
     return true;
 }
 
+// Fills the current logical extent of the CPU shadow with one RGBA color.
 void Image_fill(Image *image, Color color) {
     if (!image) return;
     if (!Image_clearGpu(image))
@@ -143,27 +152,45 @@ void Image_fill(Image *image, Color color) {
     }
 }
 
+// Returns the logical image width, or zero when image is null.
 uint32_t Image_width(const Image *image) { return image ? (*image).width : 0u; }
+// Returns the logical image height, or zero when image is null.
 uint32_t Image_height(const Image *image) { return image ? (*image).height : 0u; }
+// Returns the declared pixel format, or the RGBA8 default for null.
 uint32_t Image_format(const Image *image) { return image ? (*image).format : IMAGE_FORMAT_RGBA8; }
+// Returns the declared usage flags, or IMAGE_USAGE_NONE for null.
 uint32_t Image_usage(const Image *image) { return image ? (*image).usage : IMAGE_USAGE_NONE; }
+// Returns allocated RGBA row stride in bytes, or zero for null.
 size_t Image_stride(const Image *image) { return image ? (size_t)((*image).capW) * 4u : 0u; }
+// Returns the mutable CPU pixel buffer, or nullptr when image is null.
 uint8_t *Image_pixels(const Image *image) { return image ? (*image).pixels : nullptr; }
+// Reports whether the logical image extent is nonempty.
 bool Image_isValid(const Image *image) { return image && (*image).width > 0 && (*image).height > 0; }
 
+// Returns the borrowed opaque backend-native handle.
 void *Image_native(const Image *image) { return image ? (*image).native : nullptr; }
+// Returns the borrowed opaque IOSurface handle.
 void *Image_iosurface(const Image *image) { return image ? (*image).ioSurface : nullptr; }
+// Stores a borrowed opaque backend-native handle without taking ownership.
 void Image_setNative(Image *image, void *native) { if (image) (*image).native = native; }
+// Stores a borrowed opaque IOSurface handle without taking ownership.
 void Image_setIOSurface(Image *image, void *ioSurface) { if (image) (*image).ioSurface = ioSurface; }
+// Returns the image's atlas or sampler layer index.
 uint32_t Image_layer(const Image *image) { return image ? (*image).layer : 0u; }
+// Sets the image's atlas or sampler layer index.
 void Image_setLayer(Image *image, uint32_t layer) { if (image) (*image).layer = layer; }
 
+// Returns the owned opaque GPU resource pointer.
 void *Image_gpuResource(const Image *image) { return image ? (*image).gpuResource : nullptr; }
+// Returns the borrowed identity of the GPU device that owns the resource.
 void *Image_gpuDevice(const Image *image) { return image ? (*image).gpuDevice : nullptr; }
+// Returns the borrowed GPU sampling descriptor.
 void *Image_gpuDescriptor(const Image *image) { return image ? (*image).gpuDescriptor : nullptr; }
+// Reports whether the image has a valid extent and either CPU pixels or a GPU descriptor.
 bool Image_isDrawable(const Image *image) {
     return Image_isValid(image) && (Image_pixels(image) || Image_gpuDescriptor(image));
 }
+// Releases the retained GPU resource; on release failure the existing binding remains intact.
 bool Image_clearGpu(Image *image) {
     if (!image)
         return false;
@@ -176,6 +203,7 @@ bool Image_clearGpu(Image *image) {
     (*image).gpuRelease = nullptr;
     return true;
 }
+// Retains and installs a complete GPU binding, replacing the previous binding only after admission.
 bool Image_bindGpu(Image *image, void *resource, void *device, void *descriptor,
                    ImageGpuRefFn retain, ImageGpuRefFn release) {
     if (!image || !resource || !device || !descriptor || !retain || !release) {
