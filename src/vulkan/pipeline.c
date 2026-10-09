@@ -71,6 +71,7 @@ Pipeline *Pipeline_fromFiles(const char *vertSpvPath, const char *fragSpvPath,
     return p;
 }
 
+// Destroys the owned pipeline and layout objects; null is ignored.
 void Pipeline_destroy(Pipeline *pipeline) {
     if (!pipeline) return;
     free((*pipeline).vert);
@@ -78,10 +79,12 @@ void Pipeline_destroy(Pipeline *pipeline) {
     free(pipeline);
 }
 
+// Reports whether the wrapper has vertex and fragment stages and a positive vertex stride.
 bool Pipeline_isValid(const Pipeline *pipeline) {
     return pipeline && (*pipeline).vert && (*pipeline).frag && (*pipeline).vertexStride > 0;
 }
 
+// Returns the configured vertex stride, or zero when pipeline is null.
 uint32_t Pipeline_vertexStride(const Pipeline *pipeline) {
     return pipeline ? (*pipeline).vertexStride : 0u;
 }

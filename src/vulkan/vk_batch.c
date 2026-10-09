@@ -6,18 +6,21 @@
 // graphvex R3 — vulkan/vk_batch.c
 // Pure CPU quad batching. No Vulkan handle: testable headless.
 
+// Allocates an empty CPU-side quad batch with an initially unbounded clip.
 VkBatch *VkBatch_0(void) {
     VkBatch *b = calloc(1, sizeof *b);
     if (b) (*b).clip = (Rect){-1.0e7f, -1.0e7f, 2.0e7f, 2.0e7f};   // unbounded
     return b;
 }
 
+// Frees the quad storage and batch object; null is ignored.
 void VkBatch_free(VkBatch *b) {
     if (!b) return;
     free((*b).quads);
     free(b);
 }
 
+// Clears queued quads and restores the default unbounded rectangular clip.
 void VkBatch_clear(VkBatch *b) {
     if (b) {
         (*b).count = 0;
@@ -26,15 +29,18 @@ void VkBatch_clear(VkBatch *b) {
     }
 }
 
+// Sets the rectangular clip applied to subsequently added quads.
 void VkBatch_setClip(VkBatch *b, Rect clip) {
     if (b) (*b).clip = clip;
 }
 
+// Sets a nonnegative rounded-clip radius for subsequently added quads.
 void VkBatch_setClipRadius(VkBatch *b, float radius) {
     if (b) (*b).clipRadius = radius > 0.0f ? radius : 0.0f;
 }
 
 // bake the batch clip into a quad's LOCAL space (the shape is untouched)
+// Encodes the batch clip relative to a quad while preserving its original geometry.
 static void clip_quad(VkQuad *q, Rect clip, float radius) {
     (*q).cx0 = clip.x - (*q).x;
     (*q).cy0 = clip.y - (*q).y;
@@ -43,6 +49,7 @@ static void clip_quad(VkQuad *q, Rect clip, float radius) {
     (*q).clipRadius = radius > 0.0f ? radius : 0.0f;
 }
 
+// Reserves and initializes one quad slot, returning null if backing growth fails.
 static VkQuad *batch_push(VkBatch *b) {
     if ((*b).count == (*b).cap) {
         (*b).cap = (*b).cap ? (*b).cap * 2 : 256;
@@ -56,6 +63,7 @@ static VkQuad *batch_push(VkBatch *b) {
     return q;
 }
 
+// Appends a brush-filled rectangle with the current clip metadata.
 void VkBatch_rect(VkBatch *b, Rect dst, const Brush *brush) {
     if (!b || !brush || Rect_isEmpty(dst)) return;
     VkQuad *q = batch_push(b);
@@ -71,6 +79,7 @@ void VkBatch_rect(VkBatch *b, Rect dst, const Brush *brush) {
     clip_quad(q, (*b).clip, (*b).clipRadius);
 }
 
+// Appends an image quad whose source rectangle is normalized by image dimensions.
 void VkBatch_image(VkBatch *b, const Image *image, Rect src, Rect dst) {
     if (!b || !image || Rect_isEmpty(dst)) return;
     VkQuad *q = batch_push(b);
@@ -86,6 +95,7 @@ void VkBatch_image(VkBatch *b, const Image *image, Rect src, Rect dst) {
     clip_quad(q, (*b).clip, (*b).clipRadius);
 }
 
+// Appends a tinted glyph quad referencing the supplied atlas layer.
 void VkBatch_glyph(VkBatch *b, Rect dst, uint32_t atlasLayer, Color color) {
     if (!b || Rect_isEmpty(dst)) return;
     VkQuad *q = batch_push(b);
@@ -97,6 +107,7 @@ void VkBatch_glyph(VkBatch *b, Rect dst, uint32_t atlasLayer, Color color) {
     clip_quad(q, (*b).clip, (*b).clipRadius);
 }
 
+// Copies quad attributes and the supplied position/UV into one packed vertex.
 static void put(VkVertex *v, const VkQuad *q, float x, float y, float u, float vv) {
     (*v).x = x; (*v).y = y;
     (*v).u = u; (*v).v = vv;
@@ -122,6 +133,7 @@ static void put(VkVertex *v, const VkQuad *q, float x, float y, float u, float v
     (*v).blur = (*q).blur;
 }
 
+// Returns required vertex count, or expands all quads into six vertices each when capacity suffices.
 size_t VkBatch_vertices(const VkBatch *b, VkVertex *out, size_t capacity) {
     if (!b) return 0;
     size_t needed = (*b).count * 6u;

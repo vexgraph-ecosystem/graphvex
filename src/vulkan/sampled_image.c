@@ -43,6 +43,7 @@ struct SampledImage {
     bool pending;
 };
 static const uint64_t SAMPLE_WAIT_NS = UINT64_C(100000000);
+// Selects a compatible physical-device memory type containing every requested property flag.
 static uint32_t memoryType(Device *owner, uint32_t bits, VkMemoryPropertyFlags want) {
     VkPhysicalDeviceMemoryProperties properties;
     vkGetPhysicalDeviceMemoryProperties((VkPhysicalDevice) Device_physical(owner), &properties);
@@ -53,6 +54,7 @@ static uint32_t memoryType(Device *owner, uint32_t bits, VkMemoryPropertyFlags w
     }
     return UINT32_MAX;
 }
+// Releases staging resources and upload synchronization retained by the pending transfer.
 static void uploadRelease(SampledImage *self) {
     VkDevice d = (*self).device;
     if ((*self).commands)
@@ -68,6 +70,7 @@ static void uploadRelease(SampledImage *self) {
     (*self).staging = VK_NULL_HANDLE;
     (*self).stagingMemory = VK_NULL_HANDLE;
 }
+// Polls the bounded upload fence and retires staging state when the transfer completes.
 bool SampledImage_poll(SampledImage *self) {
     if (!self)
         return false;
@@ -79,6 +82,7 @@ bool SampledImage_poll(SampledImage *self) {
     }
     return true;
 }
+// Releases sampled-image resources, optionally destroying an internally owned VkImage.
 static void dispose(SampledImage *self, bool ownedImage) {
     VkDevice d = (*self).device;
     uploadRelease(self);
@@ -96,12 +100,14 @@ static void dispose(SampledImage *self, bool ownedImage) {
         vkFreeMemory(d, (*self).memory, nullptr);
     free(self);
 }
+// Adds a reference to a valid sampled image unless its reference count is saturated.
 bool SampledImage_retain(SampledImage *self) {
     if (!self || (*self).refs == UINT32_MAX)
         return false;
     ++(*self).refs;
     return true;
 }
+// Drops a reference and disposes the sampled image when the count reaches zero.
 bool SampledImage_release(SampledImage *self) {
     if (!self)
         return true;
@@ -113,9 +119,13 @@ bool SampledImage_release(SampledImage *self) {
         --(*self).refs;
     return true;
 }
+// Reports whether the asynchronous upload is no longer pending.
 bool SampledImage_isReady(const SampledImage *self) { return self && !(*self).pending; }
+// Adapts Image's opaque retain callback to a SampledImage reference increment.
 static bool retainOpaque(void *resource) { return SampledImage_retain(resource); }
+// Adapts Image's opaque release callback to a SampledImage reference decrement.
 static bool releaseOpaque(void *resource) { return SampledImage_release(resource); }
+// Binds this resource into an Image, transferring one retained reference through its callback pair.
 bool SampledImage_bindImage(SampledImage *self, Image *image) {
     if (!SampledImage_isReady(self) || !image || Image_width(image) != (*self).width ||
         Image_height(image) != (*self).height) {
@@ -124,7 +134,9 @@ bool SampledImage_bindImage(SampledImage *self, Image *image) {
     }
     return Image_bindGpu(image, self, (*self).owner, (void*) (*self).set, retainOpaque, releaseOpaque);
 }
+// Returns the sampled image width, or zero for null.
 uint32_t SampledImage_width(const SampledImage *self) { return self ? (*self).width : 0; }
+// Returns the sampled image height, or zero for null.
 uint32_t SampledImage_height(const SampledImage *self) { return self ? (*self).height : 0; }
 Device *SampledImage_device(const SampledImage *self) { return self ? (*self).owner : nullptr; }
 void *SampledImage_descriptor(const SampledImage *self) { return self ? (void*) (*self).set : nullptr; }
@@ -297,6 +309,7 @@ failed:
     THROW("SampledImage GPU upload allocation or recording failed");
     return nullptr;
 }
+// Writes the bounded value or one-level field projection of a sampled image.
 static void format(const SampledImage *self, bool structure, char *dest, size_t cap, bool *truncated) {
     int n = 0;
     if (!dest || !cap) {
@@ -318,5 +331,7 @@ static void format(const SampledImage *self, bool structure, char *dest, size_t 
     if (truncated)
         *truncated = n < 0 || (size_t) n >= cap;
 }
+// Formats a concise bounded summary of the sampled image.
 void SampledImage_toString(const SampledImage *self, char *dest, size_t cap, bool *truncated) { format(self,false,dest,cap,truncated); }
+// Formats the sampled-image fields into caller-provided bounded storage.
 void SampledImage_toStringStruct(const SampledImage *self, char *dest, size_t cap, bool *truncated) { format(self,true,dest,cap,truncated); }
