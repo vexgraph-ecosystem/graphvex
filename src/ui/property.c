@@ -47,6 +47,7 @@
  * ============================================================================
  */
 
+// Returns a zeroed bound with an opaque white background and no size clamps.
 Property Property_default(void) {
     Property p = {0};
     p.background = COLOR_WHITE;
@@ -54,28 +55,33 @@ Property Property_default(void) {
 }
 
 // Clamp the stored extent into [min, max]; a non-positive max is no ceiling.
+// Applies the minimum and an optional positive maximum to one stored dimension.
 static float property_clamp(float value, float min, float max) {
     if (max > 0.0f && value > max) value = max;
     if (value < min) value = min;
     return value;
 }
 
+// Sets nonnegative minimum dimensions; zero disables each minimum.
 void Property_setMinSize(Property *property, float width, float height) {
     if (!property) return;
     (*property).minW = width > 0.0f ? width : 0.0f;
     (*property).minH = height > 0.0f ? height : 0.0f;
 }
 
+// Sets nonnegative maximum dimensions; zero means no upper bound.
 void Property_setMaxSize(Property *property, float width, float height) {
     if (!property) return;
     (*property).maxW = width > 0.0f ? width : 0.0f;
     (*property).maxH = height > 0.0f ? height : 0.0f;
 }
 
+// Returns the stored width clamped to configured limits, or zero for null.
 float Property_width(const Property *property) {
     return property ? property_clamp((*property).w, (*property).minW, (*property).maxW) : 0.0f;
 }
 
+// Returns the stored height clamped to configured limits, or zero for null.
 float Property_height(const Property *property) {
     return property ? property_clamp((*property).h, (*property).minH, (*property).maxH) : 0.0f;
 }

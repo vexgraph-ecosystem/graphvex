@@ -58,6 +58,7 @@ struct Element {
 };
 
 // ── construction ────────────────────────────────────────────────────────────
+// Resolves one of the nine anchor/pivot positions within a rectangle; invalid parts select top-left.
 Point Part_point(Rect r, int part) {
     if (part < 0 || part >= PART_COUNT) part = PART_TOP_LEFT;
     int col = part % 3;   // 0 left, 1 centre, 2 right
@@ -65,6 +66,7 @@ Point Part_point(Rect r, int part) {
     return (Point){r.x + (float)col * 0.5f * r.w, r.y + (float)row * 0.5f * r.h};
 }
 
+// Creates an element with a pooled property record initialized from d or the default style.
 Element *Element_1(const ElementDesc *d) {
     Element *e = calloc(1, sizeof *e);
     if (!e) return nullptr;
@@ -93,8 +95,10 @@ Element *Element_1(const ElementDesc *d) {
     return e;
 }
 
+// Creates a visible default element with zero extent and inherited cursor preference.
 Element *Element_0(void) { return Element_1(nullptr); }
 
+// Recursively destroys the owned child tree and releases only an owned property record.
 void Element_destroy(Element *e) {
     if (!e) return;
     for (int i = 0; i < (*e).count; i++) Element_destroy((*e).children[i]);
@@ -105,8 +109,10 @@ void Element_destroy(Element *e) {
 }
 
 // ── the bound ───────────────────────────────────────────────────────────────
+// Returns the element's property record as a borrowed pointer.
 Property *Element_property(const Element *e) { return e ? (*e).property : nullptr; }
 
+// Binds a borrowed property record, releasing any previously owned record and marking layout dirty.
 Element *Element_setProperty(Element *e, Property *property) {
     if (!e) return e;
     if ((*e).ownsProperty && (*e).property)
@@ -117,6 +123,7 @@ Element *Element_setProperty(Element *e, Property *property) {
     return e;
 }
 
+// Copies the current property into an element-owned pooled record.
 Element *Element_ownProperty(Element *e) {
     if (!e) return e;
     Property *copy = PropertyPool_alloc(PropertyPool_default(), (*e).property);
@@ -130,6 +137,7 @@ Element *Element_ownProperty(Element *e) {
 }
 
 // ── revalidation ────────────────────────────────────────────────────────────
+// Marks this element and its ancestors dirty so revalidation reaches the changed branch.
 void Element_markDirty(Element *e) {
     for (Element *n = e; n; n = (*n).parent) {
         if ((*n).dirty) break;
@@ -137,6 +145,7 @@ void Element_markDirty(Element *e) {
     }
 }
 
+// Clears dirty state bottom-up while pruning already-clean subtrees.
 void Element_revalidate(Element *root) {
     if (!root || !(*root).dirty) return;    // prune clean subtrees
     for (int i = 0; i < (*root).count; i++) {
@@ -146,9 +155,11 @@ void Element_revalidate(Element *root) {
     (*root).dirty = false;
 }
 
+// Reports whether this element is marked for revalidation.
 bool Element_isDirty(const Element *e) { return e && (*e).dirty; }
 
 // ── tree ────────────────────────────────────────────────────────────────────
+// Inserts child at a clamped position and updates its parent link and dirty state.
 static void child_insert(Element *parent, Element *child, int index) {
     if ((*parent).count == (*parent).cap) {
         (*parent).cap = (*parent).cap ? (*parent).cap * 2 : 8;
@@ -165,18 +176,21 @@ static void child_insert(Element *parent, Element *child, int index) {
     Element_markDirty(parent);
 }
 
+// Appends child to parent and returns child; null inputs leave the tree unchanged.
 Element *Element_add(Element *parent, Element *child) {
     if (!parent || !child) return child;
     child_insert(parent, child, (*parent).count);
     return child;
 }
 
+// Inserts child at index (out-of-range indices append) and returns child.
 Element *Element_addAt(Element *parent, Element *child, int index) {
     if (!parent || !child) return child;
     child_insert(parent, child, index);
     return child;
 }
 
+// Detaches child from its parent without destroying it; returns false when unattached.
 bool Element_remove(Element *child) {
     if (!child || !(*child).parent) return false;
     Element *p = (*child).parent;
@@ -191,21 +205,26 @@ bool Element_remove(Element *child) {
     return false;
 }
 
+// Returns the number of direct children, or zero for null.
 int Element_count(const Element *e) { return e ? (*e).count : 0; }
 
+// Returns a borrowed child at index, or nullptr when the index is invalid.
 Element *Element_child(const Element *e, int index) {
     if (!e || index < 0 || index >= (*e).count) return nullptr;
     return (*e).children[index];
 }
 
+// Returns the borrowed parent pointer, or nullptr for a root or null input.
 Element *Element_parent(const Element *e) { return e ? (*e).parent : nullptr; }
 
+// Walks parent links to return the root of the element's current tree.
 Element *Element_root(Element *e) {
     if (!e) return nullptr;
     while ((*e).parent) e = (*e).parent;
     return e;
 }
 
+// Searches depth-first for the first element whose non-null tag matches tag.
 Element *Element_find(Element *root, const char *tag) {
     if (!root || !tag) return nullptr;
     if ((*root).tag && !strcmp((*root).tag, tag)) return root;
@@ -217,6 +236,7 @@ Element *Element_find(Element *root, const char *tag) {
 }
 
 // ── hit-test (deepest top-most element under the point) ─────────────────────
+// Tests visible descendants in reverse paint order while honoring ancestor clip shapes.
 static Element *hit_rec(Element *e, Rect absolute, float x, float y) {
     if (!e || !(*e).visible || !(*e).property) return nullptr;
     const Property *property = (*e).property;
@@ -242,6 +262,7 @@ static Element *hit_rec(Element *e, Rect absolute, float x, float y) {
     return nullptr;
 }
 
+// Returns the deepest topmost element hit by the point, or nullptr when none qualifies.
 Element *Element_hit(Element *root, float x, float y) {
     if (!root) return nullptr;
     Rect self = {0, 0, Property_width((*root).property), Property_height((*root).property)};
@@ -249,6 +270,7 @@ Element *Element_hit(Element *root, float x, float y) {
 }
 
 // ── geometry ────────────────────────────────────────────────────────────────
+// Resolves the layout/hit rectangle from parent anchor, element offset, pivot, and clamped size.
 Rect Element_eventBound(const Element *e, Rect parent) {
     if (!e || !(*e).property) return (Rect){0, 0, 0, 0};
     float w = Property_width((*e).property);
@@ -261,48 +283,59 @@ Rect Element_eventBound(const Element *e, Rect parent) {
                   w, h};
 }
 
+// Resolves the element's event bound; kept as the layout-facing alias.
 Rect Element_resolve(const Element *e, Rect parent) {
     return Element_eventBound(e, parent);
 }
 
+// Sets stored dimensions on the bound and marks the element tree dirty.
 Element *Element_setSize(Element *e, float w, float h) {
     if (e && (*e).property) { (*e).property->w = w; (*e).property->h = h; Element_markDirty(e); }
     return e;
 }
+// Sets nonnegative minimum dimensions on the shared bound and marks it dirty.
 Element *Element_setMinimumSize(Element *e, float w, float h) {
     if (e && (*e).property) { Property_setMinSize((*e).property, w, h); Element_markDirty(e); }
     return e;
 }
+// Sets nonnegative maximum dimensions on the shared bound and marks it dirty.
 Element *Element_setMaximumSize(Element *e, float w, float h) {
     if (e && (*e).property) { Property_setMaxSize((*e).property, w, h); Element_markDirty(e); }
     return e;
 }
+// Sets the element's anchor-relative offset and marks its ancestors dirty.
 Element *Element_setOffset(Element *e, float x, float y) {
     if (e) { (*e).offsetX = x; (*e).offsetY = y; Element_markDirty(e); }
     return e;
 }
+// Sets a valid parent anchor part; invalid part values are ignored.
 Element *Element_setAnchor(Element *e, int anchor) {
     if (e && anchor >= 0 && anchor < PART_COUNT) { (*e).anchor = anchor; Element_markDirty(e); }
     return e;
 }
+// Sets a valid self pivot part; invalid part values are ignored.
 Element *Element_setPivot(Element *e, int pivot) {
     if (e && pivot >= 0 && pivot < PART_COUNT) { (*e).pivot = pivot; Element_markDirty(e); }
     return e;
 }
+// Stores a borrowed tag pointer used by Element_find.
 Element *Element_setTag(Element *e, const char *tag) {
     if (e) (*e).tag = tag;
     return e;
 }
 
 // ── visual ──────────────────────────────────────────────────────────────────
+// Sets the corner radius, clamping negative values to zero, and marks the tree dirty.
 Element *Element_setRadius(Element *e, float radius) {
     if (e && (*e).property) { (*e).property->radius = radius < 0.0f ? 0.0f : radius; Element_markDirty(e); }
     return e;
 }
+// Sets the bound's background color and marks the tree dirty.
 Element *Element_setBackground(Element *e, Color color) {
     if (e && (*e).property) { (*e).property->background = color; Element_markDirty(e); }
     return e;
 }
+// Sets border color and nonnegative width on the bound.
 Element *Element_setBorder(Element *e, Color color, float width) {
     if (e && (*e).property) {
         (*e).property->border = color;
@@ -311,6 +344,7 @@ Element *Element_setBorder(Element *e, Color color, float width) {
     }
     return e;
 }
+// Sets shadow offset and nonnegative blur, assigning a default translucent black if unset.
 Element *Element_setShadow(Element *e, float offsetX, float offsetY, float blur) {
     if (!e || !(*e).property) return e;
     (*e).property->shadowX = offsetX;
@@ -322,27 +356,33 @@ Element *Element_setShadow(Element *e, float offsetX, float offsetY, float blur)
     Element_markDirty(e);
     return e;
 }
+// Sets the shadow color on the bound and marks the tree dirty.
 Element *Element_setShadowColor(Element *e, Color color) {
     if (e && (*e).property) { (*e).property->shadow = color; Element_markDirty(e); }
     return e;
 }
+// Sets nonnegative element-edge blur on the bound and marks the tree dirty.
 Element *Element_setBlur(Element *e, float blur) {
     if (e && (*e).property) { (*e).property->blur = blur < 0.0f ? 0.0f : blur; Element_markDirty(e); }
     return e;
 }
+// Enables or disables clipping of descendants to this element's bound.
 Element *Element_setClip(Element *e, bool clip) {
     if (e && (*e).property) { (*e).property->clip = clip; Element_markDirty(e); }
     return e;
 }
+// Updates the pressed visual state without changing layout.
 Element *Element_setPressed(Element *e, bool pressed) {
     if (e) (*e).pressed = pressed;
     return e;
 }
+// Sets whether this element and its subtree participate in painting and hit testing.
 Element *Element_setVisible(Element *e, bool visible) {
     if (e) (*e).visible = visible;
     return e;
 }
 
+// Stores a borrowed image for element painting and marks the element tree dirty.
 Element *Element_setImage(Element *e, const Image *image) {
     if (e) {
         (*e).image = image;
@@ -351,27 +391,40 @@ Element *Element_setImage(Element *e, const Image *image) {
     return e;
 }
 
+// Returns the element's borrowed image pointer.
 const Image *Element_image(const Element *e) {
     return e ? (*e).image : nullptr;
 }
 
 // ── queries ─────────────────────────────────────────────────────────────────
+// Stores the host-interpreted cursor preference; -1 denotes inherited preference.
 Element *Element_setCursorPreference(Element *e, int cursor) {
     if (e) (*e).cursorPreference = cursor;
     return e;
 }
+// Returns the stored cursor preference, or -1 when no element is supplied.
 int Element_cursorPreference(const Element *e) { return e ? (*e).cursorPreference : -1; }
+// Returns the effective clamped property width, or zero without a bound.
 float Element_width(const Element *e) { return (e && (*e).property) ? Property_width((*e).property) : 0.0f; }
+// Returns the effective clamped property height, or zero without a bound.
 float Element_height(const Element *e) { return (e && (*e).property) ? Property_height((*e).property) : 0.0f; }
+// Returns the bound's corner radius, or zero when unavailable.
 float Element_radius(const Element *e) { return (e && (*e).property) ? (*e).property->radius : 0.0f; }
+// Returns the parent anchor part, defaulting to top-left for null.
 int   Element_anchor(const Element *e) { return e ? (*e).anchor : PART_TOP_LEFT; }
+// Returns the self pivot part, defaulting to top-left for null.
 int   Element_pivot(const Element *e) { return e ? (*e).pivot : PART_TOP_LEFT; }
+// Reports whether a bound exists and its stored width and height are nonnegative.
 bool  Element_isValid(const Element *e) { return e && (*e).property && (*e).property->w >= 0.0f && (*e).property->h >= 0.0f; }
+// Reports whether the element is visible.
 bool  Element_isVisible(const Element *e) { return e && (*e).visible; }
+// Reports whether the element is in its pressed state.
 bool  Element_isPressed(const Element *e) { return e && (*e).pressed; }
+// Returns the borrowed tag string, or nullptr for a null element.
 const char *Element_tag(const Element *e) { return e ? (*e).tag : nullptr; }
 
 // ── paint ───────────────────────────────────────────────────────────────────
+// Records this element's shadow, body, image, and children into the supplied display list.
 void Element_paint(const Element *e, Rect absolute, DisplayList *dl) {
     if (!e || !dl || !(*e).visible || !(*e).property) return;
     const Property *p = (*e).property;
@@ -424,6 +477,7 @@ void Element_paint(const Element *e, Rect absolute, DisplayList *dl) {
     if (clips) DisplayList_unclip(dl);
 }
 
+// Computes a conservative world-space paint bound including own effects and clipped descendants.
 Rect Element_absoluteBound(const Element *e, Rect parent) {
     if (!e || !(*e).visible || !(*e).property) return (Rect){0, 0, 0, 0};
     Rect base = Element_eventBound(e, parent);
@@ -457,6 +511,7 @@ Rect Element_absoluteBound(const Element *e, Rect parent) {
     return result;
 }
 
+// Returns the absolute paint bound; compatibility alias for Element_absoluteBound.
 Rect Element_bounds(const Element *e, Rect parent) {
     return Element_absoluteBound(e, parent);
 }
