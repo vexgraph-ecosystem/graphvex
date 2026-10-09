@@ -30,6 +30,7 @@ struct ColorPass {
     VkPipeline pipeline;
 };
 
+// Checks supported color-filter IDs and their finite, operation-specific payload ranges.
 static bool tokenValid(FilterToken token) {
     uint16_t id = Filter_id(token);
     uint64_t payload = Filter_payload(token);
@@ -52,15 +53,19 @@ static bool tokenValid(FilterToken token) {
     return amount >= 0;
 }
 
+// Validates a token and emits a cold diagnostic when its operation or payload is unsupported.
 bool ColorPass_validateToken(FilterToken token) {
     if (tokenValid(token))
         return true;
     THROW("ColorPass rejected filter token");
     return false;
 }
+// Returns the null identity because a Vulkan color pass requires device and shader inputs.
 ColorPass *ColorPass_0(void) { return nullptr; }
+// Returns the null identity through the zero-argument constructor.
 ColorPass *ColorPass_zero(void) { return ColorPass_0(); }
 
+// Destroys pipeline objects created by this pass; caller must retire submitted work first.
 void ColorPass_destroy(ColorPass *self) {
     if (!self)
         return;
@@ -73,6 +78,7 @@ void ColorPass_destroy(ColorPass *self) {
     free(self);
 }
 
+// Builds a Vulkan fullscreen filter pipeline from validated SPIR-V words and render-pass handle.
 ColorPass *ColorPass_6(Device *device, void *nativeRenderPass,
                        const uint32_t *vertexWords, size_t vertexBytes,
                        const uint32_t *fragmentWords, size_t fragmentBytes) {
@@ -155,9 +161,11 @@ failed:
     return nullptr;
 }
 
+// Returns the owned descriptor-set layout as an opaque handle for descriptor allocation.
 void *ColorPass_getDescriptorLayout(const ColorPass *self) {
     return self ? (void*) (*self).descriptorLayout : nullptr;
 }
+// Records viewport, bindings, filter constants, and a fullscreen triangle into the command buffer.
 bool ColorPass_record(const ColorPass *self, void *nativeCommandBuffer,
                       void *nativeDescriptorSet, uint32_t width, uint32_t height,
                       FilterToken token) {
@@ -178,6 +186,7 @@ bool ColorPass_record(const ColorPass *self, void *nativeCommandBuffer,
     vkCmdDraw(cmd, 3, 1, 0, 0);
     return true;
 }
+// Writes the bounded concise or field-level ColorPass projection.
 static void format(const ColorPass *self, bool structure, char *dest, size_t cap, bool *outTruncated) {
     if (!dest || !cap) {
         if (outTruncated)
@@ -195,9 +204,11 @@ static void format(const ColorPass *self, bool structure, char *dest, size_t cap
     if (outTruncated)
         *outTruncated = count < 0 || (size_t) count >= cap;
 }
+// Formats a bounded value summary of the color pipeline.
 void ColorPass_toString(const ColorPass *self, char *dest, size_t cap, bool *outTruncated) {
     format(self, false, dest, cap, outTruncated);
 }
+// Formats the ColorPass fields into caller-provided bounded storage.
 void ColorPass_toStringStruct(const ColorPass *self, char *dest, size_t cap, bool *outTruncated) {
     format(self, true, dest, cap, outTruncated);
 }

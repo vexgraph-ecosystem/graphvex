@@ -14,10 +14,12 @@
  * Private: srgbDecode/srgbEncode implement the transfer function; export
  * clamps HDR only at the byte boundary. No class fields owned by this adapter. */
 
+// Converts one normalized sRGB channel to linear light.
 static float srgbDecode(float encoded) {
     return encoded <= 0.04045f ? encoded / 12.92f :
         powf((encoded + 0.055f) / 1.055f, 2.4f);
 }
+// Converts one linear channel to an sRGB byte with endpoint clamping and rounding.
 static uint8_t srgbEncode(float linear) {
     if (linear <= 0)
         return 0;
@@ -28,6 +30,7 @@ static uint8_t srgbEncode(float linear) {
     return (uint8_t) lroundf(encoded * 255.0f);
 }
 
+// Imports a borrowed RGBA8 CPU shadow as an owned linear-premultiplied surface at x,y.
 CompositorStatus CompositorSurface_fromImage(const Image *image,
                                              int32_t x, int32_t y,
                                              CompositorSurface **out) {
@@ -65,6 +68,7 @@ CompositorStatus CompositorSurface_fromImage(const Image *image,
     return COMPOSITOR_OK;
 }
 
+// Exports a validated surface to a newly owned RGBA8 Image, converting back to straight sRGB.
 CompositorStatus CompositorSurface_toImage(const CompositorSurface *surface,
                                            Image **out) {
     if (!out)
