@@ -23,6 +23,7 @@ static bool validRect(Rect rect) {
            isfinite(rect.x + rect.w) && isfinite(rect.y + rect.h);
 }
 
+// Reads one RGBA8 sample, returning transparent black outside the image extent.
 static Color sample(const uint8_t *pixels, size_t stride, uint32_t width,
                     uint32_t height, Rect destination, int32_t x, int32_t y) {
     double u = ((double) x + 0.5 - destination.x) / destination.w;
@@ -33,6 +34,7 @@ static Color sample(const uint8_t *pixels, size_t stride, uint32_t width,
     return COLOR_RGBA(pixel[0], pixel[1], pixel[2], pixel[3]);
 }
 
+// Visits contiguous horizontal runs of equal sampled color within the clipped destination.
 bool ImageRuns_visit(const Image *image, Rect destination, Rect clip,
                      ImageRunsFn visit, void *context) {
     if (!image || !visit || !Image_isValid(image) || !validRect(destination) ||

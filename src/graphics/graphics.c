@@ -26,6 +26,7 @@ static bool s_hasBaseClip = false; // explicit clip outside a display-list scope
 
 const Backend *RasterGraphics_row(void);   // defined below
 
+// Registers or replaces a backend descriptor by ID.
 bool Graphics_register(const Backend *row) {
     if (!row || (*row).id == BACKEND_NONE) return false;
     for (int i = 0; i < s_rowCount; i++) {
@@ -36,6 +37,7 @@ bool Graphics_register(const Backend *row) {
     return true;
 }
 
+// Selects a registered backend and configures its callbacks for current dimensions.
 bool Graphics_use(uint32_t backendId) {
     for (int i = 0; i < s_rowCount; i++) {
         if ((*s_rows[i]).id == backendId) { s_current = s_rows[i]; s_hasBaseClip = false; return true; }
@@ -49,37 +51,48 @@ bool Graphics_use(uint32_t backendId) {
     return false;
 }
 
+// Returns the active backend ID, or BACKEND_NONE when no backend is selected.
 uint32_t Graphics_backendId(void) { return s_current ? (*s_current).id : BACKEND_NONE; }
 const Backend *Graphics_current(void) { return s_current; }
 
 // ── forwarders (call through the active row; false when none) ───────────────
 bool Graphics_begin(void)   { return s_current && (*s_current).begin   ? (*s_current).begin()   : false; }
+// Forwards frame completion to the active backend when provided.
 bool Graphics_end(void)     { return s_current && (*s_current).end     ? (*s_current).end()     : false; }
+// Forwards presentation to the active backend when provided.
 bool Graphics_present(void) { return s_current && (*s_current).present ? (*s_current).present() : false; }
+// Resizes the active backend and updates graphics clip state on success.
 bool Graphics_resize(uint32_t w, uint32_t h) {
     bool ok = s_current && (*s_current).resize ? (*s_current).resize(w, h) : false;
     if (ok) s_hasBaseClip = false;
     return ok;
 }
+// Clears the active backend with color when its clear callback exists.
 bool Graphics_clear(Color color) {
     return s_current && (*s_current).clear ? (*s_current).clear(color) : false;
 }
+// Installs the base rounded clip used by subsequent drawing operations.
 bool Graphics_clipRounded(const Rect *rect, float radius) {
     if (!s_current || !(*s_current).clip || !(*s_current).clip(rect, radius)) return false;
     s_hasBaseClip = rect != nullptr;
     if (rect) { s_baseClip.dst = *rect; s_baseClip.radius = fmaxf(radius, 0); }
     return true;
 }
+// Installs a rectangular base clip by using a zero corner radius.
 bool Graphics_clip(const Rect *rect) { return Graphics_clipRounded(rect, 0.0f); }
+// Forwards a rectangle fill to the active backend.
 bool Graphics_fillRect(const Rect *rect, const Brush *brush) {
     return s_current && (*s_current).fillRect ? (*s_current).fillRect(rect, brush) : false;
 }
+// Forwards an image draw to the active backend.
 bool Graphics_drawImage(const Image *image, const Rect *dst) {
     return s_current && (*s_current).drawImage ? (*s_current).drawImage(image, dst) : false;
 }
+// Forwards a text draw to the active backend.
 bool Graphics_drawText(const Rect *rect, const char *text, const Brush *brush) {
     return s_current && (*s_current).drawText ? (*s_current).drawText(rect, text, brush) : false;
 }
+// Captures the active backend into dest when its capture callback is available.
 bool Graphics_capture(Image *dest) {
     return s_current && (*s_current).capture ? (*s_current).capture(dest) : false;
 }
@@ -98,6 +111,7 @@ DisplayList *DisplayList_0(void) {
     return dl;
 }
 
+// Frees the command array and display-list record.
 void DisplayList_free(DisplayList *dl) {
     if (!dl) return;
     free((*dl).items);
@@ -105,6 +119,7 @@ void DisplayList_free(DisplayList *dl) {
     free(dl);
 }
 
+// Resets the command count and clip stack while retaining allocated capacity.
 void DisplayList_clear(DisplayList *dl) {
     if (dl) { (*dl).count = 0; (*dl).clipDepth = 0; }
 }
@@ -120,6 +135,7 @@ static DrawCmd *dl_push(DisplayList *dl) {
     return c;
 }
 
+// Appends a rectangle draw command with a copied brush value.
 void DisplayList_rect(DisplayList *dl, Rect dst, const Brush *brush) {
     if (!dl || !brush || Rect_isEmpty(dst)) return;
     DrawCmd *c = dl_push(dl);
@@ -133,6 +149,7 @@ void DisplayList_rect(DisplayList *dl, Rect dst, const Brush *brush) {
     (*c).blur = (*brush).blur;
 }
 
+// Appends an image draw command and retains its image for deferred submission.
 void DisplayList_image(DisplayList *dl, const Image *image, Rect src, Rect dst) {
     if (!dl || !image || Rect_isEmpty(dst)) return;
     DrawCmd *c = dl_push(dl);
@@ -143,6 +160,7 @@ void DisplayList_image(DisplayList *dl, const Image *image, Rect src, Rect dst) 
     (*c).image = image;
 }
 
+// Appends a text command with copied text and color data.
 void DisplayList_text(DisplayList *dl, Rect dst, const char *text, Color color) {
     if (!dl || !text || Rect_isEmpty(dst)) return;
     DrawCmd *c = dl_push(dl);
@@ -153,10 +171,12 @@ void DisplayList_text(DisplayList *dl, Rect dst, const char *text, Color color) 
     (*c).color = color;
 }
 
+// Pushes a rectangular clip command and records its stack entry.
 void DisplayList_clip(DisplayList *dl, Rect rect) {
     DisplayList_clipRounded(dl, rect, 0.0f);
 }
 
+// Pushes a rounded clip command and records its stack entry.
 void DisplayList_clipRounded(DisplayList *dl, Rect rect, float radius) {
     if (!dl) return;
     if ((*dl).clipDepth == (*dl).clipCap) {
@@ -174,6 +194,7 @@ void DisplayList_clipRounded(DisplayList *dl, Rect rect, float radius) {
     (*c).radius = radius > 0.0f ? radius : 0.0f;   // 0 = rectangular scissor
 }
 
+// Pops one nested clip when present and appends the matching unclip command.
 void DisplayList_unclip(DisplayList *dl) {
     if (!dl) return;
     DrawCmd *c = dl_push(dl);
@@ -182,6 +203,7 @@ void DisplayList_unclip(DisplayList *dl) {
     if ((*dl).clipDepth > 0) (*dl).clipDepth--;
 }
 
+// Returns the number of recorded commands, or zero for null.
 size_t DisplayList_count(const DisplayList *dl) { return dl ? (*dl).count : 0; }
 const DrawCmd *DisplayList_cmds(const DisplayList *dl) { return dl ? (*dl).items : nullptr; }
 
@@ -260,6 +282,7 @@ static bool submit_masks(DisplayList *dl, const DrawCmd *cmd, size_t depth) {
     return submit_span(cmd, span);
 }
 
+// Submits recorded commands in order while applying accumulated clip masks.
 bool Graphics_submit(DisplayList *dl) {
     if (!dl || !s_current) return false;
     size_t depth = 0;
@@ -301,6 +324,7 @@ static uint32_t blend_over(uint32_t dst, uint32_t src) {
     return (r << 24) | (g << 16) | (b << 8) | a;
 }
 
+// Allocates or resizes the CPU reference framebuffer to the requested dimensions.
 bool Raster_configure(uint32_t width, uint32_t height) {
     // GROW-ONLY. The framebuffer is allocated once and only ever grows, so a
     // resize is pure scissoring: no realloc, no refill, ever. The row stride is
@@ -334,6 +358,7 @@ bool Raster_configure(uint32_t width, uint32_t height) {
 
 const uint32_t *Raster_pixels(void) { return s_px; }
 
+// Returns the packed pixel at x,y, or transparent black outside the configured extent.
 uint32_t Raster_pixelAt(uint32_t x, uint32_t y) {
     if (!s_px || (int32_t)x >= s_w || (int32_t)y >= s_h) return 0u;
     return s_px[(size_t)y * (size_t)s_capW + (size_t)x];
