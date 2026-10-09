@@ -113,6 +113,7 @@ static SampledImage *s_uploadPending = nullptr;
 static const uint64_t RENDER_WAIT_NS = UINT64_C(100000000);
 enum { IMAGE_DRAW_INITIAL_CAPACITY = 16 };
 
+// Waits for the previous submission within the renderer's fixed timeout.
 static bool retire_frame(void) {
     if (s_pending) {
         if (vkWaitForFences(s_device, 1, &s_fence, VK_TRUE, RENDER_WAIT_NS) != VK_SUCCESS)
@@ -122,17 +123,22 @@ static bool retire_frame(void) {
     }
     return true;
 }
+// Releases references held by recorded sampled-image draw commands.
 static void release_image_draws(void) {
     for (size_t i = 0; i < s_imageDrawCount; ++i)
         SampledImage_release(s_imageDraws[i].sampled);
     s_imageDrawCount = 0;
 }
 
+// Returns the renderer's current diagnostic buffer.
 const char *VulkanBackend_lastError(void) { return s_err; }
+// Returns the active CPU batch, or null when no frame batch is open.
 const VkBatch *VulkanBackend_batch(void) { return s_batch; }
+// Returns allocated vertex-buffer capacity in bytes.
 size_t VulkanBackend_vertexBytes(void) { return (size_t) s_vboCap; }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
+// Selects the first physical-device memory type satisfying the requirements.
 static uint32_t mem_type(uint32_t bits, VkMemoryPropertyFlags want) {
     VkPhysicalDeviceMemoryProperties mp;
     vkGetPhysicalDeviceMemoryProperties(s_phys, &mp);
@@ -141,6 +147,7 @@ static uint32_t mem_type(uint32_t bits, VkMemoryPropertyFlags want) {
     return UINT32_MAX;
 }
 
+// Creates a host-visible coherent Vulkan buffer and binds compatible memory.
 static bool make_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
                         VkBuffer *buf, VkDeviceMemory *mem) {
     VkBufferCreateInfo bi = {0}; bi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -161,6 +168,7 @@ static bool make_buffer(VkDeviceSize size, VkBufferUsageFlags usage,
 }
 
 // ── render target ───────────────────────────────────────────────────────────
+// Destroys and nulls the renderer's private offscreen target resources.
 static void destroy_target(void) {
     if (s_fb) { vkDestroyFramebuffer(s_device, s_fb, nullptr); s_fb = VK_NULL_HANDLE; }
     if (s_imgView) { vkDestroyImageView(s_device, s_imgView, nullptr); s_imgView = VK_NULL_HANDLE; }
@@ -168,6 +176,7 @@ static void destroy_target(void) {
     if (s_imgMem) { vkFreeMemory(s_device, s_imgMem, nullptr); s_imgMem = VK_NULL_HANDLE; }
 }
 
+// Recreates the private RGBA target, image view, and framebuffer for the requested extent.
 static bool create_target(uint32_t w, uint32_t h) {
     destroy_target();
     VkImageCreateInfo ii = {0}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -233,6 +242,7 @@ static void surface_slot_destroy(int i) {
     *slot = (VkSurfaceSlot){0};
 }
 
+// Imports and registers an IOSurface-backed target, returning its slot or a negative error.
 static int surface_slot_add(void *iosurface, uint32_t w, uint32_t h) {
     if (!s_device || !s_rpPresent || !iosurface || w == 0 || h == 0) return -1;
     int i = -1;
@@ -279,6 +289,7 @@ static int surface_slot_add(void *iosurface, uint32_t w, uint32_t h) {
     return i;
 }
 
+// Destroys every imported surface target and clears the slot registry.
 static void surface_slots_destroy_all(void) {
     for (int k = 0; k < VK_SURFACE_MAX; k++)
         if (s_surfaces[k].used) surface_slot_destroy(k);
@@ -319,6 +330,7 @@ static bool create_render_pass_ex(VkRenderPass *out, VkFormat format, VkImageLay
     return true;
 }
 
+// Creates renderer texture/sampler resources used for image draw commands.
 static bool create_texture(void) {
     VkImageCreateInfo ii = {0}; ii.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ii.imageType = VK_IMAGE_TYPE_2D;
@@ -383,6 +395,7 @@ static bool create_texture(void) {
     return true;
 }
 
+// Creates the renderer's graphics pipeline and associated shader/layout state.
 static bool create_pipeline(void) {
     VkShaderModuleCreateInfo vci = {0}; vci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     vci.codeSize = quad_vert_spv_len;
@@ -474,6 +487,7 @@ static bool create_pipeline(void) {
     return true;
 }
 
+// Initializes the Vulkan instance/device and renderer resources on first use.
 static bool init_vulkan(void) {
     if (s_device != VK_NULL_HANDLE) return true;
     s_dev = Device_create(false);
@@ -505,6 +519,7 @@ static bool init_vulkan(void) {
 }
 
 Device *VulkanBackend_device(void) { return init_vulkan() ? s_dev : nullptr; }
+// Creates or reuses a sampled GPU representation for an Image.
 bool VulkanBackend_prepareImage(Image *image) {
     if (!Image_isValid(image) || Image_format(image) != IMAGE_FORMAT_RGBA8 || !init_vulkan()) {
         THROW("Vulkan image preparation requires a valid RGBA image/device");
@@ -537,6 +552,7 @@ bool VulkanBackend_prepareImage(Image *image) {
 // ── the batch render pass ───────────────────────────────────────────────────
 static float cf(Color c) { return (float)((c >> 24) & 0xFFu) / 255.0f; }
 
+// Records and submits the current batch, retaining sampled resources until its fence retires.
 static bool render(void) {
     if (!s_device) return false;
     if (s_pending)
@@ -655,6 +671,7 @@ static bool render(void) {
 }
 
 // ── Backend row ─────────────────────────────────────────────────────────────
+// Opens a new CPU-side batch after initializing the backend if needed.
 static bool vk_begin(void) {
     if (!init_vulkan()) return false;
     if (!retire_frame()) return false;
@@ -666,16 +683,21 @@ static bool vk_begin(void) {
     s_rendered = false;
     return true;
 }
+// Reports whether a batch is open; submission is performed by vk_present.
 static bool vk_end(void) { return s_batch != nullptr; }
+// Presents the recorded batch through the renderer's bounded submission path.
 static bool vk_present(void) { return render(); }
 
+// Updates native-pixel renderer extent and resets the default clip.
 static bool vk_resize(uint32_t w, uint32_t h) {
     s_w = (int)w;
     s_h = (int)h;
     s_clip = (Rect){0, 0, (float)w, (float)h};
     return true;
 }
+// Stores the clear color used when the next frame target is initialized.
 static bool vk_clear(Color color) { s_clear = color; return true; }
+// Sets the rounded base clip for subsequent renderer draw commands.
 static bool vk_clip(const Rect *rect, float radius) {
     s_clip = rect ? *rect : (Rect){0, 0, (float)s_w, (float)s_h};
     if (s_batch) {
@@ -684,6 +706,7 @@ static bool vk_clip(const Rect *rect, float radius) {
     }
     return true;
 }
+// Appends a rectangle command to the active Vulkan batch.
 static bool vk_fillRect(const Rect *rect, const Brush *brush) {
     if (!s_batch || !rect || !brush) return false;
     // NEVER intersect the geometry: that would resize the box and recompute the
@@ -691,6 +714,7 @@ static bool vk_fillRect(const Rect *rect, const Brush *brush) {
     VkBatch_rect(s_batch, *rect, brush);
     return true;
 }
+// Retains and appends a sampled image draw to the active batch.
 static bool vk_drawImage(const Image *image, const Rect *dst) {
     if (!s_batch || !image || !dst)
         return false;
@@ -728,6 +752,7 @@ static bool vk_drawImage(const Image *image, const Rect *dst) {
     s_imageDraws[s_imageDrawCount++] = (VkImageDraw){before, sampled};
     return true;
 }
+// Records text glyph quads using the current atlas and brush color.
 static bool vk_drawText(const Rect *rect, const char *text, const Brush *brush) {
     if (!s_batch || !rect) return false;
     VkBatch_glyph(s_batch, *rect, 0u, brush ? (*brush).color : COLOR_WHITE);
@@ -735,6 +760,7 @@ static bool vk_drawText(const Rect *rect, const char *text, const Brush *brush) 
     return true;
 }
 
+// Reads back the private render target into dest when capture is supported.
 static bool vk_capture(Image *dest) {
     if (!dest) return false;
     if (s_surfaceCurrent >= 0) return false;   // an imported surface is read by the host
@@ -760,6 +786,7 @@ const Backend *VulkanBackend_row(void) {
     return &row;
 }
 
+// Binds the host's native presentation layer and configures the renderer in native pixels.
 bool VulkanBackend_bind(void *nativeLayer, uint32_t widthPx, uint32_t heightPx) {
     (void)nativeLayer;
     if (!init_vulkan()) return false;
@@ -769,6 +796,7 @@ bool VulkanBackend_bind(void *nativeLayer, uint32_t widthPx, uint32_t heightPx) 
 // Import a host IOSurface (native px, RGBA8) as the render target. Present then
 // renders straight into it — the host's layer composites those very Bytes, no
 // readback. Apple only (VK_EXT_metal_objects); false elsewhere or if absent.
+// Imports an IOSurface as the presentation target when the active device supports it.
 bool VulkanBackend_bindSurface(void *iosurface, uint32_t widthPx, uint32_t heightPx) {
     if (!init_vulkan()) return false;
     if (!Device_hasMetalObjects(s_dev)) {
@@ -787,6 +815,7 @@ bool VulkanBackend_bindSurface(void *iosurface, uint32_t widthPx, uint32_t heigh
 }
 
 // Leave the imported target and return to the private (readback) target.
+// Leaves the currently imported IOSurface target and restores private-target rendering.
 void VulkanBackend_unbindSurface(void) {
     if (s_boundSlot < 0) return;
     if (!retire_frame()) return;
@@ -796,11 +825,13 @@ void VulkanBackend_unbindSurface(void) {
 }
 
 // ── surface-target pool (double buffering; the seam swaps slots) ────────────
+// Adds an IOSurface target to the renderer's reusable surface pool.
 int VulkanBackend_addSurface(void *iosurface, uint32_t widthPx, uint32_t heightPx) {
     if (!init_vulkan() || !Device_hasMetalObjects(s_dev)) return -1;
     return surface_slot_add(iosurface, widthPx, heightPx);
 }
 
+// Selects a registered surface slot as the active render target.
 bool VulkanBackend_useSurface(int slot) {
     if (slot < 0) { s_surfaceCurrent = -1; return true; }
     if (slot >= VK_SURFACE_MAX || !s_surfaces[slot].used) return false;
@@ -812,12 +843,14 @@ bool VulkanBackend_useSurface(int slot) {
     return true;
 }
 
+// Destroys all pooled surface targets after their dependent work has stopped.
 void VulkanBackend_cleanupSurfaces(void) {
     if (!s_device) return;
     if (!retire_frame()) return;
     surface_slots_destroy_all();
 }
 
+// Removes and destroys one registered surface slot.
 void VulkanBackend_removeSurface(int slot) {
     if (slot < 0 || slot >= VK_SURFACE_MAX || !s_surfaces[slot].used) return;
     if (!retire_frame()) return;
@@ -826,6 +859,7 @@ void VulkanBackend_removeSurface(int slot) {
     surface_slot_destroy(slot);
 }
 
+// Detaches the native presentation layer from the renderer.
 void VulkanBackend_unbind(void) {
     if (s_device) {
         if (!retire_frame()) return;

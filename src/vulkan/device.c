@@ -18,6 +18,7 @@ struct Device {
     char error[256];
 };
 
+// Copies a bounded diagnostic into the device record when one is available.
 static void set_err(Device *c, const char *msg) {
     snprintf((*c).error, sizeof (*c).error, "%s", msg);
 }
@@ -130,6 +131,7 @@ Device *Device_create(bool enableValidation) {
     return c;
 }
 
+// Destroys owned Vulkan handles and device metadata; null is ignored.
 void Device_destroy(Device *c) {
     if (!c) return;
     if ((*c).device) vkDestroyDevice((*c).device, nullptr);
@@ -137,6 +139,7 @@ void Device_destroy(Device *c) {
     free(c);
 }
 
+// Reports whether the wrapper currently owns a non-null logical device.
 bool Device_isValid(const Device *c) { return c && (*c).device != VK_NULL_HANDLE; }
 const char *Device_lastError(const Device *c) { return c ? (*c).error : "null device"; }
 const char *Device_name(const Device *c) { return c ? (*c).deviceName : ""; }
@@ -144,5 +147,7 @@ void *Device_native(const Device *c) { return c ? (void*) ((*c).device) : nullpt
 void *Device_instance(const Device *c) { return c ? (void*) ((*c).instance) : nullptr; }
 void *Device_physical(const Device *c) { return c ? (void*) ((*c).physical) : nullptr; }
 void *Device_queue(const Device *c) { return c ? (void*) ((*c).queue) : nullptr; }
+// Returns the selected graphics queue-family index, or zero for null.
 uint32_t Device_queueFamily(const Device *c) { return c ? (*c).queueFamily : 0u; }
+// Reports whether the device enabled VK_EXT_metal_objects.
 bool Device_hasMetalObjects(const Device *c) { return c && (*c).metalObjects; }

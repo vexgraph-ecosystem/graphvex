@@ -80,8 +80,10 @@ struct Surface {
     void *clockUser;
 };
 
+// Creates an offscreen surface with a 1x1 retained image.
 Surface *Surface_0(void) { return Surface_2(nullptr, 0, 0); }
 
+// Creates a surface around a borrowed native handle and allocates its retained image.
 Surface *Surface_2(void *native, uint32_t width, uint32_t height) {
     Surface *s = calloc(1, sizeof *s);
     if (!s) return nullptr;
@@ -99,6 +101,7 @@ Surface *Surface_2(void *native, uint32_t width, uint32_t height) {
     return s;
 }
 
+// Destroys the retained image and board directory without destroying borrowed boards or native handle.
 void Surface_destroy(Surface *surface) {
     if (!surface) return;
     Image_destroy((*surface).present);
@@ -106,6 +109,7 @@ void Surface_destroy(Surface *surface) {
     free(surface);
 }
 
+// Updates native-pixel dimensions and resizes the retained image, using at least 1x1 backing.
 bool Surface_resize(Surface *surface, uint32_t width, uint32_t height) {
     if (!surface || !(*surface).present) return false;
     (*surface).width = width;
@@ -113,42 +117,55 @@ bool Surface_resize(Surface *surface, uint32_t width, uint32_t height) {
     return Image_resize((*surface).present, width ? width : 1u, height ? height : 1u);
 }
 
+// Returns the configured native-pixel width, or zero for null.
 uint32_t Surface_width(const Surface *surface) { return surface ? (*surface).width : 0u; }
+// Returns the configured native-pixel height, or zero for null.
 uint32_t Surface_height(const Surface *surface) { return surface ? (*surface).height : 0u; }
+// Reports whether the retained presentation image exists.
 bool Surface_isValid(const Surface *surface) { return surface && (*surface).present != nullptr; }
+// Returns the borrowed native host handle.
 void *Surface_handle(const Surface *surface) { return surface ? (*surface).native : nullptr; }
+// Returns the retained presentation image as a borrowed pointer.
 Image *Surface_presentImage(Surface *surface) { return surface ? (*surface).present : nullptr; }
 
+// Installs the host presentation callback and its borrowed userdata.
 void Surface_onPresent(Surface *surface, SurfacePresentFn fn, void *userdata) {
     if (!surface) return;
     (*surface).presentFn = fn;
     (*surface).presentUser = userdata;
 }
 
+// Reads time from the configured clock callback or the monotonic system clock.
 static uint64_t surfaceNow(Surface *surface) {
     if ((*surface).clockFn) return (*surface).clockFn((*surface).clockUser);
     struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
+// Reports whether the FPS cap permits another presentation at the current time.
 static bool surfaceDue(Surface *surface) {
     return (*surface).fpsCap == -1 || !(*surface).presentCount ||
         surfaceNow(surface) - (*surface).lastPresent >=
         (1000000000ULL + (uint64_t)(*surface).fpsCap - 1) / (uint64_t)(*surface).fpsCap;
 }
 
+// Sets the presentation cap; -1 disables it and nonpositive alternatives are ignored.
 void Surface_setFPSCap(Surface *surface, int fps) {
     if (!surface || (fps != -1 && fps <= 0) || (*surface).fpsCap == fps) return;
     (*surface).fpsCap = fps;
 }
+// Returns the configured cap, or zero when surface is null.
 int Surface_getFPSCap(const Surface *surface) { return surface ? (*surface).fpsCap : 0; }
+// Returns the count of successful host presentation callbacks.
 uint64_t Surface_getPresentCount(const Surface *surface) { return surface ? (*surface).presentCount : 0; }
+// Installs a clock callback and resets present timing and count for deterministic scheduling.
 void Surface_setClock(Surface *surface, SurfaceClockFn fn, void *userdata) {
     if (!surface) return;
     (*surface).clockFn = fn; (*surface).clockUser = userdata;
     (*surface).lastPresent = 0; (*surface).presentCount = 0;
 }
 
+// Hands the retained image to the host when due; a missing callback or failed callback returns false.
 bool Surface_present(Surface *surface) {
     if (!surface || !(*surface).present) return false;
     if (!surfaceDue(surface)) { (*surface).pending = true; return false; }
@@ -166,6 +183,7 @@ bool Surface_present(Surface *surface) {
 }
 
 // ── revalidation ────────────────────────────────────────────────────────────
+// Appends a borrowed board to the surface's ordered revalidation list.
 void Surface_addBoard(Surface *surface, Board *board) {
     if (!surface || !board) return;
     if ((*surface).boardCount == (*surface).boardCap) {
@@ -178,6 +196,7 @@ void Surface_addBoard(Surface *surface, Board *board) {
     (*surface).boards[(*surface).boardCount++] = board;
 }
 
+// Removes the first matching borrowed board while preserving the order of remaining boards.
 void Surface_removeBoard(Surface *surface, Board *board) {
     if (!surface || !board) return;
     for (int i = 0; i < (*surface).boardCount; i++) {
@@ -191,17 +210,20 @@ void Surface_removeBoard(Surface *surface, Board *board) {
 
 // The one call a Frame makes: revalidate each board (which renders its
 // scene/content), then present the finished image to the host.
+// Marks output pending and polls it, revalidating boards only when presentation is due.
 void Surface_revalidate(Surface *surface) {
     if (!surface) return;
     (*surface).pending = true;
     Surface_poll(surface);
 }
 
+// Revalidates and presents pending output once its configured cap allows it.
 void Surface_poll(Surface *surface) {
     if (!surface || !(*surface).pending || !surfaceDue(surface)) return;
     Surface_revalidateNow(surface);
 }
 
+// Revalidates each attached board in order, then attempts one presentation.
 void Surface_revalidateNow(Surface *surface) {
     if (!surface) return;
     for (int i = 0; i < (*surface).boardCount; i++)
