@@ -20,12 +20,14 @@
  * so filterBounds determines the backdrop snapshot's cumulative sample halo.
  * Rectangle-only binary masks; nonzero radii/translucent baseline unsupported. */
 
+// Reports whether the inner world-space rectangle is fully contained in outer.
 static bool contains(CompositorBounds outer, CompositorBounds inner) {
     return inner.x >= outer.x && inner.y >= outer.y &&
         (int64_t) inner.x + inner.width <= (int64_t) outer.x + outer.width &&
         (int64_t) inner.y + inner.height <= (int64_t) outer.y + outer.height;
 }
 
+// Copies the source/bounds intersection into an owned surface with the requested origin and extent.
 CompositorStatus Compositor_crop(const CompositorSurface *source,
                                  CompositorBounds bounds, CompositorSurface **out) {
     if (!out)
@@ -57,6 +59,7 @@ CompositorStatus Compositor_crop(const CompositorSurface *source,
     return COMPOSITOR_OK;
 }
 
+// Validates scope inputs and verifies backdrop coverage for every requested filter tap.
 static CompositorStatus sceneCheck(const CompositorScopeDesc *desc) {
     if (!desc || ((*desc).foregroundCount && !(*desc).foreground))
         return COMPOSITOR_INVALID;
@@ -129,6 +132,7 @@ static CompositorStatus replacementCopy(const CompositorSurface *group,
     return COMPOSITOR_OK;
 }
 
+// Applies backdrop, foreground, decoration, and element scopes to a private scene copy.
 CompositorStatus Compositor_scopedScene(const CompositorScopeDesc *desc,
                                         CompositorSurface **out) {
     if (!out)

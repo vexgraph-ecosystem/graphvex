@@ -31,6 +31,7 @@ struct CompositorSurface {
     float *pixels;
 };
 
+// Validates paired empty dimensions, coordinate extents, and configured pixel/storage limits.
 static CompositorStatus boundsCheck(CompositorBounds b) {
     if ((!b.width) != (!b.height))
         return COMPOSITOR_INVALID;
@@ -43,6 +44,7 @@ static CompositorStatus boundsCheck(CompositorBounds b) {
     return COMPOSITOR_OK;
 }
 
+// Allocates a transparent linear-premultiplied surface and writes out only on success.
 CompositorStatus CompositorSurface_create(CompositorBounds b,
                                           CompositorSurface **out) {
     if (!out)
@@ -65,18 +67,22 @@ CompositorStatus CompositorSurface_create(CompositorBounds b,
     return COMPOSITOR_OK;
 }
 
+// Creates an empty zero-origin surface.
 CompositorSurface *CompositorSurface_0(void) {
     return CompositorSurface_1((CompositorBounds) {0});
 }
+// Convenience constructor returning null if checked surface creation fails.
 CompositorSurface *CompositorSurface_1(CompositorBounds bounds) {
     CompositorSurface *surface = nullptr;
     CompositorSurface_create(bounds, &surface);
     return surface;
 }
+// Returns the empty-surface identity through the zero-argument constructor.
 CompositorSurface *CompositorSurface_zero(void) {
     return CompositorSurface_0();
 }
 
+// Writes a bounded value or one-level field projection and reports truncation.
 static void surfaceString(const CompositorSurface *surface, bool structure,
                            char *dest, size_t cap, bool *outTruncated) {
     if (!dest || !cap) {
@@ -101,31 +107,38 @@ static void surfaceString(const CompositorSurface *surface, bool structure,
     if (outTruncated)
         *outTruncated = written < 0 || (size_t) written >= cap;
 }
+// Formats a concise bounded summary of the surface.
 void CompositorSurface_toString(const CompositorSurface *surface, char *dest,
                                 size_t cap, bool *outTruncated) {
     surfaceString(surface, false, dest, cap, outTruncated);
 }
+// Formats the surface's own fields into a bounded structure projection.
 void CompositorSurface_toStringStruct(const CompositorSurface *surface, char *dest,
                                       size_t cap, bool *outTruncated) {
     surfaceString(surface, true, dest, cap, outTruncated);
 }
 
+// Frees the owned pixel buffer and surface record; null is ignored.
 void CompositorSurface_destroy(CompositorSurface *surface) {
     if (!surface)
         return;
     free((*surface).pixels);
     free(surface);
 }
+// Returns the world-space bounds, or an empty bounds value for null.
 CompositorBounds CompositorSurface_bounds(const CompositorSurface *surface) {
     return surface ? (*surface).bounds : (CompositorBounds) {0};
 }
+// Returns mutable packed linear-premultiplied RGBA pixels borrowed from the surface.
 float *CompositorSurface_pixels(CompositorSurface *surface) {
     return surface ? (*surface).pixels : nullptr;
 }
+// Returns a read-only borrowed view of packed surface pixels.
 const float *CompositorSurface_constPixels(const CompositorSurface *surface) {
     return surface ? (*surface).pixels : nullptr;
 }
 
+// Validates supported filter token payloads and extracts their scalar parameters.
 static CompositorStatus decode(FilterToken token, float *gain, uint32_t *radius) {
     uint64_t payload = Filter_payload(token);
     switch (Filter_id(token)) {
@@ -147,6 +160,7 @@ static CompositorStatus decode(FilterToken token, float *gain, uint32_t *radius)
     }
 }
 
+// Computes conservative output bounds after sequential filter support expansion.
 CompositorStatus Compositor_filterBounds(CompositorBounds source,
                                         const FilterToken *filters, size_t count,
                                         CompositorBounds *out) {
@@ -186,6 +200,7 @@ CompositorStatus Compositor_filterBounds(CompositorBounds source,
     return COMPOSITOR_OK;
 }
 
+// Checks finite nonnegative premultiplied pixels, bounded alpha, and transparent-black pixels.
 CompositorStatus CompositorSurface_validate(const CompositorSurface *surface) {
     if (!surface)
         return COMPOSITOR_INVALID;
@@ -202,6 +217,7 @@ CompositorStatus CompositorSurface_validate(const CompositorSurface *surface) {
     return COMPOSITOR_OK;
 }
 
+// Composites the intersecting world-space region using premultiplied source-over.
 CompositorStatus Compositor_sourceOver(const CompositorSurface *source,
                                        CompositorSurface *dest) {
     if (source == dest)
@@ -239,6 +255,7 @@ CompositorStatus Compositor_sourceOver(const CompositorSurface *source,
     return COMPOSITOR_OK;
 }
 
+// Computes the bounded union of two world-space rectangles, treating empty bounds as identity.
 static CompositorStatus unionBounds(CompositorBounds a, CompositorBounds b,
                                      CompositorBounds *out) {
     if (!a.width) {
@@ -263,6 +280,7 @@ static CompositorStatus unionBounds(CompositorBounds a, CompositorBounds b,
     return status;
 }
 
+// Applies one validated filter, replacing the owned intermediate only after successful processing.
 static CompositorStatus apply(CompositorSurface **surface, FilterToken token) {
     float gain = 1;
     uint32_t radius = 0;
@@ -331,6 +349,7 @@ static CompositorStatus apply(CompositorSurface **surface, FilterToken token) {
     return COMPOSITOR_OK;
 }
 
+// Builds painter-order source-over output, then applies filters in their supplied order.
 CompositorStatus Compositor_compose(const CompositorSurface *const *sources,
                                     size_t sourceCount,
                                     const FilterToken *filters, size_t filterCount,

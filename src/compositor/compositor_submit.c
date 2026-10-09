@@ -13,6 +13,7 @@
  * and export/append failures leave outImage unchanged. No global backend switch,
  * fitting transform, GPU work or retained compositor-surface borrow occurs. */
 
+// Converts a nonempty world-origin surface to an owned Image and appends it to the display list.
 CompositorStatus Compositor_record(const CompositorSurface *surface,
                                    DisplayList *list, Image **outImage) {
     if (!surface || !list || !outImage)

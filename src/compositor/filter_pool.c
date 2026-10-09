@@ -44,12 +44,14 @@ struct FilterPool {
     Slot *slots;
 };
 
+// Reports a rejected cold operation and returns its status unchanged.
 static FilterPoolStatus reject(FilterPoolStatus status) {
     if (status != FILTER_POOL_OK)
         THROW("FilterPool rejected operation: status=%d", (int) status);
     return status;
 }
 
+// Resolves a live pool token after validating pool identity, slot index, and generation.
 static FilterPoolStatus lookup(const FilterPool *pool, FilterToken token,
                                Slot **out) {
     if (!pool || Filter_id(token) != FILTER_POOL_ID)
@@ -68,6 +70,7 @@ static FilterPoolStatus lookup(const FilterPool *pool, FilterToken token,
     return FILTER_POOL_OK;
 }
 
+// Creates bounded recipe storage and initializes each slot's first generation.
 FilterPoolStatus FilterPool_2(FilterPoolConfig config, FilterPool **out) {
     if (!out || !config.capacity || !config.maxRecipeFilters)
         return reject(FILTER_POOL_INVALID);
@@ -91,6 +94,7 @@ FilterPoolStatus FilterPool_2(FilterPoolConfig config, FilterPool **out) {
     return FILTER_POOL_OK;
 }
 
+// Destroys an empty pool; returns busy and preserves it while recipes remain live.
 FilterPoolStatus FilterPool_destroy(FilterPool *pool) {
     if (!pool)
         return FILTER_POOL_OK;
@@ -101,6 +105,7 @@ FilterPoolStatus FilterPool_destroy(FilterPool *pool) {
     return FILTER_POOL_OK;
 }
 
+// Validates and copies an ordered non-nested recipe into an available slot.
 FilterPoolStatus FilterPool_insert(FilterPool *pool, const FilterToken *tokens,
                                   size_t count, FilterToken *out) {
     if (!pool || !out || (count && !tokens))
@@ -131,6 +136,7 @@ FilterPoolStatus FilterPool_insert(FilterPool *pool, const FilterToken *tokens,
     return reject(FILTER_POOL_LIMIT);
 }
 
+// Adds one reference to a live recipe unless its reference count is saturated.
 FilterPoolStatus FilterPool_retain(FilterPool *pool, FilterToken token) {
     Slot *slot;
     FilterPoolStatus status = lookup(pool, token, &slot);
@@ -142,6 +148,7 @@ FilterPoolStatus FilterPool_retain(FilterPool *pool, FilterToken token) {
     return FILTER_POOL_OK;
 }
 
+// Drops one recipe reference and advances or retires its slot generation at zero.
 FilterPoolStatus FilterPool_release(FilterPool *pool, FilterToken token) {
     Slot *slot;
     FilterPoolStatus status = lookup(pool, token, &slot);
@@ -158,6 +165,7 @@ FilterPoolStatus FilterPool_release(FilterPool *pool, FilterToken token) {
     return FILTER_POOL_OK;
 }
 
+// Copies a live recipe into caller storage, leaving output count untouched on rejection.
 FilterPoolStatus FilterPool_snapshot(const FilterPool *pool, FilterToken token,
                                     FilterToken *outTokens, size_t capacity,
                                     size_t *outCount) {
@@ -175,6 +183,7 @@ FilterPoolStatus FilterPool_snapshot(const FilterPool *pool, FilterToken token,
     return FILTER_POOL_OK;
 }
 
+// Expands pool tokens in order and composes the supplied source group with that recipe.
 FilterPoolStatus FilterPool_compose(const FilterPool *pool,
                                    const CompositorSurface *const *sources,
                                    size_t sourceCount, const FilterToken *tokens,
@@ -205,16 +214,20 @@ FilterPoolStatus FilterPool_compose(const FilterPool *pool,
     return reject((FilterPoolStatus) Compositor_compose(sources, sourceCount, expanded, count, out));
 }
 
+// Returns configured slot capacity, or zero for null.
 uint32_t FilterPool_capacity(const FilterPool *pool) {
     return pool ? (*pool).capacity : 0;
 }
+// Returns the per-recipe filter limit, or zero for null.
 uint32_t FilterPool_maxRecipeFilters(const FilterPool *pool) {
     return pool ? (*pool).maxRecipeFilters : 0;
 }
+// Returns the number of occupied recipe slots, or zero for null.
 uint32_t FilterPool_live(const FilterPool *pool) {
     return pool ? (*pool).live : 0;
 }
 
+// Writes the selected bounded pool projection and reports truncation.
 static void format(const FilterPool *pool, bool structure, char *dest, size_t cap,
                    bool *outTruncated) {
     if (!dest && cap) {
@@ -237,10 +250,12 @@ static void format(const FilterPool *pool, bool structure, char *dest, size_t ca
     if (outTruncated)
         *outTruncated = length < 0 || (size_t) length >= cap;
 }
+// Formats the pool's concise value summary into caller storage.
 void FilterPool_toString(const FilterPool *pool, char *dest, size_t cap,
                          bool *outTruncated) {
     format(pool, false, dest, cap, outTruncated);
 }
+// Formats the pool's own fields into caller storage.
 void FilterPool_toStringStruct(const FilterPool *pool, char *dest, size_t cap,
                                bool *outTruncated) {
     format(pool, true, dest, cap, outTruncated);
