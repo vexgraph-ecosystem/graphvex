@@ -29,23 +29,8 @@ bounded by the recorded evidence in `tests/test-checklist.md`.
 - **Platforms:** proven on Apple Silicon macOS 14+ only. Windows and Linux GPU
   paths and shaders are unproven.
 
-## CLion: CMake is IDE metadata only
-
-Open this repository root as a CMake project. `CMakeLists.txt` provides C23
-source targets, include paths and flags for navigation, diagnostics and inlay
-hints. Targets are excluded from the default build; no linking, dependency
-downloads, shader generation or application runner are wired into it.
-Set `VEXSPOKE_SOURCE_DIR` to a local Vexspoke `src/`, `VULKAN_INCLUDE_DIR` to
-local SDK headers, and optionally `VEXGRAPH_SHADER_DIR` to existing b shader
-output containing `quad_spv.h`. Missing headers stay real IDE errors; no fake
-declarations are generated. IDE appearance is user-verified.
-
-Build with [b](https://github.com/vex-graph/b), not this adapter. From the
-Vexgraph workspace root: `./tools/b build graphvex`. IDE metadata is not proof
-of a standalone runtime build or GPU readiness.
-
 The **rect-first** GPU driver + UI element-tree core. Built by the workspace
-build system `b` (standalone repo at `../../../personal/b`).
+build system [b](https://github.com/vex-graph/b) (local checkout at `../../../personal/b`).
 
 > **NO SWAPCHAIN, EVER.** We never touch `VK_KHR_swapchain`. Rendering goes into
 > our own `Image`/`Board`s; the on-screen destination is a host-borrowed seam
@@ -130,5 +115,5 @@ following:
   meshlets, SDF atlases, 3D shading and advanced lighting remain partial or
   planned; the reference compositor is not yet a pooled hot path.
 - **It proves no cross-platform GPU path.** Only Apple Silicon macOS 14+ on the
-  local host is exercised; the IDE CMake adapter is metadata only and is not
-  proof of a standalone runtime build or GPU readiness.
+  local host is exercised; other-host runtime and GPU readiness require their
+  own proof.
