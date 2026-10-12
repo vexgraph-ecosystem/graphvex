@@ -1,10 +1,10 @@
 # graphvex — Repo-Local Living Preferences
 > Repo-local preferences governed by the Living Documentation Law.
-> Universal Supreme Constitution: workspace-root preferences.md, published on Gist.
+> Universal Supreme Constitution: workspace gist/PREFERENCES.md, published on Gist.
 
 ## 0. Constitution Link (supreme)
-- [preferences.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a) — real, Git-ignored workspace-root file at ../../../preferences.md, not a tracked Vexspoke file or symlink.
-- All universal laws in `../../../preferences.md` are mandatory and binding across the ecosystem.
+- [preferences.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a) — real, Git-ignored workspace file at `../../gist/PREFERENCES.md`, not a tracked Vexspoke file or symlink.
+- All universal laws in `../../gist/PREFERENCES.md` are mandatory and binding across the ecosystem.
 - This document codifies **exclusive** preferences for `graphvex` (R3 GPU Driver). R3 borrows Vexspoke CPU computation/behavior and Relational Engine memory/storage contracts. Canonical IO/NIO includes and the native Memory implementation now come from RE by default; allocation semantics remain compatible, not rewritten into Rust. GPU shaders, dispatch, capabilities and synchronization stay Graphvex-owned.
 
 ## 1. Exclusive Preferences Binding Matrix
@@ -71,7 +71,7 @@ Fragmented color channel encodings (`0xAARRGGBB` vs `0xRRGGBBAA` vs `0xBBGGRRAA`
 
 ### SPIR-V Shader Deployment Law
 
-GLSL sources belong to Graphvex's `src/shaders`; the umbrella build `../../../tools/b`
+GLSL sources belong to Graphvex's `src/shaders`; the umbrella build `../../tools/b`
 compiles ahead-of-time SPIR-V into its external build-state `shader/` directory.
 Existing stage directories remain supported. New modules separate responsibilities
 (`ui`, `shadow`, `compositor`, `filters`, `light`) rather than creating one

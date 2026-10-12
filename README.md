@@ -5,7 +5,7 @@
 graphvex is an **R3 graphics driver**. Today it provides a working CPU
 graphics/compositor foundation plus a single Vulkan backend row — a substantial
 implementation, **not** a finished production renderer. Every claim below is
-bounded by the recorded evidence in `tests/test-checklist.md`.
+bounded by the recorded evidence in `../../gist/test-checklist.md`.
 
 - **Implemented and exercised** (Apple Silicon macOS is the only proven host):
   the rect-first drawable seam with a headless CPU raster backend (`graphics`),
@@ -30,7 +30,7 @@ bounded by the recorded evidence in `tests/test-checklist.md`.
   paths and shaders are unproven.
 
 The **rect-first** GPU driver + UI element-tree core. Built by the workspace
-build system [b](https://github.com/vex-graph/b) (local checkout at `../../../personal/b`).
+build system [b](https://github.com/vex-graph/b) (local checkout at `../../personal/b`).
 
 > **NO SWAPCHAIN, EVER.** We never touch `VK_KHR_swapchain`. Rendering goes into
 > our own `Image`/`Board`s; the on-screen destination is a host-borrowed seam
@@ -97,7 +97,7 @@ cd ~/vexgraph
 
 The tests live in the workspace `tests` repo, mirrored per unit under
 `tests/graphvex/<dir>/<unit>_test.c` (the Test Tree Mirror Law). The in-repo
-`../../../tests` and prebuilt `shader/spv/` of the old tree were retired with the rewrite.
+`../../tests` and prebuilt `shader/spv/` of the old tree were retired with the rewrite.
 
 ## Scope and Limitations
 
