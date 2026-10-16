@@ -2,19 +2,58 @@
 #include "graphics/image_runs.h"
 
 #include "image.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
-// graphvex R3 — graphics/graphics.c
-// The registry, the slim forwarders, the display-list streamer, and the
-// headless CPU (raster) backend. No Vulkan here: the GPU backend lands behind
-// the same row later. DisplayList reserves reusable clip-stack scratch while
-// recording. Submission intersects every enclosing mask and restores caller
-// scope; mixed rounded intersections use coalesced pixel-center scissors on
-// both backends, retaining the original quad geometry and texture coordinates.
-// Raster fill draws an inside border as well as the background.
+;;DEFINITION
+/** This module implements the backend-neutral drawing forwarders, retained
+ * DisplayList recording/submission, and the headless CPU raster Backend row.
+ * It is a procedural integration unit rather than one class file: Graphvex
+ * graphics state and the Raster reference backend share this translation unit
+ * today. Submission applies nested clips without resizing geometry and restores
+ * the caller's base clip. This co-location is documented, not a waiver of the
+ * Single Class Per File Law; extraction remains required before treating these
+ * behavior owners as one class. */
+;;OVERVIEW
+/** ========================================================================
+ * MODULE: graphics/graphics.c
+ * MODULE STATE
+ * const Backend *s_rows[8]     registered callback rows
+ * int s_rowCount               initialized backend rows
+ * const Backend *s_current     selected backend row
+ * DrawCmd s_baseClip           external clip scope
+ * bool s_hasBaseClip           whether the external clip is active
+ * uint32_t *s_px                raster pixel backing
+ * int32_t s_capW,s_capH        allocated raster extent/row stride
+ * int32_t s_w,s_h              current raster viewport extent
+ * Rect s_clip; float s_clipRadius active raster clipping geometry
+ * FUNCTION REGISTRY
+ * Backend registry: Graphics_register, Graphics_use, Graphics_backendId,
+ *   Graphics_current
+ * Backend forwarding: Graphics_begin/end/present/resize/clear/clip/
+ *   clipRounded/fillRect/drawImage/drawText/capture
+ * DisplayList: DisplayList_0/free/clear/rect/image/text/clip/clipRounded/
+ *   unclip/count/cmds
+ * Submission: Graphics_submit
+ * Raster backend: RasterGraphics_row, Raster_configure, Raster_pixels,
+ *   Raster_pixelAt
+ * Private behavior: dl_push grows command storage; submit_draw dispatches one
+ *   draw; submit_clip and submit_mask read clip state; submit_span,
+ *   submit_masks, and submit_masked geometry apply rectangular/rounded scopes;
+ *   blend_over performs RGBA compositing; raster_begin/end/present/resize/
+ *   clear/clip/fillRect/imageRun/drawImage/drawText/capture implement the CPU
+ *   backend; sd_round_box computes rounded-rectangle coverage.
+ * Ownership and failure contract:
+ * DisplayList owns command and clip-stack allocations, but command text/images
+ * are borrowed through submission. Raster backing is module-owned and grow-only.
+ * Registry capacity is currently eight and a full registry refuses admission;
+ * submit failure restores the external clip when the backend callback permits.
+ * The API has global state and requires caller serialization.
+ * ======================================================================== */
 
 // ── backend registry ────────────────────────────────────────────────────────
 #define MAX_BACKENDS 8

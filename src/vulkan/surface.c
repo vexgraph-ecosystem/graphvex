@@ -52,7 +52,7 @@
  * FUNCTION REGISTRY (exported by vulkan/surface.h):
  * ----------------------------------------------------------------------------
  * Constructors:
- *   - Surface_0, Surface_2, Surface_destroy
+ *   - Surface_0, Surface_3, Surface_destroy
  * Core:
  *   - Surface_resize, Surface_onPresent, Surface_present
  * Queries / Getters:
@@ -81,10 +81,10 @@ struct Surface {
 };
 
 // Creates an offscreen surface with a 1x1 retained image.
-Surface *Surface_0(void) { return Surface_2(nullptr, 0, 0); }
+Surface *Surface_0(void) { return Surface_3(nullptr, 0, 0); }
 
 // Creates a surface around a borrowed native handle and allocates its retained image.
-Surface *Surface_2(void *native, uint32_t width, uint32_t height) {
+Surface *Surface_3(void *native, uint32_t width, uint32_t height) {
     Surface *s = calloc(1, sizeof *s);
     if (!s) return nullptr;
     (*s).native = native;

@@ -5,6 +5,8 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
+#include "c23/constructor.h"
+
 #include "graphics/graphics.h"
 #include "image.h"
 
@@ -30,6 +32,7 @@ typedef struct BoardDesc {
 
 Board *Board_0(void);
 Board *Board_2(uint32_t width, uint32_t height);
+#define Board(...) CONSTRUCTOR_DISPATCH(Board, __VA_ARGS__)
 Board *Board_new(const BoardDesc *desc);
 void Board_destroy(Board *board);
 

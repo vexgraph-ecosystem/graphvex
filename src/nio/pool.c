@@ -1,14 +1,43 @@
 #include "nio/pool.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 #include "nio/mem.h"   // vexspoke R2 — ForeignMemory (Memory_alloc / Memory_free)
 
-// graphvex R3 — nio/pool.c
-// Blocks are cut from ForeignMemory and APPENDED, never moved, so a borrowed
-// slot pointer stays valid for the pool's life. A free slot is threaded with
-// the address of the next free slot (every slot is >= sizeof(void*)).
+;;DEFINITION
+/** Pool owns a growable directory of fixed-stride blocks allocated through the
+ * Relational Engine-backed Memory ABI. Blocks append without moving earlier
+ * slots; a free list is threaded through slot storage itself. Destroy requires
+ * all borrowers to be excluded and invalidates every returned slot pointer. */
+;;OVERVIEW
+/** ========================================================================
+ * CLASS: Pool (nio/pool.c)
+ * STRUCT FIELDS (Mirroring Pool)
+ * size_t stride                  bytes in each fixed-size slot
+ * uint32_t blockCap              slots admitted per backing block
+ * void **blocks                  owned directory of Memory_alloc blocks
+ * int blockCount                 initialized block directory entries
+ * int blocksCap                  block-directory capacity
+ * void *freeHead                 head of intrusive free-slot chain
+ * uint32_t live                  currently checked-out slot count
+ * FUNCTION REGISTRY
+ * Constructors: Pool *Pool_new(size_t stride, uint32_t blockCap)
+ * Lifecycle: void Pool_destroy(Pool *pool)
+ * Operations: void *Pool_alloc(Pool *pool), void Pool_release(Pool *pool,
+ *   void *item), bool Pool_contains(const Pool *pool, const void *item)
+ * Projections: uint32_t Pool_live(const Pool *pool),
+ *   size_t Pool_stride(const Pool *pool)
+ * Private helpers: blocks_push grows the block directory; pool_grow appends
+ *   Memory-backed storage and links each slot into the free list.
+ * Admission, failure and ownership contract:
+ * Invalid geometry or allocation failure returns nullptr/false. Returned slots
+ * are pool-owned storage borrowed by consumers until release or destroy;
+ * release requires a live slot belonging to this pool. contains checks block
+ * range membership, not slot alignment or live allocation identity.
+ * ======================================================================== */
 
 struct Pool {
     size_t stride;

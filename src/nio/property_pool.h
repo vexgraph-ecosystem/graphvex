@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "c23/constructor.h"
+
 #include "ui/property.h"
 
 // graphvex R3 — nio/property_pool.h
@@ -13,6 +15,7 @@
 typedef struct PropertyPool PropertyPool;
 
 PropertyPool *PropertyPool_0(void);
+#define PropertyPool(...) CONSTRUCTOR_DISPATCH(PropertyPool, __VA_ARGS__)
 PropertyPool *PropertyPool_default(void);   // process-global, for Element-owned bounds
 void PropertyPool_destroy(PropertyPool *pool);
 

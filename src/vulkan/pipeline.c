@@ -1,12 +1,40 @@
 #include "vulkan/pipeline.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// graphvex R3 — vulkan/pipeline.c
-// Owns the shader modules + fixed state. The VkPipeline itself is created once
-// a Device is bound (next slice); until then this is the shader/state record.
+;;DEFINITION
+/** Pipeline owns copied vertex and fragment SPIR-V bytes plus the immutable
+ * vertex/push-constant geometry needed by a renderer. The current unit does not
+ * create or bind a native VkPipeline; native is an opaque reserved projection. */
+;;OVERVIEW
+/** ========================================================================
+ * CLASS: Pipeline (vulkan/pipeline.c)
+ * STRUCT FIELDS (Mirroring Pipeline)
+ * void *vert                     owned vertex SPIR-V byte copy
+ * uint32_t vertSize              vertex byte length
+ * void *frag                     owned fragment SPIR-V byte copy
+ * uint32_t fragSize              fragment byte length
+ * uint32_t vertexStride          configured bytes per vertex
+ * uint32_t pushConstantSize      configured push-constant byte extent
+ * void *native                   reserved opaque native pipeline handle
+ * FUNCTION REGISTRY
+ * Constructors: Pipeline *Pipeline_new(const PipelineDesc *desc)
+ *   Pipeline *Pipeline_fromFiles(const char *vertSpvPath,
+ *     const char *fragSpvPath, uint32_t vertexStride, uint32_t pushConstantSize)
+ * Lifecycle: void Pipeline_destroy(Pipeline *pipeline)
+ * Projections: bool Pipeline_isValid(const Pipeline *pipeline)
+ *   uint32_t Pipeline_vertexStride(const Pipeline *pipeline)
+ *   void *Pipeline_native(const Pipeline *pipeline)
+ * Private helper: slurp reads one nonempty shader file into owned bytes.
+ * Admission, failure and ownership contract:
+ * Constructors copy supplied/file bytes; temporary file buffers are freed after
+ * construction. Rejection returns nullptr and preserves no partial Pipeline.
+ * Destroy accepts nullptr. Native pipeline creation is not implemented here.
+ * ======================================================================== */
 
 struct Pipeline {
     void *vert;         // SPIR-V Bytes

@@ -1,10 +1,43 @@
 #include "graphics/render_loop.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
 #include <stdlib.h>
 #include <time.h>
 
-// graphvex R3 — graphics/render_loop.c
-// The demand-driven step. Pure scheduling: no GPU resource, no verb.
+;;DEFINITION
+/** RenderLoop schedules registered clients and invokes their borrowed callbacks
+ * only when dirty state or a newer content generation creates presentation
+ * demand. It owns no GPU resources; the caller owns client handles and must
+ * serialize registry mutation against stepping. */
+;;OVERVIEW
+/** ========================================================================
+ * CLASS: RenderLoop (graphics/render_loop.c)
+ * STRUCT FIELDS (Mirroring graphics/render_loop.h)
+ * Client *clients               owned growable client registry
+ * int count                     initialized registry entries
+ * int cap                       allocated registry capacity
+ * uint32_t targetFps             optional target cadence; zero means uncapped
+ * _Atomic bool wake              coalesced cross-thread wake request
+ * double lastSeconds             previous monotonic step time
+ * FUNCTION REGISTRY
+ * Constructors: RenderLoop *RenderLoop_0(void),
+ *   RenderLoop *RenderLoop_fps(uint32_t targetFps),
+ *   RenderLoop *RenderLoop_default(void)
+ * Lifecycle: void RenderLoop_free(RenderLoop *loop)
+ * Registry: bool RenderLoop_addClient(RenderLoop *loop,const Client *client)
+ *   bool RenderLoop_removeClient(RenderLoop *loop,void *window)
+ *   Client *RenderLoop_findClient(RenderLoop *loop,const void *window)
+ * Demand: void RenderLoop_markDirty(RenderLoop *loop,void *window)
+ *   void RenderLoop_setContentGen(RenderLoop *loop,void *window,uint64_t gen)
+ *   void RenderLoop_notify(RenderLoop *loop)
+ *   bool RenderLoop_step(RenderLoop *loop)
+ * Private helper: now_seconds reads CLOCK_MONOTONIC for elapsed-time callbacks.
+ * Failure, ownership and threading contract:
+ * The loop owns the copied client array, but window/userdata and callbacks are
+ * borrowed. notify is the atomic wake seam; registry changes and step require
+ * external serialization. A failed present leaves dirty/generation demand live.
+ * ======================================================================== */
 
 struct RenderLoop {
     Client *clients;

@@ -1,11 +1,46 @@
 #include "vulkan/device.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vulkan/vulkan.h>
 
-// graphvex R3 — vulkan/device.c
+;;DEFINITION
+/** Device owns the Vulkan instance, selected physical and logical device, and
+ * graphics queue used by Graphvex's offscreen rendering path. It does not own a
+ * swapchain or window presentation surface. Construction probes the host loader,
+ * device, graphics queue family and optional platform extensions; partial state
+ * is destroyed on rejection. */
+;;OVERVIEW
+/** ========================================================================
+ * CLASS: Device (vulkan/device.c)
+ * STRUCT FIELDS (Mirroring vulkan/device.h opaque Device)
+ * VkInstance instance           owned Vulkan instance
+ * VkPhysicalDevice physical     selected physical device handle
+ * VkDevice device               owned logical device
+ * VkQueue queue                 borrowed queue retrieved from logical device
+ * uint32_t queueFamily          selected graphics queue-family index
+ * bool metalObjects             optional VK_EXT_metal_objects admission result
+ * char deviceName[256]          bounded physical-device name projection
+ * char error[256]               bounded last construction diagnostic
+ * FUNCTION REGISTRY
+ * Constructors: Device *Device_create(bool enableValidation)
+ * Lifecycle: void Device_destroy(Device *device)
+ * Projections: bool Device_isValid(const Device *device)
+ *   const char *Device_lastError(const Device *device)
+ *   const char *Device_name(const Device *device)
+ *   void *Device_native(const Device *device), Device_instance,
+ *   Device_physical, Device_queue (opaque Vulkan handles)
+ *   uint32_t Device_queueFamily(const Device *device)
+ *   bool Device_hasMetalObjects(const Device *device)
+ * Private helper: set_err copies a bounded cold-path failure description.
+ * Admission, failure and ownership contract:
+ * Device_create returns nullptr after cleaning partial handles on failure;
+ * destroy accepts nullptr. The physical handle and queue are owned through the
+ * logical device/instance lifetime. No swapchain or presentation resource exists.
+ * ======================================================================== */
 
 struct Device {
     VkInstance instance;

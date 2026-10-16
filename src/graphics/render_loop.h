@@ -5,6 +5,8 @@
 #include <stdatomic.h>
 #include <stdint.h>
 
+#include "c23/constructor.h"
+
 // graphvex R3 — graphics/render_loop.h
 //
 // THE PRESENT-ON-DEMAND LOOP (restored + trimmed from the old graphics_loop).
@@ -40,6 +42,7 @@ typedef struct Client {
 
 RenderLoop *RenderLoop_0(void);
 RenderLoop *RenderLoop_fps(uint32_t targetFps);   // 0 = pure demand
+#define RenderLoop(...) CONSTRUCTOR_DISPATCH(RenderLoop, __VA_ARGS__)
 void RenderLoop_free(RenderLoop *loop);
 RenderLoop *RenderLoop_default(void);             // process singleton
 

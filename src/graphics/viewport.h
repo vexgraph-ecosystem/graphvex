@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "c23/constructor.h"
+
 #include "graphics/graphics.h"
 
 // graphvex R3 — graphics/viewport.h
@@ -23,8 +25,11 @@ typedef struct Viewport {
     float scale;    // backingScale: points → px (2.0 retina, else 1.0)
     Rect  scissor;  // visible rect in native px (usually the full framebuffer)
 } Viewport;
+typedef struct ViewportPoint { float x; float y; } ViewportPoint;
+typedef struct ViewportSize { float width; float height; } ViewportSize;
 
 Viewport Viewport_0(void);   // 0x0, scale 1
+#define Viewport(...) CONSTRUCTOR_DISPATCH(Viewport, __VA_ARGS__)
 
 void Viewport_resize(Viewport *v, float framebufferWidthPx, float framebufferHeightPx,
                      float backingScale);
@@ -37,10 +42,10 @@ float Viewport_h(const Viewport *v, float pointH);
 Rect  Viewport_rect(const Viewport *v, float xPoints, float yPoints, float wPoints, float hPoints);
 
 // native px → logical points
-void Viewport_toPoints(const Viewport *v, float px, float py, float *outX, float *outY);
+ViewportPoint Viewport_toPoints(const Viewport *v, float px, float py);
 
 // the framebuffer's logical size, in points
-void Viewport_logicalSize(const Viewport *v, float *outW, float *outH);
+ViewportSize Viewport_logicalSize(const Viewport *v);
 
 bool Viewport_isEmpty(const Viewport *v);
 

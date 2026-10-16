@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "c23/constructor.h"
+
 #include "graphics/graphics.h"
 #include "image.h"
 
@@ -62,6 +64,7 @@ typedef struct VkVertex {
 } VkVertex;
 
 VkBatch *VkBatch_0(void);
+#define VkBatch(...) CONSTRUCTOR_DISPATCH(VkBatch, __VA_ARGS__)
 void VkBatch_free(VkBatch *b);
 void VkBatch_clear(VkBatch *b);
 

@@ -1,10 +1,51 @@
 #include "vulkan/vk_batch.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-// graphvex R3 — vulkan/vk_batch.c
-// Pure CPU quad batching. No Vulkan handle: testable headless.
+;;DEFINITION
+/** VkBatch is the CPU-side bridge from Graphvex draw requests to a packed
+ * vertex stream. It owns growable quad storage, preserves source geometry, and
+ * records clipping as local metadata; it owns no Vulkan handle and is directly
+ * testable without a device. */
+;;OVERVIEW
+/** ========================================================================
+ * CLASS: VkBatch (vulkan/vk_batch.c)
+ * STRUCT FIELDS (Mirroring VkBatch)
+ * VkQuad *quads                 owned growable quad array
+ * size_t count                  initialized quad count
+ * size_t cap                    allocated quad capacity
+ * Rect clip                     current native-pixel rectangular clip
+ * float clipRadius              current rounded clip radius
+ * FUNCTION REGISTRY
+ * Constructors: VkBatch *VkBatch_0(void)
+ * Lifecycle: void VkBatch_free(VkBatch *b), void VkBatch_clear(VkBatch *b)
+ * Setters: void VkBatch_setClip(VkBatch *b, Rect clip)
+ *   void VkBatch_setClipRadius(VkBatch *b, float radius)
+ * Operations: void VkBatch_rect(VkBatch *b, Rect dst, const Brush *brush)
+ *   void VkBatch_image(VkBatch *b, const Image *image, Rect src, Rect dst)
+ *   void VkBatch_glyph(VkBatch *b, Rect dst, uint32_t atlasLayer, Color color)
+ * Projection: size_t VkBatch_vertices(const VkBatch *b, VkVertex *out,
+ *   size_t capacity)
+ * Private helpers: clip_quad converts batch clip to local quad bounds;
+ *   batch_push reserves and initializes a quad; put converts quad attributes
+ *   into one packed vertex.
+ * SLOT RECORD: VkQuad (public behaviorless row used by the batch)
+ * float x,y,w,h                 native-pixel destination
+ * float u0,v0,u1,v1             source texture coordinates
+ * Color fill, border            packed 0xRRGGBBAA colors
+ * float radius,stroke,blur,mode shape and sampling parameters
+ * uint32_t texture              atlas/layer selection
+ * float cx0,cy0,cx1,cy1         local clip rectangle
+ * float clipRadius              local rounded-clip radius
+ * Admission, failure and ownership contract:
+ * The batch owns quads and free releases them. Invalid/null inputs are ignored.
+ * Vertex projection returns required count without writing when output is null
+ * or too small. A failed growth currently clears the batch count/capacity; this
+ * failure disposition is part of the current implementation, not rollback.
+ * ======================================================================== */
 
 // Allocates an empty CPU-side quad batch with an initially unbounded clip.
 VkBatch *VkBatch_0(void) {

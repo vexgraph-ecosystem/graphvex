@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "c23/constructor.h"
+
 // graphvex R3 — graphics/graphics.h
 //
 // THE CLEAN CORE. The UI is rectangles, so the drawable vocabulary is:
@@ -94,6 +96,7 @@ typedef struct DrawCmd {
 typedef struct DisplayList DisplayList;
 
 DisplayList *DisplayList_0(void);
+#define DisplayList(...) CONSTRUCTOR_DISPATCH(DisplayList, __VA_ARGS__)
 void DisplayList_free(DisplayList *dl);
 void DisplayList_clear(DisplayList *dl);
 void DisplayList_rect(DisplayList *dl, Rect dst, const Brush *brush);

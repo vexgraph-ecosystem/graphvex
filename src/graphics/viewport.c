@@ -1,7 +1,34 @@
 #include "graphics/viewport.h"
+#include "annotation/definition.h"
+#include "annotation/overview.h"
 
-// graphvex R3 — graphics/viewport.c
-// Points <-> native pixels. Pure math; no virtual canvas, no scene modes.
+;;DEFINITION
+/** Viewport stores a framebuffer's native-pixel extent and converts UI geometry
+ * between logical points and physical pixels using the admitted backing scale.
+ * It is pure geometry: no virtual canvas, allocation, device or scene mode. */
+;;OVERVIEW
+/** ========================================================================
+ * CLASS: Viewport (graphics/viewport.c)
+ * STRUCT FIELDS (Mirroring graphics/viewport.h)
+ * float width                   framebuffer width in native pixels
+ * float height                  framebuffer height in native pixels
+ * float scale                   logical-point to native-pixel scale
+ * Rect scissor                  visible native-pixel rectangle
+ * FUNCTION REGISTRY
+ * Constructors: Viewport Viewport_0(void)
+ * Setters: void Viewport_resize(Viewport *v, float framebufferWidthPx,
+ *   float framebufferHeightPx, float backingScale)
+ * Projections: Viewport_x/y/w/h(const Viewport *v, float pointValue)
+ *   Rect Viewport_rect(const Viewport *v, float xPoints, float yPoints,
+ *   float wPoints, float hPoints)
+ *   void Viewport_toPoints(const Viewport *v, float px, float py,
+ *   float *outX, float *outY)
+ *   void Viewport_logicalSize(const Viewport *v, float *outW, float *outH)
+ *   bool Viewport_isEmpty(const Viewport *v)
+ * Private helper: s returns the positive backing scale, defaulting to 1.
+ * Null/default contract: zero construction uses scale 1; resize ignores null
+ * and sanitizes nonpositive scale to 1. Optional output pointers are independent.
+ * ======================================================================== */
 
 // Returns a zero-sized viewport with unit backing scale.
 Viewport Viewport_0(void) {
@@ -37,17 +64,15 @@ Rect Viewport_rect(const Viewport *v, float xPoints, float yPoints, float wPoint
 }
 
 // Converts native-pixel coordinates to logical points, writing only non-null outputs.
-void Viewport_toPoints(const Viewport *v, float px, float py, float *outX, float *outY) {
+ViewportPoint Viewport_toPoints(const Viewport *v, float px, float py) {
     float sc = s(v);
-    if (outX) *outX = px / sc;
-    if (outY) *outY = py / sc;
+    return (ViewportPoint) { px / sc, py / sc };
 }
 
 // Converts the stored native-pixel extent to logical dimensions for supplied outputs.
-void Viewport_logicalSize(const Viewport *v, float *outW, float *outH) {
+ViewportSize Viewport_logicalSize(const Viewport *v) {
     float sc = s(v);
-    if (outW) *outW = (v ? (*v).width : 0.0f) / sc;
-    if (outH) *outH = (v ? (*v).height : 0.0f) / sc;
+    return (ViewportSize) { (v ? (*v).width : 0.0f) / sc, (v ? (*v).height : 0.0f) / sc };
 }
 
 // Reports true for a null viewport or an extent with a non-positive dimension.

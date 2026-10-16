@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "c23/constructor.h"
+
 #include "image.h"
 #include "board.h"
 
@@ -28,7 +30,8 @@ typedef bool (*SurfacePresentFn)(Surface *surface, void *userdata);
 typedef uint64_t (*SurfaceClockFn)(void *userdata); // monotonic nanoseconds
 
 Surface *Surface_0(void);
-Surface *Surface_2(void *native, uint32_t width, uint32_t height);
+Surface *Surface_3(void *native, uint32_t width, uint32_t height);
+#define Surface(...) CONSTRUCTOR_DISPATCH(Surface, __VA_ARGS__)
 void Surface_destroy(Surface *surface);
 
 bool Surface_resize(Surface *surface, uint32_t width, uint32_t height);

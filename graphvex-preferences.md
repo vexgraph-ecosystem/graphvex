@@ -194,7 +194,7 @@ R3 and widget behavior to R4; include and lifecycle directions are unchanged.
 
 ## 3. Repo-Local Extensions (managed, per the Conflict Triage Law)
 
-;;INTENTION("R3 GPU Driver: Vulkan 1.3/MoltenVK compute & rasterization; ahead-of-time SPIR-V bytecode; native-pixel backing scale.")
+;;INTENTION("R3 GPU Driver: Vulkan/MoltenVK compute & rasterization; device.c currently requests Vulkan API 1.1; ahead-of-time SPIR-V bytecode; native-pixel backing scale.")
 
 ---
 
