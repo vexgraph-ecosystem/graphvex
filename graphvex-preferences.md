@@ -26,177 +26,83 @@
 
 ### Unified Graphics Abstraction Law
 
-#### Definition:
-`graphvex` provides unified, backend-agnostic graphics primitives (`Image`, `Fence`, `Semaphore`, `Swapchain`, `CommandBuffer`, `CommandQueue`, `Surface`, and `GraphicsLayer`) that decouple high-level application and UI rendering pipelines from concrete hardware APIs (Vulkan, Metal, Direct3D).
-- **CPU Shadow & Zero Steady-State Allocation:** Resource handles (`Image`, `Swapchain`) maintain tightly-packed CPU shadow memory blocks (e.g. RGBA8 at width * height * 4 Bytes) allocated through the `vexspoke` arena (`Memory_alloc`). High-level operations manipulate metadata and memory-mapped buffers without invoking heavy GPU driver state transitions during recording.
-- **Synchronization Contracts:** GPU-CPU join points (`Fence`) enforce a hard 100ms ceiling under the Bounded Wait Law (`FENCE_WAIT_TIMEOUT_NS`), preventing deadlocks on dropped frames. GPU-GPU timeline ordering (`Semaphore`) advances monotonically and is strictly probed, never blocking CPU threads.
-- **Dual Presentation Seam:** Display surfaces and swapchains seamlessly bridge into OS-level compositing layers (CAMetalLayer via `GraphicsLayer`, `VkIOSurface`, and window surface hooks) using native hardware pixel scaling (the Native Pixel Law) without leaking backend API types across repository boundaries. On Apple the host creates the IOSurface; `VulkanBackend_bindSurface` imports it as the render target (`VK_EXT_metal_objects`, `VkImportMetalIOSurfaceInfoEXT`) so the GPU writes the exact Bytes CoreAnimation composites — zero-copy, no readback, still no `VkSwapchainKHR`.
+**Definition:** backend-agnostic graphics primitives (`Image`, `Fence`, `Semaphore`, `Swapchain`, `CommandBuffer`, `CommandQueue`, `Surface`, `GraphicsLayer`) decoupling app/UI rendering from Vulkan, Metal, Direct3D.
+- `Image`/`Swapchain` keep tightly-packed CPU shadow blocks — zero steady-state allocation (RGBA8 at width * height * 4 Bytes) from the `vexspoke` arena (`Memory_alloc`); high-level ops touch metadata and mapped buffers, never heavy driver state transitions during recording.
+- GPU-GPU ordering (`Semaphore`) advances monotonically, strictly probed, never blocking CPU threads.
+- Surfaces/swapchains bridge into OS compositing layers (`CAMetalLayer` via `GraphicsLayer`, `VkIOSurface`, window hooks) by native hardware pixel scaling (the Native Pixel Law); no backend API types leak across repo boundaries. On Apple the host creates the IOSurface; `VulkanBackend_bindSurface` imports it (`VK_EXT_metal_objects`, `VkImportMetalIOSurfaceInfoEXT`) so the GPU writes the exact Bytes CoreAnimation composites — zero-copy, no readback, no `VkSwapchainKHR`.
 
-#### The Why:
-Directly coupling UI widgets or game logic to Vulkan or Metal handles creates intractable cross-platform fragmentation, dangling command buffers across dynamic reload cycles, and driver lockups. By unifying graphics objects into pure C23 structs with predictable memory footprints, bounded waits, and optional backend binding, `graphvex` guarantees deterministic multi-platform rendering across macOS, Linux, and Windows with zero driver lock-in.
+**Why:** hand-coupled Vulkan/Metal fragments platforms, dangles command buffers across hot reloads, locks up drivers.
 
-#### The Rule:
-1. **Agnostic Primitives First:** High-level rendering operates exclusively on unified `Image`, `Swapchain`, `CommandBuffer`, and `GraphicsLayer` structs. Never expose driver handles (`VkImage`, `VkDevice`, `MTLDevice`) in client headers.
-2. **Bounded Synchronization:** All fence joins and timeline waits must obey `FENCE_WAIT_TIMEOUT_NS` (100ms max). Indefinite GPU waits (`UINT64_MAX`) are strictly prohibited.
-3. **Transparent Backing Resolution:** Backing surfaces must resolve pixel scaling via `backingScaleFactor` to ensure native 1:1 hardware pixel mapping.
-4. **Fitted Image Contract:** Every image drawn into a destination rect resolves through `Image_fitRect` + `Graphics_drawImageFit` — never a bespoke widget transform. The families are `IMAGE_FIT_STRETCH` (whole image stretched into dst), `IMAGE_FIT_CONTAIN` (fit inside, centered, letterboxed), `IMAGE_FIT_COVER` (cover, centered, overflow cropped), and `IMAGE_FIT_WINDOW` (a source-pixel window, anchored, scaled to fill dst). A WINDOW is widget-shaped: at most one of `windowW` / `windowH` drives it and the other derives from the dst aspect, so the same window is expressible from either axis; unset means dst pixels (true 1:1); the window always clamps to the image (you cannot show pixels that do not exist). The scale is `dst ÷ window` — a 300-px window in a 600-px dst draws at 2x. Fit math is pure, R3-owned, and testable without a backend; widgets call it, never reimplement it.
-
----
+**Rule:**
+1. Rendering operates exclusively on those primitives; never expose driver handles (`VkImage`, `VkDevice`, `MTLDevice`) in client headers.
+2. Every fence join and timeline wait obeys `FENCE_WAIT_TIMEOUT_NS` (100ms max, the Bounded Wait Law); indefinite GPU waits (`UINT64_MAX`) prohibited.
+3. Every image drawn into a destination rect resolves through `Image_fitRect` + `Graphics_drawImageFit` — never a bespoke widget transform. Families: `IMAGE_FIT_STRETCH` (whole image stretched into dst), `IMAGE_FIT_CONTAIN` (fit inside, centered, letterboxed), `IMAGE_FIT_COVER` (cover, centered, overflow cropped), `IMAGE_FIT_WINDOW` (source-pixel window, anchored, scaled to fill dst). WINDOW is widget-shaped: at most one of `windowW`/`windowH` drives it, the other derives from dst aspect; unset means dst pixels (1:1); the window clamps to the image. Scale = `dst ÷ window`; a 300-px window in a 600-px dst draws at 2x; fit math pure, R3-owned — widgets call, never reimplement.
 
 ### Strict 0xRRGGBBAA Color Law
 
-#### Definition:
-All packed 32-bit integer colors across the ecosystem are strictly and uniformly formatted as **`0xRRGGBBAA`** (Red in bits 31–24, Green in bits 23–16, Blue in bits 15–8, Alpha in bits 7–0). In continuous memory buffers, pixel shadow arrays (`Image`), and color framebuffers (`ColorBuffer`), byte channel ordering is strictly monotonic:
-- Byte index 0: Red ($[0..255]$)
-- Byte index 1: Green ($[0..255]$)
-- Byte index 2: Blue ($[0..255]$)
-- Byte index 3: Alpha ($[0..255]$)
+**Definition:** all packed 32-bit integer colors are strictly **`0xRRGGBBAA`** (Red bits 31–24, Green 23–16, Blue 15–8, Alpha 7–0); channel order in continuous buffers, pixel shadow arrays (`Image`) and color framebuffers (`ColorBuffer`) is strictly monotonic: 0 Red, 1 Green, 2 Blue, 3 Alpha (each 0..255).
 
-#### The Why:
-Fragmented color channel encodings (`0xAARRGGBB` vs `0xRRGGBBAA` vs `0xBBGGRRAA`) create subtle visual bugs, inverted transparency masks, and fragile bit-shift arithmetic across UI widgets, brushes, rasterizers, and GPU shaders. Aligning packed hex constants with sequential memory storage ensures that reading a color hex code left-to-right matches its natural channel order (R, G, B, A), eliminates channel-swizzle confusion, and maps 1:1 to standard GPU vector types (`vec4(r, g, b, a)`).
+**Why:** fragmented encodings cause visual bugs, inverted transparency, fragile shift arithmetic.
 
-#### The Rule:
-1. **Packed 32-Bit Hex Order:** All color constants and parameter integers must be formatted as `0xRRGGBBAA`. Legacy `0xAARRGGBB` is strictly prohibited.
-   - Opaque Black is `0x000000FFu` (never `0xFF000000u`).
-   - Opaque White is `0xFFFFFFFFu`.
-   - Fully Transparent / Clear is `0x00000000u`.
-2. **Monotonic Channel Extraction:** Unpacking channels from packed colors must always use monotonic shifts:
-   - `Red   = (color >> 24) & 0xFFu`
-   - `Green = (color >> 16) & 0xFFu`
-   - `Blue  = (color >> 8)  & 0xFFu`
-   - `Alpha = color & 0xFFu`
-3. **Presentation Boundary Isolation:** Hardware scanout requirements on platform surfaces (such as Apple's native BGRA display swapchains) must be encapsulated entirely within driver-level presentation adapters (`VkIOSurface`, swapchain blits, or final composite shaders), keeping all application logic, brushes, meshes, buffers, and textures strictly RGBA.
-
----
+**Rule:**
+1. All color constants and parameter integers are `0xRRGGBBAA`; legacy `0xAARRGGBB`/`0xBBGGRRAA` prohibited. Opaque Black `0x000000FFu` (never `0xFF000000u`); Opaque White `0xFFFFFFFFu`; Fully Transparent / Clear `0x00000000u`.
+2. Unpacking uses those monotonic shifts: `Red = (color >> 24) & 0xFFu` … `Alpha = color & 0xFFu`.
+3. Hardware scanout needs (native BGRA display swapchains) live only inside driver-level presentation adapters (`VkIOSurface`, swapchain blits, final composite shaders); application logic, brushes, meshes, buffers and textures stay strictly RGBA.
 
 ### SPIR-V Shader Deployment Law
 
-GLSL sources belong to Graphvex's `src/shaders`; the umbrella build `../../tools/b`
-compiles ahead-of-time SPIR-V into its external build-state `shader/` directory.
-Existing stage directories remain supported. New modules separate responsibilities
-(`ui`, `shadow`, `compositor`, `filters`, `light`) rather than creating one
-unbounded shader spanning widget composition and scene lighting. Shared color,
-alpha and coordinate helpers have one implementation. Darling and vexspoke own
-no shader blobs. A source module is not runtime support until a backend pipeline
-actually executes it and has stated automated evidence.
+GLSL lives in Graphvex's `src/shaders`; umbrella build `../../tools/b` compiles ahead-of-time SPIR-V into external build-state `shader/`; existing stage directories remain supported. New modules separate responsibilities (`ui`, `shadow`, `compositor`, `filters`, `light`) — never one unbounded shader spanning widget composition and scene lighting; shared color/alpha/coordinate helpers have one implementation. Darling and vexspoke own no shader blobs. A source module is not runtime support until a backend pipeline executes it with stated automated evidence.
 
-**Runtime Shader Resolution Protocol**:
-The runtime loader (`loadSpvAny`) must search in this exact precedence order:
-1. `ANTI_SPV_DIR` / `VEX_SPV_DIR` (build-time staging directory `${CMAKE_BINARY_DIR}/spv/`, populated from `/shader/spv/`)
+**Runtime Shader Resolution Protocol** — `loadSpvAny` precedence:
+1. `ANTI_SPV_DIR` / `VEX_SPV_DIR` (build-time staging `${CMAKE_BINARY_DIR}/spv/`, populated from `/shader/spv/`)
 2. `<exe_dir>/spv/<name>` (adjacent deployment)
-3. `<exe_dir>/../Resources/spv/<name>` (macOS `.app` bundle)
+3. `<exe_dir>/../Resources/spv/<name>` (macOS `.app`)
 4. CWD-relative paths (`spv/<name>`, `src/_old/vulkan/spv/<name>`)
 
-The umbrella build is shader build truth; IDE adapters delegate to it. Compiler
-errors propagate, generated outputs stay outside source, and shader dependencies
-must invalidate their consumers. Pointwise fusion uses bounded instruction/variant
-budgets and preserves order; spatial filters are explicit pipeline boundaries.
-
----
+Umbrella build = shader build truth; IDE adapters delegate to it. Compiler errors propagate, generated outputs stay outside source, shader dependencies invalidate consumers. Pointwise fusion has bounded instruction/variant budgets and preserves order; spatial filters are explicit pipeline boundaries.
 
 ### Ecosystem Vulkan Safety Nets Law (Determinism + Tree-Shaken Truth)
 
-#### Definition:
-Vulkan is the one subsystem whose failure surfaces at a *later* boundary than its cause: MoltenVK reports a lost device only at the next API touch, so a `DEVICE LOST` logged at acquire means the damage happened at an earlier call. Every Vulkan-touching file in the ecosystem therefore carries the same two-layer contract: **deterministic handling** (same input sequence ⇒ same seam name, same decision, same log line) and **seam guards** (every driver-facing function validates the health chain before touching the driver). The net spans ALL Vulkan touchpoints — not just the R1 present chain: hotcwap `vulkan.c` (present), graphvex `texture.c`, `sdf_gpu.c`, `vk_scene.c`, `vk_view.c`, `vk_iosurface.c`, the seam canvas in `vk_instance.c`, darling `compositor.c` (re-record batch). Adding a new file that calls the driver without joining the net is a defect (the repository's class registry alone is too weak — driver calls span repos).
+**Definition:** every Vulkan-touching file carries deterministic handling — same input sequence ⇒ same seam name, decision, log line. Net spans ALL Vulkan touchpoints: hotcwap `vulkan.c` present, graphvex `texture.c`, `sdf_gpu.c`, `vk_scene.c`, `vk_view.c`, `vk_iosurface.c`, seam canvas in `vk_instance.c`, darling `compositor.c`. A driver-calling file not joining the net is a defect (its one type registry law is a too-weak enforcement point — driver calls span repos).
 
-#### The Why:
-GPU failures are only debuggable if the report site equals the cause site. Chasing acquired-device-lost logs is whack-a-mole; a seam guard converts "the driver died somewhere" into "health broke at seam X" and makes every path to failure reachable, named, and identical — deterministic output producing deterministic debugging. It is not "zero bugs"; it is the guarantee that every failure is reachable, named, and reproducible.
+**Why:** the report site must equal the cause site.
 
-#### The Rule:
-1. **One canonical guard, zero forks.** `VkGuard_check(seam, device, queue, deviceLost)` lives once in `graphvex/src/vulkan/vk_guard.h` (header-only, no struct, the Single Class Per File Law private-helper doctrine; allowlist-safe: graphvex→own, hotcwap→graphvex, darling→graphvex). It returns `false` when the device is lost or null; a null queue is permitted only on device-resource seams (create/destroy/record) — any seam that submits/fences/presents must pass its queue so the whole queue chain is covered. Callers degrade exactly like any transient failure: return `false`, keep dirty state, retry next tick (the Bounded Wait Law + the Cold-Strict, Hot-Minimal Validation Law). Never a crash, never UB, never a wedged wait.
-2. **Tree-shaken when released.** Under `NDEBUG` the guard is a macro no-op: zero calls, zero branches, unevaluated arguments. Release binaries are the Cold-Strict, Hot-Minimal Validation Law hot-minimal skeleton of the debug build — the debug net never counts against hot-minimal branch budgets (the Conflict Triage Law triage: debug exhaustive / release minimal is the managed exception, codified here). Every file's `;;OVERVIEW` lists which of its functions carry the net.
-3. **Deterministic driver-state handling.** Every wait/acquire/submit/present follows one fixed decision table, written once: success advances; timeout-with-signal recovers; timeout-unsignaled drops with dirty state intact and retries next tick; `VK_ERROR_DEVICE_LOST` latches once at the true site (`presentDeviceLost(where)` in hotcwap — the latch is single-owned; downstream repos must not re-implement it, they may query `Vk_isDeviceLost()` wherever the allowlist permits) and short-circuits every later pass.
-4. **The report site is never the cause.** First action on any `VK_ERROR_DEVICE_LOST`: run with `MVK_CONFIG_LOG_LEVEL` enabled and read MoltenVK's underlying Metal error (`MTLCommandBuffer` error code + message) BEFORE touching code — `MTLCommandBufferErrorInternal`/`PageFault`/`Timeout` distinguishes a usage defect from a GPU power/restart event. Paste both lines together; never "fix the acquire" until MoltenVK says the acquire is the cause.
-5. **No loopholes in the health chain.** Handles are nulled in the same teardown pass (the Vertical Integration Law (Teardown)) so a stale guard catches a real lifecycle defect instead of passing on a zombie pointer. Cold resource-creation paths (graphvex images/textures/framebuffers/views) keep the Cold-Strict, Hot-Minimal Validation Law result checks; hot per-frame seams (present, pane present, compositor batch, uploads, SDF dispatch, IOSurface export) carry `VkGuard_check` at entry.
-
----
+**Rule:**
+1. `VkGuard_check(seam, device, queue, deviceLost)` lives once in `graphvex/src/vulkan/vk_guard.h` (header-only, no struct — Single Class Per File Law; allowlist-safe: graphvex→own, hotcwap→graphvex, darling→graphvex). `false` on lost/null device; null queue only on device-resource seams (create/destroy/record) — any submit/fence/present seam passes its queue (whole chain). Transient-failure degrade: return `false`, keep dirty state, retry next tick (the Bounded Wait Law + Cold-Strict, Hot-Minimal Validation Law); never crash, never UB, never a wedged wait.
+2. Under `NDEBUG` the guard is a macro no-op — zero calls, zero branches, unevaluated arguments, not counted against hot-minimal branch budgets (the Conflict Triage Law). Every file's `;;OVERVIEW` lists which functions carry the net.
+3. One fixed decision table for every wait/acquire/submit/present: success advances; timeout-with-signal recovers; timeout-unsignaled drops (dirty state intact), retry next tick; `VK_ERROR_DEVICE_LOST` latches once at the true site — `presentDeviceLost(where)` is hotcwap single-owned, downstream repos never re-implement, `Vk_isDeviceLost()` queryable wherever the allowlist permits — short-circuiting every later pass.
+4. Report site is never the cause: on `VK_ERROR_DEVICE_LOST`, run `MVK_CONFIG_LOG_LEVEL` and read MoltenVK's Metal error (`MTLCommandBuffer` code + message) BEFORE touching code — `MTLCommandBufferErrorInternal`/`PageFault`/`Timeout` distinguishes a usage defect from a GPU power/restart event. Paste both lines; never "fix the acquire" until MoltenVK says the acquire is the cause.
+5. Handles nulled in the same teardown pass (Vertical Integration Law (Teardown)) so a stale guard catches a real lifecycle defect. Cold resource creation (images/textures/framebuffers/views) keeps full result checks; hot per-frame seams (present, pane present, compositor batch, uploads, SDF dispatch, IOSurface export) carry `VkGuard_check` at entry.
 
 ### Native Pixel Law
 
-Every `CAMetalLayer` `drawableSize` and Vulkan render into the single seam
-canvas must use **native hardware pixels**, not logical points.
+Per the canonical Native Pixel Law — native hardware pixels at `CAMetalLayer` `drawableSize` and in all Vulkan rendering into the seam canvas, never logical points. Example grammar:
 
 ```c
-// CORRECT — multiply point size by the monitor scale factor
 int pxW = (int)(w * kx + 0.5f);
 int pxH = (int)(h * ky + 0.5f);
 Vk_seamSetMaxExtent(pxW, pxH);    // the fixed-buffer seam canvas (built once)
-
-// WRONG — logical points only, blurry on Retina
-Vk_seamSetMaxExtent((int)w, (int)h);
+Vk_seamSetMaxExtent((int)w, (int)h); // never logical points — blurry on Retina
 ```
 
-The seam `CALayer` frame is always set in **logical points** (CoreAnimation
-convention), while its `contentsScale` is set to `backingScaleFactor` (e.g.
-`2.0` on Retina) so CoreAnimation maps the native physical pixels of the
-seam's swapchain to logical points at exact 1:1 screen resolution, preventing
-the content from appearing doubled in size. The seam canvas is the window's
-only `CAMetalLayer` (the Single-Seam Canvas Law in `darling-framework`):
-there are no per-pane surfaces or swapchains.
-
----
-
+Repo-local delta: seam `CALayer` frame in logical points, `contentsScale` = `backingScaleFactor` (`2.0` on Retina) so native pixels map 1:1; the seam canvas is the window's only `CAMetalLayer` (the Single-Seam Canvas Law in `darling-framework`); no per-pane surfaces or swapchains.
 ### R3 Graphics Language & Board Compositor Law
 
-#### Definition:
-`graphvex` (R3) owns the backend-agnostic graphics language, graphical element
-tree and widget compositor: placement, isolated groups, images, filters, masks,
-render dependencies and ordered composition into the host-borrowed destination.
-This includes composing images produced for a Darling Scene widget. Darling
-(R4) is the widget interface: widget semantics, tree construction, layout policy,
-input/focus and application/native-window bridges. It submits Graphvex graphics
-records; it does not own a competing filter or render compositor.
+**Definition:** `graphvex` (R3) owns the backend-agnostic graphics language, graphical element tree and widget compositor: placement, isolated groups, images, filters, masks, render dependencies, ordered composition into the host-borrowed destination (including Darling Scene widget images). Darling (R4) is the widget interface; it submits Graphvex graphics records, never a competing filter/render compositor.
 
-#### The Why:
-Widget rendering is a graphics operation even when its source is a widget tree.
-One R3 compositor keeps filters, bounds and backend behavior consistent for all
-interfaces. The Vertical Integration Law assigns graphical tree composition to
-R3 and widget behavior to R4; include and lifecycle directions are unchanged.
+**Why:** one R3 compositor keeps filters, bounds and backend behavior consistent for all interfaces.
 
-#### The Rule:
-1. **`lang/` owns the graphics vocabulary:** `device`, `image`, `filter`,
-   `filter_stack`, `compositor`, `graphics_component`, `element_node`,
-   `transform`. Each is a `lang/<name>.h` contract with a `<dir>/<name>.c`
-   implementation.
-2. **One graphics composition owner.** Board-image and widget-element rendering,
-   isolation and filter execution belong to R3 Graphvex. R4 Darling constructs
-   widgets and supplies their graphical content through R3 contracts. A host
-   bridge may orchestrate calls during migration, but cannot duplicate rendering
-   semantics; draft R4 compositor files confer no alternate ownership.
-3. **Naming marks the layer.** The placement type is `GraphicsComponent`
-   (graphvex), never `Component` (darling's own interface type). The container is
-   `ElementNode` (graphvex), never darling's container. Same idea, different
-   layer, no collision.
-4. **Allowlist direction unchanged.** R4 darling may include graphvex (R3);
-   graphvex may borrow either R2 public contract, never R1/R4/R5 headers.
-   No reverse edge or implemented storage migration is implied.
-5. **AUTO is a sentinel with a per-class equivalence.** `lang/size.h` owns
-   `SIZE_AUTO` (the åuto FourCC, `0xE575746F`, negative on every platform).
-   A declared `w`/`h` holds either a concrete size or the sentinel; `w ==
-   SIZE_AUTO` is the check that swaps in the element's **AUTO equivalence** —
-   the size that class defaults to. The base `GraphicsComponent`/`GraphicsPanel`
-   equivalence is **0** (a dumb element has no intrinsic content); a `Label`'s
-   is its **measured text** (font advances x lines — explicit `\n` plus wrap at
-   a concrete width — plus padding), written through
-   `GraphicsComponent_setMeasuredSize` so the declared sentinel survives and
-   re-resolves every render. AUTO is the **default** for every element. The
-   sentinel is never clamped by min/max.
-6. **`Property` is the placement bound.** `ui/property.h` owns the rectangle
-   every element carries (x/y/w/h plus radius/background/border/shadow/blur):
-   placement data, never a widget. Records live in `nio/property_pool` (blocks
-   from vexspoke's ForeignMemory, stable addresses), so an element borrows one
-   and may share it — aliasing the address is the bind, and `revalidate`
-   reflects a shared record everywhere. A `radius > 0` clips children to the
-   rounded shape. Widget semantics, input, and focus remain R4. Filter halos are
-   not stored by changing this placement rectangle.
-
----
+**Rule:**
+1. `lang/` owns the graphics vocabulary: `device`, `image`, `filter`, `filter_stack`, `compositor`, `graphics_component`, `element_node`, `transform` — each a `lang/<name>.h` contract + `<dir>/<name>.c` implementation.
+2. Board-image/widget-element rendering, isolation and filter execution are R3 Graphvex-owned; R4 Darling constructs widgets, supplies graphical content through R3 contracts. Host bridges may orchestrate during migration but never duplicate rendering semantics; draft R4 compositor files confer no alternate ownership.
+3. Naming marks the layer: placement type `GraphicsComponent` (graphvex), never `Component` (darling's interface); container `ElementNode` (graphvex), never darling's container.
+4. Allowlist: R4 darling may include graphvex (R3); graphvex borrows either R2 public contract, never R1/R4/R5 headers; no reverse edge or storage migration implied.
+5. AUTO = sentinel with per-class equivalence; `lang/size.h` owns `SIZE_AUTO` (the åuto FourCC `0xE575746F`, negative on every platform); a declared `w`/`h` holds a concrete size or the sentinel; `w == SIZE_AUTO` resolves to the element's AUTO equivalence — its class default. Base `GraphicsComponent`/`GraphicsPanel` equivalence is **0**; `Label` = measured text (font advances x lines — explicit `\n` + wrap at concrete width — plus padding), written via `GraphicsComponent_setMeasuredSize` so the sentinel survives, re-resolving each render. AUTO is every element's default; never clamped by min/max.
+6. `Property` = placement bound; `ui/property.h` owns the rectangle every element carries (x/y/w/h + radius/background/border/shadow/blur) — placement data, never a widget. Records live in `nio/property_pool` (vexspoke ForeignMemory blocks, stable addresses); an element borrows one, may share it — the address alias is the bind, `revalidate` reflects a shared record everywhere. `radius > 0` clips children to the rounded shape; widget semantics, input and focus remain R4; filter halos are never stored by changing this rectangle.
 
 ## 3. Repo-Local Extensions (managed, per the Conflict Triage Law)
 
 ;;INTENTION("R3 GPU Driver: Vulkan/MoltenVK compute & rasterization; device.c currently requests Vulkan API 1.1; ahead-of-time SPIR-V bytecode; native-pixel backing scale.")
-
----
 
 ## 4. Readiness Cross-Reference (the Living Documentation Law)
 
@@ -205,109 +111,37 @@ R3 and widget behavior to R4; include and lifecycle directions are unchanged.
 
 ### UI Graphics Source Placement Law
 
-Graphical panel and label implementations live under `src/ui/<kind>/`; their
-public vocabulary remains under `src/lang`. Graphvex owns graphical element-tree
-composition and filter execution, with implementation under `src/compositor`.
-Editing, focus, widget semantics, layout policy and application behavior remain
-in Darling (R4); Graphvex borrows R2 public contracts only, never Darling headers.
+Graphical panel/label implementations live under `src/ui/<kind>/`, public vocabulary under `src/lang`; Graphvex owns element-tree composition and filter execution under `src/compositor`. Editing, focus, layout policy, application behavior remain Darling's (R4); Graphvex borrows R2 public contracts only, never Darling headers.
 
 ### Absolute Rendering & Event Bound Law
 
-#### Definition:
-Each element has two public geometric bounds with distinct purposes: its
-**event bound** and its **absolute bound**. Neither is an offscreen allocation.
+**Definition:** each element has two public geometric bounds — **event bound** and **absolute bound**; neither is an offscreen allocation.
 
-#### The Why:
-Rendering effects need extra pixels without moving the widget, its siblings,
-anchors or mouse target. Conflating placement with paint crops halos or enlarges
-input regions invisibly.
+**Why:** effects need extra pixels without moving the widget, siblings, anchors or mouse target.
 
-#### The Rule:
-1. **Event bound:** the resolved layout/hit rectangle in the declared coordinate
-   space. Filters never alter it. Layout changes still update it normally.
-   Effective hit eligibility also applies ancestor event clips and shape tests;
-   a rectangular broad phase does not replace rounded hit testing.
-2. **Absolute bound:** a conservative world-space AABB enclosing this group's
-   own paint and contributing descendant paint, after descendant effects,
-   child-content clips and ordered element filters. This query describes group
-   output before external ancestor composition clips; those constrain its
-   contribution at their composition stage. It need not be pixel-tight.
-   Ancestor filters belong to the ancestor group's bound, not each child's bound.
-3. **Ordered support:** each filter maps preceding output support in stack order.
-   Blur halos accumulate; offsets/crops may move or shrink support. Input ROIs,
-   preclip support, scratch extents, pixel rounding and damage are internal data,
-   not extra public bounds. Unknown support requires conservative full-group
-   fallback or explicit rejection, never an invented finite margin.
-4. **Absolute origins:** targets retain their world origin. Expanded allocations
-   translate coordinates only; never stretch an expanded result back into its
-   event rectangle. Native-pixel allocation rounds support outward.
-5. **Clip stages:** rounded child-content clipping remains the default when
-   radius is positive. It clips children before the element's own filter stack,
-   not its own effect halo. Hard containment needs an explicit output clip.
-   Allocation edges are not semantic clips. Required source pixels outside the
-   visible region survive culling when they can scatter into visible output.
-6. **Damage:** movement, removal, filters and descendant changes invalidate old
-   and new absolute output support; backdrop reads add rendering dependencies.
+**Rule:**
+1. **Event bound:** resolved layout/hit rectangle in the declared coordinate space; filters never alter it, layout changes still update it. Effective hit eligibility also applies ancestor event clips and shape tests.
+2. **Absolute bound:** conservative world-space AABB enclosing this group's and its descendants' paint after their effects, child-content clips and ordered element filters — group output before external ancestor composition clips; need not be pixel-tight; ancestor filters belong to the ancestor's bound, not each child's.
+3. **Ordered support:** each filter maps preceding output support in stack order — blur halos accumulate; offsets/crops may move or shrink it. Input ROIs, preclip support, scratch extents, pixel rounding, damage = internal data, not extra public bounds. Unknown support requires conservative full-group fallback or explicit rejection, never an invented finite margin.
+4. **Absolute origins:** targets retain their world origin; expanded allocations translate coordinates only, never stretching results back into event rectangles. Native-pixel allocation rounds support outward.
+5. **Clip stages:** rounded child-content clipping is default at positive radius; it clips children before the element's own filter stack, not its effect halo. Hard containment needs an explicit output clip; allocation edges are not semantic clips. Source pixels outside the visible region survive culling when they can scatter into visible output.
+6. **Damage:** movement, removal, filters and descendant changes invalidate old and new absolute output support; backdrop reads add rendering dependencies.
 
 ### Ordered Filter & Scatter Composition Law
 
-#### Definition:
-The widget compositor executes ordered filter stacks over isolated graphics
-groups, with scatter-first spatial filtering and explicit resolve semantics.
+**Definition:** the widget compositor executes ordered filter stacks over isolated graphics groups.
 
-#### The Rule:
-1. **Three scopes:** Backdrop filters consume the already-composed painter-order
-   scene prefix, excluding self/later siblings. Foreground filters consume content
-   and children, excluding own box decoration. Element filters consume the whole
-   assembled element, including filtered backdrop, decoration and children.
-   Filter a group once, not each overlapping child independently.
-2. **Compact tokens:** every filter token is `ID16 | payload48` in a 64-bit value.
-   `filter/filter_type.h` owns the canonical operation IDs, spelled
-   `FILTERNAME_ID` (for example `GAUSSIAN_BLUR_ID`) as hexadecimal `#define`
-   constants. Existing numeric IDs remain stable; legacy aliases refer to the
-   same table. Constructors live in `filter/filter_functions.h`, with
-   `lang/filter.h` retained as a compatibility include. A constructor or ID alone
-   is vocabulary, not implemented effect execution. The table specifies inline
-   parameter decoding or a typed
-   complex-filter-pool index. Payloads never encode raw pointers. Unknown IDs,
-   unsupported parameters and exhausted resources reject explicitly and preserve
-   previous valid state. Pool records outlive all stack/submitted consumers.
-3. **Order:** stacks execute left-to-right. No silent reordering of contrast,
-   HSV, noise or blur. Safe pointwise fusion preserves declared results.
-4. **Color:** composition and blur use linear-light premultiplied RGBA. Nonlinear
-   color operations define their working space, safely unpremultiply, operate,
-   and premultiply again; alpha-zero and alpha-preservation behavior are explicit.
-5. **Scatter:** weighted contributions add into isolated float accumulation,
-   followed by resolve and one ordinary source-over group composition. Raster
-   additive blending is valid; compute writes need supported atomics or exclusive
-   output ownership plus dependencies. Graphics blend state does not protect
-   compute stores. Device/format capabilities must be queried, never assumed.
-6. **Normalization:** source-energy conservation and constant-field preservation
-   are different contracts. Fixed/variable kernels declare finite support, edge
-   policy and weight-domain semantics. Transparent-domain samples count when
-   destination normalization is requested; normalization must not cancel intended
-   transparent edge fade. Normalize premultiplied RGB and alpha together.
-7. **Backdrop replacement:** filtered backdrop replaces its masked prefix region;
-   do not composite that same original backdrop twice. Snapshot/version the prefix
-   before scheduling dependent passes. Sampling ROI and output mask differ.
-8. **Incremental proof:** each operation has a CPU numeric reference and scoped
-   backend evidence. Shader compilation alone is not runtime support. Noise seeds
-   and coordinates are stable across allocation changes; animation is opt-in.
-9. **GPU execution truth:** Vulkan filter paths and GPU filter galleries execute
-   shader pipelines, never CPU filtering/composition disguised by GPU presentation.
-   CPU numeric math is an oracle or explicitly named legacy reference, not a GPU
-   fallback. Source asset preparation and upload/readback are data transport;
-   an Image/Picture bridge using readback must not be called zero-copy. Prove actual
-   GPU pixels at the owner seam and leave interactive appearance approval to the user.
+**Rule:**
+1. Backdrop filters consume the composed painter-order scene prefix, excluding self/later siblings; foreground filters consume content/children, excluding own box decoration; element filters consume the assembled element, including filtered backdrop, decoration and children — filter a group once, never per overlapping child.
+2. Filter token = `ID16 | payload48`. `filter/filter_type.h` owns canonical operation IDs `FILTERNAME_ID` (e.g. `GAUSSIAN_BLUR_ID`), hex `#define` constants; existing numeric IDs stable, legacy aliases answer to the same table. Constructors live in `filter/filter_functions.h`; a constructor/ID alone is vocabulary, not effect execution. Table specifies inline parameter decoding or a typed complex-filter-pool index; payloads never encode raw pointers. Unknown IDs, unsupported parameters, exhausted resources reject explicitly preserving prior valid state; pool records outlive all stack/submitted consumers.
+3. Stacks execute left-to-right; no silent reordering of contrast, HSV, noise or blur; safe pointwise fusion preserves declared results.
+4. Composition and blur use linear-light premultiplied RGBA; nonlinear color operations define their working space, safely unpremultiply, operate, premultiply again; alpha-zero/alpha-preservation behavior explicit.
+5. Weighted contributions add into isolated float accumulation, then resolve into one ordinary source-over group composition. Raster additive blending is valid; compute writes need supported atomics or exclusive output ownership + dependencies — graphics blend state does not protect compute stores. Device/format capabilities: queried, never assumed.
+6. Source-energy conservation and constant-field preservation are distinct contracts. Fixed/variable kernels declare finite support, edge policy and weight-domain semantics. Transparent-domain samples count for destination normalization; normalization must not cancel intended transparent edge fade. Normalize premultiplied RGB and alpha together.
+7. Filtered backdrop replaces its masked prefix region; never composite the original backdrop twice. Snapshot/version the prefix before dependent passes; sampling ROI and output mask differ.
+8. Every operation has a CPU numeric reference + scoped backend evidence; shader compilation alone is not runtime support. Noise seeds and coordinates stay stable across allocation changes; animation is opt-in.
+9. Vulkan filter paths and GPU filter galleries execute shader pipelines, never CPU filtering disguised as GPU presentation; CPU numeric math is an oracle or named legacy reference, not a GPU fallback. Image/Picture upload/readback is data transport, never zero-copy. Prove actual GPU pixels at the owner seam; appearance approval is the user's.
 
 ### Independent Scene Cadence Law
 
-Graphvex widget composition and scene-image production have independent logical
-schedules. Separate OS threads are optional, not implied. The compositor consumes
-the newest completed scene image without forcing a scene tick or waiting for the
-next image. Versions do not replace GPU synchronization: images and parameter
-records remain alive until consumers finish, including resize/close. Widget
-changes and completed scene versions invalidate composition independently;
-scene work must not monopolize widget scheduling. Current host bridges may drive
-composition while ownership migrates; unfinished scheduler/GPU integration is
-reported as a gap, never inferred from this law.
+Widget composition and scene-image production run on independent logical schedules; separate OS threads are optional, not implied. The compositor consumes the newest completed scene image (the universal constitution's Present-On-Demand Law: idle composition presents nothing) without forcing a scene tick or waiting for the next image. Images and parameter records remain alive until consumers finish, resize/close included. Widget changes and completed scene versions invalidate composition independently; scene work must not monopolize widget scheduling. Current host bridges may drive composition during ownership migration; unfinished scheduler/GPU integration is a stated gap, never inferred.
