@@ -1,10 +1,10 @@
 # graphvex — Repo-Local Living Preferences
 > Repo-local preferences governed by the Living Documentation Law.
-> Universal Supreme Constitution: workspace gist/PREFERENCES.md, published on Gist.
+> Universal constitution: `gist.md` is the compressed law list; `PREFERENCES.md` is its rationale.
 
 ## 0. Constitution Link (supreme)
-- [preferences.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a) — real, Git-ignored workspace file at `../../gist/PREFERENCES.md`, not a tracked Vexspoke file or symlink.
-- All universal laws in `../../gist/PREFERENCES.md` are mandatory and binding across the ecosystem.
+- [gist.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a#file-gist-md) — the compressed law list, mirrored in this workspace at `../../../metadata/gists/preferences/gist.md`. It is the only normative law text; `../../../PREFERENCES.md` carries the rationale and is never ingested whole. Numbers are slice addresses inside one file, never law identity: cite by Title.
+- All universal laws bind this repository. Read one on demand from the workspace root: `./tools/prefs law "<title>"`, `./tools/prefs section "<section>"`, `./tools/prefs repo <name>`.
 - This document codifies **exclusive** preferences for `graphvex` (R3 GPU Driver). R3 borrows Vexspoke CPU computation/behavior and Relational Engine memory/storage contracts. Canonical IO/NIO includes and the native Memory implementation now come from RE by default; allocation semantics remain compatible, not rewritten into Rust. GPU shaders, dispatch, capabilities and synchronization stay Graphvex-owned.
 
 ## 1. Exclusive Preferences Binding Matrix
@@ -15,7 +15,7 @@
 | **Strict 0xRRGGBBAA Color Law** | R3 GPU Driver / Universal | Mandatory for `graphvex` |
 | **SPIR-V Shader Deployment Law** | R3 GPU Driver | Mandatory for `graphvex` |
 | **Ecosystem Vulkan Safety Nets Law (Determinism + Tree-Shaken Truth)** | R3 GPU Driver | Mandatory for `graphvex` |
-| **Native Pixel Law** | R3 GPU Driver | Mandatory for `graphvex` |
+| **Seam Canvas Pixel Mapping Law** | R3 GPU Driver | Mandatory for `graphvex` |
 | **R3 Graphics Language & Board Compositor Law** | R3 GPU Driver | Mandatory for `graphvex` |
 | **UI Graphics Source Placement Law** | R3 graphics primitives | Mandatory for `graphvex` |
 | **Absolute Rendering & Event Bound Law** | R3 element geometry/composition | Mandatory for `graphvex` |
@@ -51,7 +51,7 @@
 
 ### SPIR-V Shader Deployment Law
 
-GLSL lives in Graphvex's `src/shaders`; umbrella build `../../tools/b` compiles ahead-of-time SPIR-V into external build-state `shader/`; existing stage directories remain supported. New modules separate responsibilities (`ui`, `shadow`, `compositor`, `filters`, `light`) — never one unbounded shader spanning widget composition and scene lighting; shared color/alpha/coordinate helpers have one implementation. Darling and vexspoke own no shader blobs. A source module is not runtime support until a backend pipeline executes it with stated automated evidence.
+GLSL lives in Graphvex's `src/shaders`; umbrella build `../../../tools/b` compiles ahead-of-time SPIR-V into external build-state `shader/`; existing stage directories remain supported. New modules separate responsibilities (`ui`, `shadow`, `compositor`, `filters`, `light`) — never one unbounded shader spanning widget composition and scene lighting; shared color/alpha/coordinate helpers have one implementation. Darling and vexspoke own no shader blobs. A source module is not runtime support until a backend pipeline executes it with stated automated evidence.
 
 **Runtime Shader Resolution Protocol** — `loadSpvAny` precedence:
 1. `ANTI_SPV_DIR` / `VEX_SPV_DIR` (build-time staging `${CMAKE_BINARY_DIR}/spv/`, populated from `/shader/spv/`)
@@ -74,9 +74,9 @@ Umbrella build = shader build truth; IDE adapters delegate to it. Compiler error
 4. Report site is never the cause: on `VK_ERROR_DEVICE_LOST`, run `MVK_CONFIG_LOG_LEVEL` and read MoltenVK's Metal error (`MTLCommandBuffer` code + message) BEFORE touching code — `MTLCommandBufferErrorInternal`/`PageFault`/`Timeout` distinguishes a usage defect from a GPU power/restart event. Paste both lines; never "fix the acquire" until MoltenVK says the acquire is the cause.
 5. Handles nulled in the same teardown pass (Vertical Integration Law (Teardown)) so a stale guard catches a real lifecycle defect. Cold resource creation (images/textures/framebuffers/views) keeps full result checks; hot per-frame seams (present, pane present, compositor batch, uploads, SDF dispatch, IOSurface export) carry `VkGuard_check` at entry.
 
-### Native Pixel Law
+### Seam Canvas Pixel Mapping Law
 
-Per the canonical Native Pixel Law — native hardware pixels at `CAMetalLayer` `drawableSize` and in all Vulkan rendering into the seam canvas, never logical points. Example grammar:
+The universal Native Pixel Law owns the hardware-pixel rule: `CAMetalLayer` `drawableSize` and every Vulkan render into the seam canvas, never logical points. Example grammar:
 
 ```c
 int pxW = (int)(w * kx + 0.5f);
@@ -85,7 +85,7 @@ Vk_seamSetMaxExtent(pxW, pxH);    // the fixed-buffer seam canvas (built once)
 Vk_seamSetMaxExtent((int)w, (int)h); // never logical points — blurry on Retina
 ```
 
-Repo-local delta: seam `CALayer` frame in logical points, `contentsScale` = `backingScaleFactor` (`2.0` on Retina) so native pixels map 1:1; the seam canvas is the window's only `CAMetalLayer` (the Single-Seam Canvas Law in `darling-framework`); no per-pane surfaces or swapchains.
+Repo-local delta: seam `CALayer` frame in logical points, `contentsScale` = `backingScaleFactor` (`2.0` on Retina) so native pixels map 1:1; the seam canvas is the window's only `CAMetalLayer` (the One-Seam Canvas Window Architecture Law, owned by `hotcwap`); no per-pane surfaces or swapchains.
 ### R3 Graphics Language & Board Compositor Law
 
 **Definition:** `graphvex` (R3) owns the backend-agnostic graphics language, graphical element tree and widget compositor: placement, isolated groups, images, filters, masks, render dependencies, ordered composition into the host-borrowed destination (including Darling Scene widget images). Darling (R4) is the widget interface; it submits Graphvex graphics records, never a competing filter/render compositor.
