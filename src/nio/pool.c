@@ -69,7 +69,7 @@ static bool pool_grow(Pool *p) {
     if (!blocks_push(p, mem)) { Memory_free(mem); return false; }
     for (uint32_t i = 0; i < (*p).blockCap; i++) {
         void *slot = mem + (size_t)i * (*p).stride;
-        *(void **)slot = (*p).freeHead;
+        *(void**) slot = (*p).freeHead;
         (*p).freeHead = slot;
     }
     return true;
@@ -77,7 +77,7 @@ static bool pool_grow(Pool *p) {
 
 // Creates a pool whose slots have the given stride and per-block capacity.
 Pool *Pool_new(size_t stride, uint32_t blockCap) {
-    if (stride < sizeof(void *) || blockCap == 0) return nullptr;
+    if (stride < sizeof(void*) || blockCap == 0) return nullptr;
     Pool *p = calloc(1, sizeof *p);
     if (!p) return nullptr;
     (*p).stride = stride;
@@ -98,7 +98,7 @@ void *Pool_alloc(Pool *pool) {
     if (!pool) return nullptr;
     if (!(*pool).freeHead && !pool_grow(pool)) return nullptr;
     void *item = (*pool).freeHead;
-    (*pool).freeHead = *(void **)item;
+    (*pool).freeHead = *(void**) item;
     memset(item, 0, (*pool).stride);
     (*pool).live++;
     return item;
@@ -107,7 +107,7 @@ void *Pool_alloc(Pool *pool) {
 // Returns a slot to the free list; caller must supply a live slot from this pool.
 void Pool_release(Pool *pool, void *item) {
     if (!pool || !item) return;
-    *(void **)item = (*pool).freeHead;
+    *(void**) item = (*pool).freeHead;
     (*pool).freeHead = item;
     (*pool).live--;
 }

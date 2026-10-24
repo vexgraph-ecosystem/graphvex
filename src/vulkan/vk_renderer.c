@@ -399,12 +399,12 @@ static bool create_texture(void) {
 static bool create_pipeline(void) {
     VkShaderModuleCreateInfo vci = {0}; vci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     vci.codeSize = quad_vert_spv_len;
-    vci.pCode = (const uint32_t *)quad_vert_spv;
+    vci.pCode = (const uint32_t*) quad_vert_spv;
     VkShaderModule vs;
     VK_ERR(vkCreateShaderModule(s_device, &vci, nullptr, &vs));
     VkShaderModuleCreateInfo fci = {0}; fci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     fci.codeSize = quad_frag_spv_len;
-    fci.pCode = (const uint32_t *)quad_frag_spv;
+    fci.pCode = (const uint32_t*) quad_frag_spv;
     VkShaderModule fs;
     VK_ERR(vkCreateShaderModule(s_device, &fci, nullptr, &fs));
 
@@ -599,7 +599,7 @@ static bool render(void) {
     if (vcount > 0) {
         void *map = nullptr;
         VK_ERR(vkMapMemory(s_device, s_vboMem, 0, vbytes, 0, &map));
-        written = VkBatch_vertices(s_batch, (VkVertex *)map, vcount);
+        written = VkBatch_vertices(s_batch, (VkVertex*) map, vcount);
         vkUnmapMemory(s_device, s_vboMem);
     }
 
@@ -772,7 +772,7 @@ static bool vk_capture(Image *dest) {
     uint8_t *out = Image_pixels(dest);
     size_t stride = Image_stride(dest);
     for (int y = 0; y < s_h; y++)
-        memcpy(out + (size_t)y * stride, (uint8_t *)map + (size_t)y * (size_t)s_w * 4u, (size_t)s_w * 4u);
+        memcpy(out + (size_t)y * stride, (uint8_t*) map + (size_t)y * (size_t)s_w * 4u, (size_t)s_w * 4u);
     vkUnmapMemory(s_device, s_rboMem);
     return true;
 }
