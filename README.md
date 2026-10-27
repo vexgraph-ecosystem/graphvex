@@ -5,7 +5,7 @@
 graphvex is an **R3 graphics driver**. Today it provides a working CPU
 graphics/compositor foundation plus a single Vulkan backend row — a substantial
 implementation, **not** a finished production renderer. Every claim below is
-bounded by the recorded evidence in `../../gist/test-checklist.md`.
+bounded by the recorded evidence in `../../../metadata/gists/test-checklist.md`.
 
 - **Implemented and exercised** (Apple Silicon macOS is the only proven host):
   the rect-first drawable seam with a headless CPU raster backend (`graphics`),

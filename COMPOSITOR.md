@@ -131,7 +131,7 @@ CompositorStatus prepareGroup(const Image *content, DisplayList *list,
 
 ## Automated checks
 
-Tests live in the workspace `../../tests/graphvex`, mirroring their owning units.
+Tests live in the workspace `../../../tests/graphvex`, mirroring their owning units.
 Use `./tools/b test compositor`, `./tools/b test filter_pool_test`,
 `./tools/b test filter_test` and `./tools/b test element_bounds_test` from the
 workspace. Documentation contracts use

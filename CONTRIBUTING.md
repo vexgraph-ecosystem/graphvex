@@ -40,11 +40,11 @@ This boilerplate is **not** an accident, nor is it a misunderstanding of idiomat
 
 ---
 
-## 3. Supreme Living Document: `../../gist/PREFERENCES.md` & Repo-Local Preferences
+## 3. Workspace Constitution & Repo-Local Preferences
 
 All architectural rules and style invariants are governed by the central constitution:
 
-- **[preferences.md](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a)** (one real, Git-ignored workspace `../../gist/PREFERENCES.md`, not a tracked Vexspoke file or symlink)
+- **[Compressed law list](../../../metadata/gists/preferences/gist.md)** and the [published preferences](https://gist.github.com/vex-graph/4132a6c45cb6d3797c3e8eff2e94035a); read only the relevant law with `./tools/prefs`.
 - **[graphvex-preferences.md](graphvex-preferences.md)** (repo-local mirror binding graphvex)
 
 Under the Living Documentation Law, update affected contracts in the same cycle.

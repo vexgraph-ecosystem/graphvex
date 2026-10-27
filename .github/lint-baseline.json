@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "note": "Ratchet baseline: CI fails only when a file/rule count grows.",
+  "total": 21,
+  "counts": {
+    "src/ui/element.c::Semantic Consistency Law (Reference form)": 21
+  }
+}
